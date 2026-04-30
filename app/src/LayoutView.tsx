@@ -18,6 +18,7 @@ interface Props {
   pendingPassphrase: PassphrasePending | null;
   pendingHostTrust: HostTrustPending | null;
   paneStatus: Record<string, { msg: string; err: boolean }>;
+  paneStatusText: Record<string, string>;
   ensureTerm: (paneId: string) => TerminalInstance;
   onFocus: (paneId: string) => void;
   onConnect: (paneId: string, opts?: ConnectOpts) => void;
@@ -48,6 +49,11 @@ export function LayoutView(p: Props) {
           pendingHostTrust={p.pendingHostTrust}
           status={
             p.paneStatus[
+              (p.node as Extract<LayoutNode, { kind: "pane" }>).pane_id
+            ]
+          }
+          statusText={
+            p.paneStatusText[
               (p.node as Extract<LayoutNode, { kind: "pane" }>).pane_id
             ]
           }

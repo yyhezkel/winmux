@@ -43,6 +43,8 @@ function App() {
     mismatchOld?: string;
   } | null>(null);
   const [paneStatus, setPaneStatus] = createSignal<Record<string, PaneStatus>>({});
+  // Live pane status text (e.g. "bootstrapping winmux…") set by backend events.
+  const [paneStatusText, setPaneStatusText] = createSignal<Record<string, string>>({});
   const [tick, setTick] = createSignal(0);
   const bump = () => setTick(tick() + 1);
 
@@ -419,6 +421,18 @@ function App() {
         bump();
       })
     );
+    // Per-pane status events (e.g. remote-bootstrap progress).
+    unlistens.push(
+      await listen<{ pane_id: string; text: string }>("pane:status", (e) => {
+        const next = { ...paneStatusText() };
+        if (e.payload.text) {
+          next[e.payload.pane_id] = e.payload.text;
+        } else {
+          delete next[e.payload.pane_id];
+        }
+        setPaneStatusText(next);
+      })
+    );
     // Live refresh when an external mutation happens (RPC over named pipe).
     unlistens.push(
       await listen("workspaces:changed", () => {
@@ -497,6 +511,7 @@ function App() {
               pendingPassphrase={pendingPassphraseFor()}
               pendingHostTrust={pendingHostTrust()}
               paneStatus={paneStatus()}
+              paneStatusText={paneStatusText()}
               ensureTerm={ensureTerm}
               onFocus={(pid) => {
                 setActivePaneId(pid);

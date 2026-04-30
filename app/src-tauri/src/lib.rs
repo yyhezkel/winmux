@@ -1,3 +1,4 @@
+mod remote_bootstrap;
 mod rpc_server;
 
 use std::collections::HashMap;
@@ -554,6 +555,23 @@ fn emit_data(app: &AppHandle, session_id: &str, bytes: &[u8], leftover: &mut Vec
     );
 }
 
+/// Emits a transient status text for a pane. Used by remote-bootstrap to surface
+/// progress/errors. The frontend listens on `pane:status` events.
+pub(crate) fn emit_pane_status_event(app: &AppHandle, pane_id: &str, text: &str) {
+    let _ = app.emit(
+        "pane:status",
+        serde_json::json!({ "pane_id": pane_id, "text": text }),
+    );
+}
+
+/// Spawns a tokio task that clears a pane's status text after `secs` seconds.
+pub(crate) fn schedule_status_clear(app: AppHandle, pane_id: String, secs: u64) {
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+        emit_pane_status_event(&app, &pane_id, "");
+    });
+}
+
 fn emit_exit(app: &AppHandle, session_id: &str, reason: Option<String>) {
     let _ = app.emit(
         "pty:exit",
@@ -714,7 +732,7 @@ struct HostCheckOutcome {
 
 // ─── SSH spawn ───────────────────────────────────────────────────────────────
 
-struct SshClient {
+pub(crate) struct SshClient {
     target: String,
     accept_unknown: bool,
     result: Arc<Mutex<HostCheckOutcome>>,
@@ -1001,6 +1019,36 @@ async fn spawn_ssh(
     .await?;
     if !auth_ok {
         return Err("authentication failed (agent, key, and password all failed)".into());
+    }
+
+    // Phase 6.2: best-effort bootstrap of the winmux Linux binary on the remote.
+    // We never block the user's shell on this — failures are surfaced via pane:status.
+    emit_pane_status_event(app, &pane_id, "bootstrapping winmux…");
+    match remote_bootstrap::bootstrap(&mut handle, app, false).await {
+        Ok(remote_bootstrap::BootstrapStatus::AlreadyOk) => {
+            emit_pane_status_event(app, &pane_id, "");
+        }
+        Ok(remote_bootstrap::BootstrapStatus::Uploaded { bytes, sha256: _ }) => {
+            emit_pane_status_event(
+                app,
+                &pane_id,
+                &format!("winmux installed ({} bytes)", bytes),
+            );
+            schedule_status_clear(app.clone(), pane_id.clone(), 3);
+        }
+        Ok(remote_bootstrap::BootstrapStatus::UnsupportedArch(arch)) => {
+            emit_pane_status_event(
+                app,
+                &pane_id,
+                &format!("remote arch '{}' not supported (no winmux binary)", arch),
+            );
+            schedule_status_clear(app.clone(), pane_id.clone(), 5);
+        }
+        Err(e) => {
+            tracing::warn!("remote bootstrap failed: {e}");
+            emit_pane_status_event(app, &pane_id, &format!("bootstrap failed: {e}"));
+            schedule_status_clear(app.clone(), pane_id.clone(), 5);
+        }
     }
 
     let mut channel = handle

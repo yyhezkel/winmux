@@ -245,7 +245,16 @@ body {
   flex-shrink: 0;
 }
 .pane-conn {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-status-text {
   flex: 1;
+  margin: 0 8px;
+  font-size: 11px;
+  color: #f0b429;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

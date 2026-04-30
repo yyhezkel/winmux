@@ -27,6 +27,7 @@ interface Props {
   pendingPassphrase: PassphrasePending | null;
   pendingHostTrust: HostTrustPending | null;
   status: { msg: string; err: boolean } | undefined;
+  statusText?: string;
   ensureTerm: (paneId: string) => TerminalInstance;
   onFocus: (paneId: string) => void;
   onConnect: (paneId: string, opts?: ConnectOpts) => void;
@@ -73,6 +74,9 @@ export function PaneView(p: Props) {
     >
       <div class="pane-header">
         <span class="pane-conn">{describeConnection(p.pane.connection)}</span>
+        <Show when={p.statusText}>
+          <span class="pane-status-text">{p.statusText}</span>
+        </Show>
         <Show when={p.isConnected}>
           <button
             class="pane-btn"

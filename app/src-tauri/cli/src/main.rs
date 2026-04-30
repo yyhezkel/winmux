@@ -172,6 +172,117 @@ async fn rpc_call(method: &str, params: Value) -> Result<Value, String> {
     }
 }
 
+/// Phase 6.4: HMAC-SHA256 challenge-response. The token never travels on the wire;
+/// only the random nonce (sent by the server) and the HMAC of it (sent by the client).
+async fn perform_handshake<R, W>(
+    reader: &mut tokio::io::BufReader<R>,
+    writer: &mut W,
+    token: &str,
+) -> Result<(), String>
+where
+    R: AsyncReadExt + Unpin,
+    W: AsyncWriteExt + Unpin,
+{
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    type HmacSha256 = Hmac<Sha256>;
+
+    // Read challenge.
+    let mut line = String::new();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        reader.read_line(&mut line),
+    )
+    .await;
+    match r {
+        Ok(Ok(0)) => return Err("server closed before challenge".into()),
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => return Err(format!("read challenge: {e}")),
+        Err(_) => return Err("challenge read timed out".into()),
+    }
+    let trimmed = line.trim();
+    let nonce_hex = trimmed
+        .strip_prefix("WINMUX-CHALLENGE ")
+        .ok_or_else(|| format!("expected WINMUX-CHALLENGE, got {:?}", trimmed))?;
+    let nonce = hex_decode(nonce_hex)?;
+
+    // Compute HMAC and respond.
+    let mut mac = HmacSha256::new_from_slice(token.as_bytes())
+        .map_err(|e| format!("hmac key: {e}"))?;
+    mac.update(&nonce);
+    let response = mac.finalize().into_bytes();
+    let resp_line = format!("WINMUX-RESPONSE {}\n", hex_encode(&response));
+    writer
+        .write_all(resp_line.as_bytes())
+        .await
+        .map_err(|e| format!("write response: {e}"))?;
+    writer.flush().await.ok();
+
+    // Read OK / DENIED.
+    let mut ok = String::new();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        reader.read_line(&mut ok),
+    )
+    .await;
+    match r {
+        Ok(Ok(0)) => return Err("server closed before verdict".into()),
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => return Err(format!("read verdict: {e}")),
+        Err(_) => return Err("verdict timed out".into()),
+    }
+    let verdict = ok.trim();
+    if verdict == "WINMUX-OK" {
+        Ok(())
+    } else if let Some(reason) = verdict.strip_prefix("WINMUX-DENIED") {
+        Err(format!("auth denied:{}", reason))
+    } else {
+        Err(format!("unexpected handshake verdict: {:?}", verdict))
+    }
+}
+
+fn hex_encode(b: &[u8]) -> String {
+    let mut s = String::with_capacity(b.len() * 2);
+    for x in b {
+        s.push(hex_digit(x >> 4));
+        s.push(hex_digit(x & 0xf));
+    }
+    s
+}
+
+fn hex_digit(n: u8) -> char {
+    match n {
+        0..=9 => (b'0' + n) as char,
+        10..=15 => (b'a' + (n - 10)) as char,
+        _ => '?',
+    }
+}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
+    let bytes = s.as_bytes();
+    if bytes.len() % 2 != 0 {
+        return Err(format!("odd-length hex ({})", bytes.len()));
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    let mut i = 0;
+    while i < bytes.len() {
+        let hi = hex_nibble(bytes[i])?;
+        let lo = hex_nibble(bytes[i + 1])?;
+        out.push((hi << 4) | lo);
+        i += 2;
+    }
+    Ok(out)
+}
+
+fn hex_nibble(c: u8) -> Result<u8, String> {
+    match c {
+        b'0'..=b'9' => Ok(c - b'0'),
+        b'a'..=b'f' => Ok(c - b'a' + 10),
+        b'A'..=b'F' => Ok(c - b'A' + 10),
+        _ => Err(format!("bad hex char: {:?}", c as char)),
+    }
+}
+
 async fn rpc_via<S>(
     stream: S,
     method: &str,
@@ -182,14 +293,13 @@ where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
 {
     let (reader, mut writer) = tokio::io::split(stream);
+    let mut buf = BufReader::new(reader);
 
-    // Phase 6.3: TCP transport requires a token preamble line before the JSON-RPC.
+    // Phase 6.4: TCP transport authenticates via HMAC challenge-response. Token never
+    // appears on the wire. Pipe transport (Windows) skips this — the pipe's per-user
+    // ACL is the auth.
     if let Some(t) = token {
-        let preamble = format!("{}\n", t);
-        writer
-            .write_all(preamble.as_bytes())
-            .await
-            .map_err(|e| e.to_string())?;
+        perform_handshake(&mut buf, &mut writer, t).await?;
     }
 
     let req = json!({
@@ -204,7 +314,6 @@ where
         .await
         .map_err(|e| e.to_string())?;
     writer.flush().await.ok();
-    let mut buf = BufReader::new(reader);
     let mut response = String::new();
     buf.read_line(&mut response)
         .await

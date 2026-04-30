@@ -1,17 +1,118 @@
 //! Phase 6.3: bridge a remote-forwarded TCP channel to the local Named Pipe RPC server.
-//!
-//! The Linux CLI on the remote host connects to `127.0.0.1:<remote_port>`. SSH wraps
-//! that connection in a `forwarded-tcpip` channel which russh delivers to our handler.
-//! The handler hands it to `bridge_to_pipe`, which validates a one-line auth token,
-//! then bidirectionally copies the rest of the bytes between the SSH channel and a
-//! fresh client connection to our named pipe RPC server.
+//! Phase 6.4: replace the plain-token preamble with an HMAC-SHA256 challenge-response
+//! handshake so the shared secret never travels in cleartext.
 
+use hmac::{Hmac, Mac};
+use rand::RngCore;
 use russh::{Channel, ChannelMsg};
-use tokio::io::{AsyncBufReadExt, BufStream};
+use sha2::Sha256;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufStream};
 
 use crate::dlog;
 
-const TOKEN_PREAMBLE_MAX_LEN: usize = 128;
+type HmacSha256 = Hmac<Sha256>;
+
+const HANDSHAKE_TIMEOUT_SECS: u64 = 10;
+
+fn hex_encode(b: &[u8]) -> String {
+    let mut s = String::with_capacity(b.len() * 2);
+    for x in b {
+        s.push(hex_digit(x >> 4));
+        s.push(hex_digit(x & 0xf));
+    }
+    s
+}
+
+fn hex_digit(n: u8) -> char {
+    match n {
+        0..=9 => (b'0' + n) as char,
+        10..=15 => (b'a' + (n - 10)) as char,
+        _ => '?',
+    }
+}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
+    let bytes = s.as_bytes();
+    if bytes.len() % 2 != 0 {
+        return Err(format!("odd-length hex ({})", bytes.len()));
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    let mut i = 0;
+    while i < bytes.len() {
+        let hi = hex_nibble(bytes[i])?;
+        let lo = hex_nibble(bytes[i + 1])?;
+        out.push((hi << 4) | lo);
+        i += 2;
+    }
+    Ok(out)
+}
+
+fn hex_nibble(c: u8) -> Result<u8, String> {
+    match c {
+        b'0'..=b'9' => Ok(c - b'0'),
+        b'a'..=b'f' => Ok(c - b'a' + 10),
+        b'A'..=b'F' => Ok(c - b'A' + 10),
+        _ => Err(format!("bad hex char: {:?}", c as char)),
+    }
+}
+
+/// Perform the server-side half of the HMAC challenge-response.
+/// Returns `Ok(())` if the client proved knowledge of the token; on failure, it has
+/// already written `WINMUX-DENIED ...` to the stream and the caller should drop it.
+async fn perform_handshake<S>(bs: &mut BufStream<S>, expected_token: &str) -> Result<(), String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    // 1) Send challenge.
+    let mut nonce = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let challenge_line = format!("WINMUX-CHALLENGE {}\n", hex_encode(&nonce));
+    bs.write_all(challenge_line.as_bytes())
+        .await
+        .map_err(|e| format!("write challenge: {e}"))?;
+    bs.flush().await.map_err(|e| format!("flush: {e}"))?;
+
+    // 2) Read response with a timeout — clients that never respond should be dropped.
+    let mut line = String::new();
+    let read = tokio::time::timeout(
+        std::time::Duration::from_secs(HANDSHAKE_TIMEOUT_SECS),
+        bs.read_line(&mut line),
+    )
+    .await;
+    match read {
+        Ok(Ok(0)) => return Err("client closed before sending response".into()),
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => return Err(format!("read response: {e}")),
+        Err(_) => return Err("response timed out".into()),
+    }
+    let line = line.trim();
+    let resp_hex = match line.strip_prefix("WINMUX-RESPONSE ") {
+        Some(x) => x,
+        None => {
+            let _ = bs.write_all(b"WINMUX-DENIED bad-format\n").await;
+            let _ = bs.flush().await;
+            return Err(format!("bad response framing: {:?}", line));
+        }
+    };
+    let resp = hex_decode(resp_hex)?;
+
+    // 3) Verify HMAC in constant time (`Hmac::verify_slice`).
+    let mut mac = HmacSha256::new_from_slice(expected_token.as_bytes())
+        .map_err(|e| format!("hmac key: {e}"))?;
+    mac.update(&nonce);
+    if mac.verify_slice(&resp).is_err() {
+        let _ = bs.write_all(b"WINMUX-DENIED bad-mac\n").await;
+        let _ = bs.flush().await;
+        return Err("hmac verify failed".into());
+    }
+
+    // 4) Tell the client we're good.
+    bs.write_all(b"WINMUX-OK\n")
+        .await
+        .map_err(|e| format!("write OK: {e}"))?;
+    bs.flush().await.map_err(|e| format!("flush OK: {e}"))?;
+    Ok(())
+}
 
 pub async fn bridge_to_pipe(
     channel: Channel<russh::client::Msg>,
@@ -20,48 +121,32 @@ pub async fn bridge_to_pipe(
     let stream = channel.into_stream();
     let mut bs = BufStream::new(stream);
 
-    // First line on the channel must be `<token>\n`. If wrong, drop.
-    let mut line = String::new();
-    let read_res =
-        tokio::time::timeout(std::time::Duration::from_secs(10), bs.read_line(&mut line)).await;
-    match read_res {
-        Ok(Ok(0)) => return Err("tunnel: client closed before sending token".into()),
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => return Err(format!("tunnel: read token failed: {e}")),
-        Err(_) => return Err("tunnel: token read timed out".into()),
+    if let Err(e) = perform_handshake(&mut bs, expected_token).await {
+        dlog(&format!("tunnel: handshake REJECTED — {e}"));
+        return Err(e);
     }
-    if line.len() > TOKEN_PREAMBLE_MAX_LEN {
-        return Err("tunnel: token preamble too long".into());
-    }
-    if line.trim() != expected_token {
-        dlog("tunnel: REJECTED — token mismatch");
-        return Err("tunnel: bad token".into());
-    }
+    dlog("tunnel: handshake OK");
 
     // Open a fresh client connection to the local pipe server.
     let pipe_name = crate::rpc_server::pipe_name();
-    let pipe = tokio::net::windows::named_pipe::ClientOptions::new()
+    let mut pipe = tokio::net::windows::named_pipe::ClientOptions::new()
         .open(&pipe_name)
-        .map_err(|e| format!("tunnel: open pipe {}: {}", pipe_name, e))?;
-    let mut pipe = pipe;
+        .map_err(|e| format!("open pipe {}: {}", pipe_name, e))?;
 
-    dlog("tunnel: token validated, bridging channel <-> pipe");
-    // Bidirectional copy until either side closes.
-    let r = tokio::io::copy_bidirectional(&mut bs, &mut pipe).await;
-    match r {
+    dlog("tunnel: bridging channel <-> pipe");
+    match tokio::io::copy_bidirectional(&mut bs, &mut pipe).await {
         Ok((to_pipe, to_channel)) => {
             dlog(&format!(
                 "tunnel: closed normally ({} bytes → pipe, {} bytes → channel)",
                 to_pipe, to_channel
             ));
-            Ok(())
         }
         Err(e) => {
+            // Most "connection reset" errors are normal session end; not surfaced.
             dlog(&format!("tunnel: copy_bidirectional ended: {e}"));
-            // Most "connection reset" errors are normal session-end; not worth surfacing.
-            Ok(())
         }
     }
+    Ok(())
 }
 
 /// Random alphanumeric token for the per-connection tunnel.
@@ -92,11 +177,7 @@ pub async fn write_remote_env_file(
         socket_addr, token, pane_id
     );
 
-    // mkdir + write via ssh exec — simpler than another SFTP session.
-    let mkdir_cmd = format!("mkdir -p {}", env_dir);
-    exec_simple(handle, &mkdir_cmd).await?;
-
-    // Use a heredoc so newlines/special chars are preserved verbatim.
+    exec_simple(handle, &format!("mkdir -p {}", env_dir)).await?;
     let write_cmd = format!(
         "cat > {} <<'__WINMUX_EOF__'\n{}__WINMUX_EOF__\nchmod 0600 {}",
         env_file, body, env_file

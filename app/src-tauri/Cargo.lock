@@ -155,6 +155,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "futures",
+ "hmac",
  "notify-rust",
  "portable-pty",
  "rand 0.8.6",
@@ -163,6 +164,7 @@ dependencies = [
  "russh-sftp",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
@@ -6657,7 +6659,9 @@ name = "winmux"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "hmac",
  "serde_json",
+ "sha2",
  "tokio",
  "whoami",
 ]

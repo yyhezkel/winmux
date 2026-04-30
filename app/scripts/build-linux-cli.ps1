@@ -1,6 +1,10 @@
 #!/usr/bin/env pwsh
-# Cross-compiles the winmux CLI for Linux (x86_64-musl, static) and copies the
-# artifact into src-tauri/resources/, refreshing remote-manifest.json with its sha256.
+# Stages CLI binaries into src-tauri/resources/ for the Tauri bundler.
+#  - winmux-linux-x64 (cross-compiled, static-musl) — uploaded to remote SSH servers
+#    by `remote_bootstrap`
+#  - winmux-cli.exe (Windows release build) — bundled in the MSI alongside the app
+#    so installing winmux gets you both the GUI and the CLI in one shot
+# Also (re)writes remote-manifest.json (UTF-8 without BOM).
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -41,3 +45,25 @@ $manifest = @{ "x86_64-linux" = @{ path = "winmux-linux-x64"; sha256 = $hash; si
 [System.IO.File]::WriteAllText($manifestPath, $manifest, [System.Text.UTF8Encoding]::new($false))
 
 Write-Host "Built winmux-linux-x64: $size bytes, sha256=$hash"
+
+# Also build the Windows release of the CLI and stage it for the MSI bundler.
+Push-Location $tauriDir
+try {
+    & cargo build --release -p winmux
+    if ($LASTEXITCODE -ne 0) { throw "cargo build winmux (Windows release) failed (exit $LASTEXITCODE)" }
+} finally {
+    Pop-Location
+}
+$srcWin = Join-Path $tauriDir "target\release\winmux.exe"
+$dstWin = Join-Path $resourcesDir "winmux-cli.exe"
+Copy-Item -Path $srcWin -Destination $dstWin -Force
+$winSize = (Get-Item $dstWin).Length
+Write-Host "Staged winmux-cli.exe: $winSize bytes"
+
+# Stage the LICENSE next to src-tauri so Tauri's MSI bundler picks it up via the
+# relative `licenseFile` setting. We don't commit this copy — the repo's canonical
+# LICENSE is at the project root.
+$projectLicense = Join-Path $root "..\LICENSE"
+$tauriLicense = Join-Path $tauriDir "LICENSE"
+Copy-Item -Path $projectLicense -Destination $tauriLicense -Force
+Write-Host "Staged LICENSE for bundler"

@@ -81,6 +81,53 @@ This runs Vite on `http://localhost:1420`, then `cargo run` on the Rust side.
 Tauri opens a window pointed at the local Vite. Edits to TypeScript hot-reload;
 edits to Rust trigger a rebuild + relaunch.
 
+## Release MSI / NSIS installer
+
+```cmd
+cd app
+npm run tauri build
+```
+
+Same as the debug build, **without** `-- --debug`. Cargo runs in release profile
+(slower, ~5 min cold; subsequent builds are fast). Tauri's bundler then runs
+WiX (for the MSI) and makensis (for the NSIS `setup.exe`). On first run it
+downloads the WiX toolset to `target/release/wix/`.
+
+Output:
+
+| File | Size (today) | Description |
+|---|---|---|
+| `app/src-tauri/target/release/app.exe` | ~13 MB | Stripped, release-profile binary |
+| `app/src-tauri/target/release/winmux.exe` | ~1.5 MB | Windows CLI, release |
+| `app/src-tauri/target/release/bundle/msi/winmux_0.1.0_x64_en-US.msi` | ~6 MB | MSI installer |
+| `app/src-tauri/target/release/bundle/nsis/winmux_0.1.0_x64-setup.exe` | ~4 MB | NSIS installer |
+
+The MSI installs to `C:\Program Files\winmux\` by default. After install:
+- `C:\Program Files\winmux\winmux.exe` — the GUI app (launched from Start Menu)
+- `C:\Program Files\winmux\resources\winmux-cli.exe` — the CLI
+- `C:\Program Files\winmux\resources\winmux-linux-x64` — bundled for the SSH bootstrap
+- `C:\Program Files\winmux\resources\remote-manifest.json` — sha256 + metadata
+- `C:\Program Files\winmux\resources\LICENSE` — GPL-3.0
+
+The CLI is **not** auto-added to `PATH` (the MSI bundler doesn't expose that yet
+without a custom WiX template — see [README.md](../README.md#install-release) for
+the manual step).
+
+### Publishing a release
+
+After the MSI builds:
+
+```cmd
+gh release create v0.1.0 \
+  --title "winmux v0.1.0" \
+  --notes "Initial release. Phases 1-5 + 6.x as described in CHANGELOG / README." \
+  app/src-tauri/target/release/bundle/msi/winmux_0.1.0_x64_en-US.msi \
+  app/src-tauri/target/release/bundle/nsis/winmux_0.1.0_x64-setup.exe
+```
+
+The repo is private; `gh release create --private`-style flags aren't needed —
+the release inherits the repo's visibility.
+
 ## Standalone debug build
 
 ```cmd

@@ -41,6 +41,28 @@ opinionated stack that values native feel and developer iteration speed.
 - Toast notifications via Windows WinRT
 - Live event-driven UI updates from CLI mutations
 
+## Install (release)
+
+The MSI installer ships both the GUI app and the `winmux` CLI in one package.
+
+1. Download `winmux_0.1.0_x64_en-US.msi` (or the matching `winmux_0.1.0_x64-setup.exe` if you prefer the NSIS installer) from the Releases page.
+2. Double-click → install. Default location: `C:\Program Files\winmux\`.
+3. The GUI is launched from Start Menu → "winmux".
+4. The CLI lands at `C:\Program Files\winmux\resources\winmux-cli.exe`. To call it as just `winmux` from any terminal, add that directory to your `PATH`:
+
+   ```powershell
+   # PowerShell, current user, persistent
+   [Environment]::SetEnvironmentVariable(
+     'Path',
+     "$([Environment]::GetEnvironmentVariable('Path','User'));C:\Program Files\winmux\resources",
+     'User'
+   )
+   ```
+
+   Restart your terminal. PATH auto-registration via WiX is on the roadmap; this step is manual for now.
+
+To uninstall: Settings → Apps → winmux → Uninstall. All files removed; user data in `%APPDATA%\winmux\` is preserved unless you delete it manually.
+
 ## Build
 
 ### Prerequisites

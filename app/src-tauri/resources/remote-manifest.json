@@ -1,8 +1,8 @@
 {
     "x86_64-linux":  {
                          "path":  "winmux-linux-x64",
-                         "sha256":  "13af580066be33dd85145b88e580593eb7b988b1d3cf1f8e0a8ed5b10d6898fd",
-                         "size":  1982352,
-                         "built_at":  "2026-04-30T20:30:19Z"
+                         "sha256":  "5e0ed125a153ba677c15e877332923ecdb6d7a8c85960eed56b55d149d33f187",
+                         "size":  2152920,
+                         "built_at":  "2026-04-30T21:59:46Z"
                      }
 }

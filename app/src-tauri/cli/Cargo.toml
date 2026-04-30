@@ -14,3 +14,4 @@ tokio = { version = "1", default-features = false, features = ["rt-multi-thread"
 whoami = "1"
 hmac = "0.12"
 sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }

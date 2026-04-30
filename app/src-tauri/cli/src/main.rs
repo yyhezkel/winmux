@@ -8,6 +8,8 @@
 //   when the binary runs on a remote SSH server tunneled back to a local listener.
 // - If a Linux build can't find `WINMUX_SOCKET_ADDR`, it errors with exit code 2.
 
+mod hooks;
+
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::io::Read;
@@ -96,6 +98,20 @@ enum Cmd {
     /// Stub for Claude Code agent hooks: reads JSON from stdin, fires a notify.
     ClaudeHook {
         subcommand: String,
+    },
+
+    /// Register agent hooks (e.g. Claude Code's hooks.json) so AI agents pipe
+    /// permission requests + lifecycle events through winmux. Idempotent and additive.
+    SetupHooks {
+        /// Which agent's config to install. `claude` (default) or `all`.
+        #[arg(long, default_value = "claude")]
+        agent: String,
+        /// Print what would change without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+        /// Replace any existing winmux hook entries even if already registered.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -546,6 +562,30 @@ async fn main() -> ExitCode {
                     return ExitCode::from(3);
                 }
             }
+        }
+        Cmd::SetupHooks {
+            agent,
+            dry_run,
+            force,
+        } => {
+            let mut adapters: Vec<Box<dyn hooks::HookAdapter>> = Vec::new();
+            match agent.as_str() {
+                "claude" => adapters.push(Box::new(hooks::Claude)),
+                "all" => {
+                    adapters.push(Box::new(hooks::Claude));
+                    adapters.push(Box::new(hooks::Stub { label: "Codex" }));
+                    adapters.push(Box::new(hooks::Stub { label: "Cursor" }));
+                    adapters.push(Box::new(hooks::Stub { label: "OpenCode" }));
+                    adapters.push(Box::new(hooks::Stub { label: "Gemini CLI" }));
+                    adapters.push(Box::new(hooks::Stub { label: "Copilot CLI" }));
+                }
+                other => {
+                    eprintln!("error: unknown --agent {:?} (use 'claude' or 'all')", other);
+                    return ExitCode::from(2);
+                }
+            }
+            hooks::run_all(&adapters, *dry_run, *force);
+            return ExitCode::SUCCESS;
         }
     };
 

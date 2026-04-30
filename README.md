@@ -5,6 +5,16 @@ Inspired by [cmux](https://github.com/manaflow-ai/cmux).
 
 > Status: Early development — Phases 1–5 complete, Phase 6 in progress. Not yet stable.
 
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — high-level architecture + ASCII diagram
+- [docs/MODULES.md](docs/MODULES.md) — what each Rust module + frontend file owns
+- [docs/PROTOCOLS.md](docs/PROTOCOLS.md) — JSON-RPC method catalog, named-pipe + TCP framing, HMAC handshake, agent-hook contract, bootstrap protocol
+- [docs/CONFIG.md](docs/CONFIG.md) — `workspaces.json`, `known_hosts.json`, `remote-manifest.json` schemas; environment variables
+- [docs/CLI.md](docs/CLI.md) — every `winmux` command with examples and exit codes
+- [docs/BUILD.md](docs/BUILD.md) — prerequisites, dev / debug builds, Linux cross-compile, common gotchas
+- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) — recipes for adding RPC methods, agent hooks, pane types; logging + commit conventions
+
 ## Why
 
 cmux is a macOS-only terminal optimized for working with AI coding agents

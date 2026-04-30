@@ -1,0 +1,156 @@
+# Contributing
+
+How to navigate the codebase and add features without flying blind. This is a
+personal project so there's no PR review process — these are just the
+conventions to keep things consistent.
+
+## Where to start reading
+
+1. [`docs/ARCHITECTURE.md`](./ARCHITECTURE.md) — the big picture.
+2. [`docs/MODULES.md`](./MODULES.md) — what each file does.
+3. [`docs/PROTOCOLS.md`](./PROTOCOLS.md) — the wire formats. Useful when adding RPC
+   methods or wire-level features.
+4. The source. `lib.rs` is large but well-sectioned with `// ─── Section ─────` headers.
+
+## Recipes
+
+### Add a new RPC method
+
+The dispatcher is in `app/src-tauri/src/rpc_server.rs::dispatch`. It's a flat
+`match` on the `method` string. Add an arm:
+
+```rust
+"my-new-method" => {
+    let arg = params.get("arg").and_then(|v| v.as_str()).ok_or("missing arg")?;
+    // … do work, can read state.workspaces / state.feed / etc.
+    Ok(json!({ "ok": true }))
+}
+```
+
+If your method needs to mutate workspace state, follow the existing pattern:
+mutate in a small `{ … }` block holding the lock briefly, then `persist(state)?`
+outside the lock to avoid holding it across I/O.
+
+If your method needs to emit a UI event, use `app.emit("event:name", &payload)`
+and add a corresponding `listen()` in `App.tsx`.
+
+Then expose it on the CLI side:
+
+1. Add a `Cmd::MyNewMethod { ... }` variant in `cli/src/main.rs`.
+2. Add the corresponding `Cmd::MyNewMethod { ... } => rpc_call("my-new-method", json!({...})).await`
+   arm in `main()`.
+3. Update [`docs/CLI.md`](./CLI.md) and [`docs/PROTOCOLS.md`](./PROTOCOLS.md).
+
+### Add a new agent hook subcommand
+
+The mapping from subcommand → `kind` lives in `cli/src/main.rs::Cmd::ClaudeHook`:
+
+```rust
+let blocking = matches!(subcommand.as_str(), "tool-permission" | "pre-tool-use");
+let kind = if blocking { "permission_request" } else { "passive" };
+```
+
+Add your name to the `matches!` list to make it blocking, or just leave it as
+`passive`. The title heuristic is in `derive_hook_title` — if your subcommand
+needs special title formatting, add a `match` arm there too.
+
+The server side handles all kinds uniformly via `feed.push` — no changes needed
+unless you're introducing a new `kind` (currently `permission_request` and
+`passive`; new kinds would need backend dispatch logic in
+`rpc_server.rs::dispatch::"feed.push"` to know whether to block).
+
+### Add a new pane type (e.g. browser pane)
+
+The current `LayoutNode::Pane` carries a `Connection` that's either Local or SSH.
+A WebView2 pane would be a third option:
+
+1. Extend the `Connection` enum in `lib.rs` (and the matching TS type in `types.ts`):
+   ```rust
+   #[serde(tag = "type", rename_all = "lowercase")]
+   pub(crate) enum Connection {
+       Local { … },
+       Ssh { … },
+       Webview { url: String, … },
+   }
+   ```
+2. Update `pane_connect` in `lib.rs` — for `Connection::Webview` you don't open a
+   PTY. Instead, return a fake "session_id" the frontend can recognize.
+3. In `PaneView.tsx`, branch on the connection type — render an `<iframe>` or a
+   Tauri webview child instead of the xterm slot.
+4. Decide what `pty_write` / `pty_resize` mean for webview panes (probably no-ops).
+5. Update the create-workspace modal to offer the third option.
+
+This is the planned Phase 6.6+ work; nobody has done it yet.
+
+### Add a new persisted file
+
+If you need a new on-disk config file beyond `workspaces.json` and
+`known_hosts.json`:
+
+1. Put it under `config_dir()?.join("<your-file>.json")`. Don't reach for
+   `Tauri::path::BaseDirectory::*` — we deliberately don't use those because of
+   the sandbox-redirection issue (see [BUILD.md](./BUILD.md#common-gotchas)).
+2. Use the `save_to_disk` pattern: write to a `.tmp` file, fsync, rename. Don't
+   write directly to the target path.
+3. Add a `LoadState`-style poison flag if mutations could clobber existing data
+   on parse error.
+4. Document the schema in [`docs/CONFIG.md`](./CONFIG.md).
+
+## Logging conventions
+
+We have two logging mechanisms:
+
+| Use | When |
+|---|---|
+| `dlog("msg")` | Operational events that we'd want to see post-mortem from a user's machine: load/save, bootstrap steps, tunnel handshake outcomes, every SSH exec command. Writes to `%APPDATA%\winmux\debug.log` unconditionally. |
+| `tracing::info!` / `tracing::warn!` / `tracing::debug!` | Engineer-facing log output. Visible only when running via `cargo run` / `tauri dev` (the standalone exe runs with the `windows_subsystem = "windows"` flag and has no console). |
+
+When in doubt: use `dlog` for things you'd want to see if a user reports a bug.
+The Phase 6.2 BOM bug was diagnosed in 5 minutes once the bootstrap was
+fully `dlog`-instrumented; before that, we were guessing.
+
+## Style
+
+- **Don't write comments that restate the code.** Save comments for *why*: a
+  hidden constraint, a workaround for a specific upstream issue (with a link or
+  bug number), or the reason a non-obvious choice was made. Examples in the
+  current source:
+  - `// TODO Phase X: TOFU + known_hosts` (intent for future)
+  - `// The pageant-0.0.1 crate calls .unwrap() on a Windows error when…` (why
+    we wrap in `catch_unwind`)
+  - `// Phase 6.4: TCP transport authenticates via HMAC challenge-response.
+    Token never appears on the wire.` (security-critical why)
+- **Section headers** in long files (`// ─── Section name ───`) keep `lib.rs` navigable.
+- **Error strings** as `Result<_, String>` for Tauri commands (so they serialize cleanly
+  to the frontend). Internal Rust APIs can use `anyhow::Error` if richer contexts help.
+- **Newline-delimited JSON** is the wire format choice on every transport. Don't
+  switch a transport to length-prefixed framing without updating both ends and
+  the docs.
+
+## Commit conventions
+
+One commit per logical change. Subject line follows
+`Phase <N.M>[: short summary]` for phase work, `Phase <N.M> fix: <subject>` for
+follow-up fixes. For non-phase work, anything descriptive in the imperative
+mood:
+
+```
+docs: comprehensive documentation — architecture, modules, protocols, …
+chore: bump russh to 0.50 (when released)
+```
+
+The body should explain *why* a change was made when it isn't obvious; the
+diff explains *what*.
+
+## Phase numbering
+
+Phases are stable in the commit history. Reading `git log --oneline | grep '^...... Phase'`
+gives you a chronological view of what was added when:
+
+- 1–5: in the **initial commit** (`4a6d402`). These were built before git was
+  set up; the commit message lists them.
+- 6.x: split into separate commits, one per phase + fix follow-ups where needed.
+  See `git log` for the current state.
+
+If you start a new phase that's a logical follow-up to 6.5, call it 6.6. If
+you're starting a new pillar, call it 7.x. Don't reuse numbers.

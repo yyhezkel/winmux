@@ -36,6 +36,8 @@ $iso = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $manifestPath = Join-Path $resourcesDir "remote-manifest.json"
 $manifest = @{ "x86_64-linux" = @{ path = "winmux-linux-x64"; sha256 = $hash; size = $size; built_at = $iso } } |
     ConvertTo-Json -Depth 10
-$manifest | Set-Content -Encoding utf8 $manifestPath
+# Write UTF-8 WITHOUT BOM (Windows PowerShell 5.1 `Set-Content -Encoding utf8` adds BOM,
+# which serde_json refuses with "expected value at line 1 column 1").
+[System.IO.File]::WriteAllText($manifestPath, $manifest, [System.Text.UTF8Encoding]::new($false))
 
 Write-Host "Built winmux-linux-x64: $size bytes, sha256=$hash"

@@ -12,6 +12,7 @@ use russh::ChannelMsg;
 use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 
+use crate::dlog;
 use crate::SshClient;
 
 const REMOTE_DIR: &str = ".winmux/bin";
@@ -20,6 +21,7 @@ const REMOTE_DIR: &str = ".winmux/bin";
 pub struct ManifestEntry {
     pub path: String,
     pub sha256: String,
+    #[allow(dead_code)]
     pub size: u64,
     #[allow(dead_code)]
     pub built_at: String,
@@ -28,7 +30,11 @@ pub struct ManifestEntry {
 #[derive(Debug)]
 pub enum BootstrapStatus {
     AlreadyOk,
-    Uploaded { bytes: usize, sha256: String },
+    Uploaded {
+        bytes: usize,
+        #[allow(dead_code)]
+        sha256: String,
+    },
     UnsupportedArch(String),
 }
 
@@ -40,8 +46,18 @@ fn read_manifest(app: &AppHandle) -> Result<HashMap<String, ManifestEntry>, Stri
             tauri::path::BaseDirectory::Resource,
         )
         .map_err(|e| format!("resolve manifest: {e}"))?;
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("read manifest: {e}"))?;
-    serde_json::from_str(&text).map_err(|e| format!("parse manifest: {e}"))
+    dlog(&format!("bootstrap: manifest path = {:?} exists={}", path, path.exists()));
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!("read manifest: {e}"))?;
+    // Defensive: strip a UTF-8 BOM (\u{FEFF}) if the writer (e.g. PowerShell 5.1's
+    // `Set-Content -Encoding utf8`) tacked one on. serde_json otherwise fails with
+    // "expected value at line 1 column 1".
+    let text = raw.trim_start_matches('\u{FEFF}');
+    dlog(&format!(
+        "bootstrap: manifest read {} bytes (after BOM strip: {} bytes)",
+        raw.len(),
+        text.len()
+    ));
+    serde_json::from_str(text).map_err(|e| format!("parse manifest: {e}"))
 }
 
 fn read_resource_bytes(app: &AppHandle, rel: &str) -> Result<Vec<u8>, String> {
@@ -49,13 +65,21 @@ fn read_resource_bytes(app: &AppHandle, rel: &str) -> Result<Vec<u8>, String> {
         .path()
         .resolve(format!("resources/{}", rel), tauri::path::BaseDirectory::Resource)
         .map_err(|e| format!("resolve {rel}: {e}"))?;
-    std::fs::read(&path).map_err(|e| format!("read {rel}: {e}"))
+    dlog(&format!(
+        "bootstrap: binary resource path = {:?} exists={}",
+        path,
+        path.exists()
+    ));
+    let bytes = std::fs::read(&path).map_err(|e| format!("read {rel}: {e}"))?;
+    dlog(&format!("bootstrap: read {} bytes from {:?}", bytes.len(), path));
+    Ok(bytes)
 }
 
 async fn ssh_exec(
     handle: &mut Handle<SshClient>,
     cmd: &str,
 ) -> Result<(String, i32), String> {
+    dlog(&format!("bootstrap: exec '{}'", cmd));
     let mut chan = handle
         .channel_open_session()
         .await
@@ -76,15 +100,16 @@ async fn ssh_exec(
         }
     }
     let _ = chan.close().await;
-    if exit_code != 0 && !stderr.is_empty() {
-        tracing::debug!(
-            "ssh exec '{}' exit={} stderr={}",
-            cmd,
-            exit_code,
-            String::from_utf8_lossy(&stderr)
-        );
-    }
-    Ok((String::from_utf8_lossy(&stdout).to_string(), exit_code))
+    let stdout_str = String::from_utf8_lossy(&stdout).to_string();
+    let stderr_str = String::from_utf8_lossy(&stderr).to_string();
+    dlog(&format!(
+        "bootstrap: exec '{}' exit={} stdout={:?} stderr={:?}",
+        cmd,
+        exit_code,
+        stdout_str.trim(),
+        stderr_str.trim()
+    ));
+    Ok((stdout_str, exit_code))
 }
 
 fn detect_triple(uname_output: &str) -> Option<&'static str> {
@@ -103,29 +128,51 @@ async fn upload_via_sftp(
 ) -> Result<(), String> {
     use tokio::io::AsyncWriteExt;
 
+    dlog(&format!(
+        "bootstrap: opening sftp subsystem for {} ({} bytes)",
+        abs_remote_path,
+        bytes.len()
+    ));
     let chan = handle
         .channel_open_session()
         .await
-        .map_err(|e| format!("open sftp channel: {e}"))?;
+        .map_err(|e| {
+            dlog(&format!("bootstrap: sftp channel_open failed: {e}"));
+            format!("open sftp channel: {e}")
+        })?;
     chan.request_subsystem(true, "sftp")
         .await
-        .map_err(|e| format!("request sftp: {e}"))?;
+        .map_err(|e| {
+            dlog(&format!("bootstrap: sftp request_subsystem failed: {e}"));
+            format!("request sftp: {e}")
+        })?;
     let stream = chan.into_stream();
     let sftp = russh_sftp::client::SftpSession::new(stream)
         .await
-        .map_err(|e| format!("sftp init: {e}"))?;
+        .map_err(|e| {
+            dlog(&format!("bootstrap: SftpSession::new failed: {e}"));
+            format!("sftp init: {e}")
+        })?;
+    dlog("bootstrap: sftp session ready");
 
     {
         let mut file = sftp
             .create(abs_remote_path)
             .await
-            .map_err(|e| format!("sftp create {abs_remote_path}: {e}"))?;
+            .map_err(|e| {
+                dlog(&format!("bootstrap: sftp.create {abs_remote_path} failed: {e}"));
+                format!("sftp create {abs_remote_path}: {e}")
+            })?;
         file.write_all(bytes)
             .await
-            .map_err(|e| format!("sftp write: {e}"))?;
+            .map_err(|e| {
+                dlog(&format!("bootstrap: sftp write_all failed: {e}"));
+                format!("sftp write: {e}")
+            })?;
         file.flush().await.ok();
         file.shutdown().await.ok();
     }
+    dlog("bootstrap: sftp upload complete");
 
     let _ = sftp.close().await;
     Ok(())
@@ -136,6 +183,8 @@ pub async fn bootstrap(
     app: &AppHandle,
     force: bool,
 ) -> Result<BootstrapStatus, String> {
+    dlog(&format!("bootstrap: starting (force={force})"));
+
     // Identify remote.
     let (uname, code) = ssh_exec(handle, "uname -s -m").await?;
     if code != 0 {
@@ -143,14 +192,22 @@ pub async fn bootstrap(
     }
     let triple = match detect_triple(&uname) {
         Some(t) => t,
-        None => return Ok(BootstrapStatus::UnsupportedArch(uname.trim().to_string())),
+        None => {
+            dlog(&format!("bootstrap: unsupported arch '{}'", uname.trim()));
+            return Ok(BootstrapStatus::UnsupportedArch(uname.trim().to_string()));
+        }
     };
+    dlog(&format!("bootstrap: triple = {}", triple));
 
     // Resolve manifest entry for this triple.
     let manifest = read_manifest(app)?;
     let entry = manifest
         .get(triple)
         .ok_or_else(|| format!("no manifest entry for {triple}"))?;
+    dlog(&format!(
+        "bootstrap: manifest entry path={} sha256={}",
+        entry.path, entry.sha256
+    ));
 
     // Get remote $HOME so SFTP gets an absolute path.
     let (home_out, _) = ssh_exec(handle, "echo $HOME").await?;
@@ -161,6 +218,10 @@ pub async fn bootstrap(
     let remote_dir_abs = format!("{}/{}", home, REMOTE_DIR);
     let remote_bin_abs = format!("{}/{}", remote_dir_abs, entry.path);
     let remote_symlink_abs = format!("{}/winmux", remote_dir_abs);
+    dlog(&format!(
+        "bootstrap: remote paths — dir={} bin={} symlink={}",
+        remote_dir_abs, remote_bin_abs, remote_symlink_abs
+    ));
 
     // Compare existing hash unless forced.
     if !force {
@@ -171,6 +232,7 @@ pub async fn bootstrap(
         .await?;
         let remote_hash = sum_out.trim().to_lowercase();
         if remote_hash == entry.sha256.to_lowercase() {
+            dlog("bootstrap: hash matches existing — skipping upload");
             // Ensure symlink anyway.
             let _ = ssh_exec(
                 handle,
@@ -179,6 +241,10 @@ pub async fn bootstrap(
             .await;
             return Ok(BootstrapStatus::AlreadyOk);
         }
+        dlog(&format!(
+            "bootstrap: hash mismatch — remote='{}' expected='{}' — will upload",
+            remote_hash, entry.sha256
+        ));
     }
 
     // Make dir, upload, chmod, symlink.
@@ -201,11 +267,16 @@ pub async fn bootstrap(
     .await?;
     let after_hash = verify_out.trim().to_lowercase();
     if after_hash != entry.sha256.to_lowercase() {
+        dlog(&format!(
+            "bootstrap: FAILED post-upload hash mismatch: got {} expected {}",
+            after_hash, entry.sha256
+        ));
         return Err(format!(
             "post-upload hash mismatch: got {after_hash}, expected {}",
             entry.sha256
         ));
     }
+    dlog("bootstrap: COMPLETE — upload verified");
 
     Ok(BootstrapStatus::Uploaded {
         bytes: bytes.len(),

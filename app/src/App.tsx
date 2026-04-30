@@ -4,11 +4,14 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { LayoutView } from "./LayoutView";
+import { FeedPanel } from "./FeedPanel";
 import { TerminalInstance } from "./terminalInstance";
 import {
   collectPanes,
   describeConnection,
   type Connection,
+  type FeedItem,
+  type FeedResolvedEvent,
   type LayoutNode,
   type PtyDataEvent,
   type PtyExitEvent,
@@ -45,6 +48,14 @@ function App() {
   const [paneStatus, setPaneStatus] = createSignal<Record<string, PaneStatus>>({});
   // Live pane status text (e.g. "bootstrapping winmux…") set by backend events.
   const [paneStatusText, setPaneStatusText] = createSignal<Record<string, string>>({});
+  // Phase 6.5: agent feed (most recent first; capped to 50 server-side).
+  const [feedItems, setFeedItems] = createSignal<FeedItem[]>([]);
+  const FEED_AUTO_DISMISS_MS = 3000;
+  const scheduleFeedDismiss = (request_id: string) => {
+    setTimeout(() => {
+      setFeedItems((prev) => prev.filter((i) => i.request_id !== request_id));
+    }, FEED_AUTO_DISMISS_MS);
+  };
   const [tick, setTick] = createSignal(0);
   const bump = () => setTick(tick() + 1);
 
@@ -421,6 +432,38 @@ function App() {
         bump();
       })
     );
+    // Initial feed load.
+    try {
+      const items = await invoke<FeedItem[]>("feed_list");
+      // Show most recent first.
+      setFeedItems([...items].reverse());
+      // Auto-dismiss already-resolved items so we don't show stale verdicts.
+      for (const it of items) {
+        if (it.state !== "pending") scheduleFeedDismiss(it.request_id);
+      }
+    } catch (e) {
+      console.warn("feed_list failed", e);
+    }
+    // Phase 6.5 feed events.
+    unlistens.push(
+      await listen<FeedItem>("feed:item-added", (e) => {
+        setFeedItems((prev) => [e.payload, ...prev.filter((i) => i.request_id !== e.payload.request_id)]);
+        if (e.payload.state !== "pending") scheduleFeedDismiss(e.payload.request_id);
+      })
+    );
+    unlistens.push(
+      await listen<FeedResolvedEvent>("feed:item-resolved", (e) => {
+        const verdict = e.payload.decision === "allow" ? "allowed" : e.payload.decision === "deny" ? "denied" : e.payload.decision === "timeout" ? "timedout" : "denied";
+        setFeedItems((prev) =>
+          prev.map((i) =>
+            i.request_id === e.payload.request_id
+              ? { ...i, state: verdict as FeedItem["state"] }
+              : i
+          )
+        );
+        scheduleFeedDismiss(e.payload.request_id);
+      })
+    );
     // Per-pane status events (e.g. remote-bootstrap progress).
     unlistens.push(
       await listen<{ pane_id: string; text: string }>("pane:status", (e) => {
@@ -532,6 +575,26 @@ function App() {
         open={showCreate()}
         onClose={() => setShowCreate(false)}
         onCreate={handleCreate}
+      />
+
+      <FeedPanel
+        items={feedItems()}
+        onDecide={(rid, dec) => {
+          // Optimistic local update — backend event will reaffirm.
+          setFeedItems((prev) =>
+            prev.map((i) =>
+              i.request_id === rid
+                ? { ...i, state: dec === "allow" ? "allowed" : "denied" }
+                : i
+            )
+          );
+          invoke("feed_decide", { requestId: rid, decision: dec }).catch(
+            (err) => console.error("feed_decide failed", err)
+          );
+        }}
+        onDismiss={(rid) =>
+          setFeedItems((prev) => prev.filter((i) => i.request_id !== rid))
+        }
       />
     </div>
   );

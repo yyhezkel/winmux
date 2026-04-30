@@ -6,9 +6,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
 use crate::{
-    collect_panes, new_pane_id, new_workspace_id, persist, write_to_session, AppState,
-    CreateInput, LayoutNode, NotificationItem, Workspace, NOTIF_COUNTER,
+    collect_panes, decide_feed, new_pane_id, new_workspace_id, persist, write_to_session,
+    AppState, CreateInput, FeedItem, FeedItemState, LayoutNode, NotificationItem, Workspace,
+    NOTIF_COUNTER,
 };
+
+const FEED_MAX_ITEMS_LIMIT: usize = 50;
 
 pub fn pipe_name() -> String {
     let user = std::env::var("USERNAME")
@@ -333,6 +336,149 @@ async fn dispatch(
                 .unwrap()
                 .insert(pane_id.clone(), text.clone());
             let _ = app.emit("pane:status", json!({ "pane_id": pane_id, "text": text }));
+            Ok(json!({ "ok": true }))
+        }
+
+        // ─── Phase 6.5: agent feed ────────────────────────────────────────
+        "feed.push" => {
+            let req_id = params
+                .get("request_id")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .unwrap_or_else(|| {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_nanos())
+                        .unwrap_or(0);
+                    format!("req_{:x}", now)
+                });
+            let kind = params
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("passive")
+                .to_string();
+            let subkind = params
+                .get("subkind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let pane_id = params
+                .get("pane_id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let workspace_id = params
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let title = params
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(no title)")
+                .to_string();
+            let summary = params
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let payload = params.get("payload").cloned().unwrap_or(json!({}));
+            // Clamp timeout to a sane range (1..=600s) regardless of what the
+            // client requests, so a malicious or buggy CLI can't pin a
+            // server thread/connection indefinitely.
+            let timeout_secs = params
+                .get("wait_timeout_seconds")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(120)
+                .clamp(1, 600);
+            crate::dlog(&format!(
+                "feed.push: kind={} subkind={} timeout={}s req_id={}",
+                params.get("kind").and_then(|v| v.as_str()).unwrap_or(""),
+                params.get("subkind").and_then(|v| v.as_str()).unwrap_or(""),
+                timeout_secs,
+                params
+                    .get("request_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?")
+            ));
+
+            let blocking = matches!(kind.as_str(), "permission_request");
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+
+            let item = FeedItem {
+                request_id: req_id.clone(),
+                kind: kind.clone(),
+                subkind: subkind.clone(),
+                pane_id,
+                workspace_id,
+                title: title.clone(),
+                summary: summary.clone(),
+                payload,
+                state: if blocking {
+                    FeedItemState::Pending
+                } else {
+                    FeedItemState::Passive
+                },
+                created_ms: now_ms,
+                blocking,
+            };
+
+            // Register the item (and a oneshot for blocking ones).
+            let oneshot_rx = if blocking {
+                let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+                let mut store = state.feed.lock().unwrap();
+                store.items.push_back(item.clone());
+                while store.items.len() > FEED_MAX_ITEMS_LIMIT {
+                    store.items.pop_front();
+                }
+                store.pending.insert(req_id.clone(), tx);
+                Some(rx)
+            } else {
+                let mut store = state.feed.lock().unwrap();
+                store.items.push_back(item.clone());
+                while store.items.len() > FEED_MAX_ITEMS_LIMIT {
+                    store.items.pop_front();
+                }
+                None
+            };
+
+            let _ = app.emit("feed:item-added", &item);
+            show_toast(&title, &summary);
+
+            if let Some(rx) = oneshot_rx {
+                let wait =
+                    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await;
+                let decision = match wait {
+                    Ok(Ok(d)) => d,
+                    Ok(Err(_)) => {
+                        // sender dropped — mark as denied (e.g. app shutting down)
+                        let _ = decide_feed(state, app, &req_id, "deny");
+                        "deny".to_string()
+                    }
+                    Err(_) => {
+                        let _ = decide_feed(state, app, &req_id, "timeout");
+                        "timeout".to_string()
+                    }
+                };
+                Ok(json!({ "request_id": req_id, "decision": decision }))
+            } else {
+                Ok(json!({ "request_id": req_id, "decision": "passive" }))
+            }
+        }
+
+        "feed.decide" => {
+            let req_id = params
+                .get("request_id")
+                .and_then(|v| v.as_str())
+                .ok_or("missing request_id")?
+                .to_string();
+            let decision = params
+                .get("decision")
+                .and_then(|v| v.as_str())
+                .ok_or("missing decision")?
+                .to_string();
+            decide_feed(state, app, &req_id, &decision)?;
             Ok(json!({ "ok": true }))
         }
 

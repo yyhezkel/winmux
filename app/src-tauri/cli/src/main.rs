@@ -326,6 +326,54 @@ where
     Ok(resp.get("result").cloned().unwrap_or(Value::Null))
 }
 
+fn derive_hook_title(subcommand: &str, payload: &Value) -> String {
+    match subcommand {
+        "tool-permission" | "pre-tool-use" => {
+            if let Some(cmd) = payload.get("command").and_then(|v| v.as_str()) {
+                format!("Run `{}` ?", cmd)
+            } else if let Some(tool) = payload.get("tool").and_then(|v| v.as_str()) {
+                format!("Allow `{}` ?", tool)
+            } else if let Some(t) = payload.get("title").and_then(|v| v.as_str()) {
+                t.to_string()
+            } else {
+                format!("agent: {}", subcommand)
+            }
+        }
+        "session-start" => "Claude session started".to_string(),
+        "session-stop" | "session-end" => "Claude session ended".to_string(),
+        "session-idle" => "Claude is idle".to_string(),
+        "session-active" => "Claude is active".to_string(),
+        "notification" => payload
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| "Claude notification".to_string()),
+        "prompt-submit" => "Prompt submitted".to_string(),
+        other => format!("agent: {}", other),
+    }
+}
+
+fn derive_hook_summary(_subcommand: &str, payload: &Value) -> String {
+    if let Some(s) = payload.get("summary").and_then(|v| v.as_str()) {
+        return s.to_string();
+    }
+    if let Some(s) = payload.get("description").and_then(|v| v.as_str()) {
+        return s.to_string();
+    }
+    if let Some(s) = payload.get("body").and_then(|v| v.as_str()) {
+        return s.to_string();
+    }
+    if let Some(reason) = payload.get("reason").and_then(|v| v.as_str()) {
+        return reason.to_string();
+    }
+    let s = serde_json::to_string(payload).unwrap_or_default();
+    if s.len() > 280 {
+        format!("{}…", &s[..280])
+    } else {
+        s
+    }
+}
+
 fn build_connection(
     type_: &str,
     shell: Option<String>,
@@ -424,29 +472,80 @@ async fn main() -> ExitCode {
         Cmd::ClaudeHook { subcommand } => {
             let mut buf = String::new();
             let _ = std::io::stdin().read_to_string(&mut buf);
-            eprintln!(
-                "claude-hook[{}] received {} bytes from stdin",
-                subcommand,
-                buf.len()
-            );
-            if !buf.is_empty() {
-                eprintln!("--- stdin payload ---");
-                eprintln!("{}", buf.trim_end());
-                eprintln!("---------------------");
-            }
-            let body = if buf.is_empty() {
-                "(no stdin)".to_string()
+            let payload: Value = if buf.trim().is_empty() {
+                json!({})
             } else {
-                buf.trim_end().to_string()
+                serde_json::from_str(buf.trim()).unwrap_or_else(|_| json!({ "raw": buf.trim() }))
             };
-            rpc_call(
-                "notify",
+
+            let blocking = matches!(subcommand.as_str(), "tool-permission" | "pre-tool-use");
+            let kind = if blocking { "permission_request" } else { "passive" };
+
+            let request_id = format!(
+                "req_{:x}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            let pane_id = std::env::var("WINMUX_PANE_ID").ok();
+            let title = derive_hook_title(subcommand, &payload);
+            let summary = derive_hook_summary(subcommand, &payload);
+
+            // Honor `wait_timeout_seconds` from the agent's payload if present and sane.
+            // Default 120, clamped to [1, 600] to bound server-side resource holds.
+            let timeout_secs = payload
+                .get("wait_timeout_seconds")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(120)
+                .clamp(1, 600);
+            eprintln!(
+                "claude-hook[{}] timeout={}s",
+                subcommand, timeout_secs
+            );
+
+            let result = rpc_call(
+                "feed.push",
                 json!({
-                    "title": format!("claude-hook: {}", subcommand),
-                    "body": body,
+                    "request_id": request_id,
+                    "kind": kind,
+                    "subkind": subcommand,
+                    "pane_id": pane_id,
+                    "title": title,
+                    "summary": summary,
+                    "payload": payload,
+                    "wait_timeout_seconds": timeout_secs,
                 }),
             )
-            .await
+            .await;
+
+            match result {
+                Ok(v) => {
+                    let decision = v
+                        .get("decision")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("unknown");
+                    eprintln!("claude-hook[{}] decision={}", subcommand, decision);
+                    if !cli.quiet {
+                        let s = if cli.raw {
+                            serde_json::to_string(&v).unwrap_or_default()
+                        } else {
+                            serde_json::to_string_pretty(&v).unwrap_or_default()
+                        };
+                        println!("{}", s);
+                    }
+                    return match decision {
+                        "allow" | "passive" => ExitCode::SUCCESS,
+                        "deny" => ExitCode::from(1),
+                        "timeout" => ExitCode::from(2),
+                        _ => ExitCode::from(3),
+                    };
+                }
+                Err(e) => {
+                    eprintln!("claude-hook error: {}", e);
+                    return ExitCode::from(3);
+                }
+            }
         }
     };
 

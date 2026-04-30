@@ -68,6 +68,42 @@ pub(crate) struct NotificationItem {
     pub(crate) timestamp_ms: u128,
 }
 
+#[derive(Clone, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum FeedItemState {
+    Pending,
+    Allowed,
+    Denied,
+    Timedout,
+    Passive,
+}
+
+#[derive(Clone, Serialize)]
+pub(crate) struct FeedItem {
+    pub(crate) request_id: String,
+    pub(crate) kind: String,
+    pub(crate) subkind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) pane_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) workspace_id: Option<String>,
+    pub(crate) title: String,
+    pub(crate) summary: String,
+    pub(crate) payload: serde_json::Value,
+    pub(crate) state: FeedItemState,
+    pub(crate) created_ms: u128,
+    pub(crate) blocking: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct FeedStore {
+    pub(crate) items: std::collections::VecDeque<FeedItem>,
+    pub(crate) pending: HashMap<String, tokio::sync::oneshot::Sender<String>>,
+}
+
+#[allow(dead_code)] // used as documentation; rpc_server has its own copy
+const FEED_MAX_ITEMS: usize = 50;
+
 #[derive(Default, Clone)]
 pub(crate) struct AppState {
     pub(crate) sessions: SessionMap,
@@ -76,6 +112,7 @@ pub(crate) struct AppState {
     pub(crate) load_state: Arc<Mutex<Option<LoadState>>>,
     pub(crate) notifications: Arc<Mutex<Vec<NotificationItem>>>,
     pub(crate) pane_status: Arc<Mutex<HashMap<String, String>>>,
+    pub(crate) feed: Arc<Mutex<FeedStore>>,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1583,6 +1620,55 @@ fn pane_status_get(state: State<'_, AppState>) -> HashMap<String, String> {
     state.pane_status.lock().unwrap().clone()
 }
 
+/// Phase 6.5: shared decision logic for feed items. Used both by the Tauri command
+/// `feed_decide` (called by the frontend's Allow/Deny buttons) and by the RPC handler
+/// when the timeout expires or sender drops.
+pub(crate) fn decide_feed(
+    state: &AppState,
+    app: &AppHandle,
+    request_id: &str,
+    decision: &str,
+) -> Result<(), String> {
+    let new_state = match decision {
+        "allow" => FeedItemState::Allowed,
+        "deny" => FeedItemState::Denied,
+        "timeout" => FeedItemState::Timedout,
+        other => return Err(format!("unknown decision: {other}")),
+    };
+    let tx = {
+        let mut store = state.feed.lock().unwrap();
+        for item in store.items.iter_mut() {
+            if item.request_id == request_id {
+                item.state = new_state.clone();
+            }
+        }
+        store.pending.remove(request_id)
+    };
+    let _ = app.emit(
+        "feed:item-resolved",
+        serde_json::json!({ "request_id": request_id, "decision": decision }),
+    );
+    if let Some(tx) = tx {
+        let _ = tx.send(decision.to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn feed_list(state: State<'_, AppState>) -> Vec<FeedItem> {
+    state.feed.lock().unwrap().items.iter().cloned().collect()
+}
+
+#[tauri::command]
+fn feed_decide(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    request_id: String,
+    decision: String,
+) -> Result<(), String> {
+    decide_feed(&state, &app, &request_id, &decision)
+}
+
 #[tauri::command]
 fn pty_resize(
     state: State<'_, AppState>,
@@ -1666,6 +1752,8 @@ pub fn run() {
             notifications_list,
             notifications_clear,
             pane_status_get,
+            feed_list,
+            feed_decide,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

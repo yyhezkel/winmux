@@ -34,6 +34,24 @@ export type WorkspacesFile = {
 export type PtyDataEvent = { session_id: string; data: string };
 export type PtyExitEvent = { session_id: string; reason: string | null };
 
+export type FeedItemState = "pending" | "allowed" | "denied" | "timedout" | "passive";
+
+export type FeedItem = {
+  request_id: string;
+  kind: string;
+  subkind: string;
+  pane_id?: string | null;
+  workspace_id?: string | null;
+  title: string;
+  summary: string;
+  payload: unknown;
+  state: FeedItemState;
+  created_ms: number;
+  blocking: boolean;
+};
+
+export type FeedResolvedEvent = { request_id: string; decision: string };
+
 export function collectPanes(node: LayoutNode): string[] {
   if (node.kind === "pane") return [node.pane_id];
   return [...collectPanes(node.first), ...collectPanes(node.second)];

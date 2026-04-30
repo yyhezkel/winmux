@@ -1,3 +1,4 @@
+mod notes;
 mod remote_bootstrap;
 mod rpc_server;
 mod tunnel;
@@ -54,7 +55,7 @@ type WorkspacesState = Arc<Mutex<WorkspacesFile>>;
 /// - `Loaded`: load_from_disk succeeded (file present or absent doesn't matter — state reflects truth).
 /// - `Failed`: load_from_disk hit a real error (read or parse). Persisting would clobber data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LoadState {
+pub(crate) enum LoadState {
     Loaded,
     Failed,
 }
@@ -113,6 +114,7 @@ pub(crate) struct AppState {
     pub(crate) notifications: Arc<Mutex<Vec<NotificationItem>>>,
     pub(crate) pane_status: Arc<Mutex<HashMap<String, String>>>,
     pub(crate) feed: Arc<Mutex<FeedStore>>,
+    pub(crate) notes: Arc<Mutex<notes::NotesFile>>,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -256,6 +258,11 @@ fn config_dir() -> Result<PathBuf, String> {
         .join("winmux");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {:?}: {e}", dir))?;
     Ok(dir)
+}
+
+/// Same as `config_dir` but visible to other modules.
+pub(crate) fn config_dir_pub() -> Result<PathBuf, String> {
+    config_dir()
 }
 
 fn config_path() -> Result<PathBuf, String> {
@@ -1835,6 +1842,17 @@ pub fn run() {
                     tracing::warn!("workspaces load failed: {e}");
                 }
             }
+            // Phase 7.B: load notes (best-effort; missing file is fine).
+            match notes::load_notes_from_disk() {
+                Ok(nf) => {
+                    let count = nf.notes.len();
+                    *state.notes.lock().unwrap() = nf;
+                    dlog(&format!("setup: notes loaded ({count} notes)"));
+                }
+                Err(e) => {
+                    dlog(&format!("setup: notes load failed: {e} (starting empty)"));
+                }
+            }
             // Spawn JSON-RPC server on a per-user named pipe.
             let state_clone: AppState = (*state).clone();
             let app_handle = app.handle().clone();
@@ -1865,6 +1883,10 @@ pub fn run() {
             pane_status_get,
             feed_list,
             feed_decide,
+            notes::notes_load,
+            notes::notes_add,
+            notes::notes_update,
+            notes::notes_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

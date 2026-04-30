@@ -5,6 +5,7 @@ import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { LayoutView } from "./LayoutView";
 import { FeedPanel } from "./FeedPanel";
+import { NotesModal } from "./NotesModal";
 import { TerminalInstance } from "./terminalInstance";
 import {
   collectPanes,
@@ -13,6 +14,8 @@ import {
   type FeedItem,
   type FeedResolvedEvent,
   type LayoutNode,
+  type Note,
+  type NotesFile,
   type PtyDataEvent,
   type PtyExitEvent,
   type SplitDirection,
@@ -50,6 +53,17 @@ function App() {
   const [paneStatusText, setPaneStatusText] = createSignal<Record<string, string>>({});
   // Phase 6.5: agent feed (most recent first; capped to 50 server-side).
   const [feedItems, setFeedItems] = createSignal<FeedItem[]>([]);
+  // Phase 7.B: notes
+  const [notes, setNotes] = createSignal<Note[]>([]);
+  const [showNotes, setShowNotes] = createSignal(false);
+  const refreshNotes = async () => {
+    try {
+      const f = await invoke<NotesFile>("notes_load");
+      setNotes(f.notes ?? []);
+    } catch (e) {
+      console.warn("notes_load failed", e);
+    }
+  };
   const FEED_AUTO_DISMISS_MS = 3000;
   const scheduleFeedDismiss = (request_id: string) => {
     setTimeout(() => {
@@ -365,6 +379,11 @@ function App() {
 
   const handleKey = (e: KeyboardEvent) => {
     if (!e.ctrlKey || !e.shiftKey) return;
+    if (e.key === "N" || e.key === "n") {
+      e.preventDefault();
+      setShowNotes((v) => !v);
+      return;
+    }
     const target = activePaneId();
     if (!target) return;
     if (e.key === "D" || e.key === "d") {
@@ -462,6 +481,13 @@ function App() {
           )
         );
         scheduleFeedDismiss(e.payload.request_id);
+      })
+    );
+    // Phase 7.B: notes
+    await refreshNotes();
+    unlistens.push(
+      await listen("notes:changed", () => {
+        void refreshNotes();
       })
     );
     // Per-pane status events (e.g. remote-bootstrap progress).
@@ -597,6 +623,47 @@ function App() {
         open={showCreate()}
         onClose={() => setShowCreate(false)}
         onCreate={handleCreate}
+      />
+
+      <button
+        class="notes-fab"
+        title="Notes (Ctrl+Shift+N)"
+        onClick={() => setShowNotes(true)}
+      >
+        📝 {notes().filter((n) => n.status === "open").length}
+      </button>
+
+      <NotesModal
+        open={showNotes()}
+        notes={notes()}
+        workspaces={file().workspaces}
+        activeWorkspaceId={file().active_workspace_id}
+        onClose={() => setShowNotes(false)}
+        onAdd={(text, tag, workspaceId) => {
+          invoke<Note>("notes_add", {
+            text,
+            tag: tag ?? null,
+            workspaceId: workspaceId ?? null,
+            paneId: null,
+          })
+            .then(() => refreshNotes())
+            .catch((e) => console.error("notes_add failed", e));
+        }}
+        onDone={(id) =>
+          invoke("notes_update", { id, status: "done" })
+            .then(() => refreshNotes())
+            .catch((e) => console.error("notes_update done failed", e))
+        }
+        onReopen={(id) =>
+          invoke("notes_update", { id, status: "open" })
+            .then(() => refreshNotes())
+            .catch((e) => console.error("notes_update reopen failed", e))
+        }
+        onDelete={(id) =>
+          invoke("notes_delete", { id })
+            .then(() => refreshNotes())
+            .catch((e) => console.error("notes_delete failed", e))
+        }
       />
 
       <FeedPanel

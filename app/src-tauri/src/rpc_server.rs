@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
+use crate::notes::{self, NoteStatus};
 use crate::{
     collect_panes, decide_feed, find_workspace_for_pane, new_pane_id, new_workspace_id, persist,
     update_pane_in, write_to_session, AppState, CreateInput, FeedItem, FeedItemState, LayoutNode,
@@ -529,6 +530,108 @@ async fn dispatch(
             } else {
                 Ok(json!({ "request_id": req_id, "decision": "passive" }))
             }
+        }
+
+        // ─── Phase 7.B: notes ─────────────────────────────────────────────
+        "note-add" => {
+            let text = params
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or("missing text")?
+                .to_string();
+            let tag = params
+                .get("tag")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let workspace_id = params
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            // pane_id: explicit param, else auto from caller's pane (set by spawn_ssh
+            // env vars and propagated to RPC by future tunnel work — for now the
+            // CLI fills it in). If pane_id is set and workspace_id isn't, look up.
+            let mut pane_id = params
+                .get("pane_id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let workspace_id = match (workspace_id, &pane_id) {
+                (Some(w), _) => Some(w),
+                (None, Some(p)) => find_workspace_for_pane(&state.workspaces.lock().unwrap(), p),
+                (None, None) => None,
+            };
+            if pane_id.as_deref() == Some("") {
+                pane_id = None;
+            }
+            let n = notes::rpc_add(state, app, text, tag, workspace_id, pane_id)?;
+            serde_json::to_value(&n).map_err(|e| e.to_string())
+        }
+
+        "note-list" => {
+            let tag = params.get("tag").and_then(|v| v.as_str());
+            let status_str = params.get("status").and_then(|v| v.as_str());
+            let status = match status_str {
+                Some("open") => Some(NoteStatus::Open),
+                Some("done") => Some(NoteStatus::Done),
+                _ => None,
+            };
+            let workspace_id = params.get("workspace_id").and_then(|v| v.as_str());
+            let limit = params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|x| x as usize);
+            let list = notes::list_filtered(state, tag, status, workspace_id, limit);
+            serde_json::to_value(&list).map_err(|e| e.to_string())
+        }
+
+        "note-update" => {
+            let id = params
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or("missing id")?
+                .to_string();
+            let text = params
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            // tag: presence vs absence vs explicit null. JSON `null` becomes
+            // `Some(Value::Null)`; a literal "" empty string clears too.
+            let tag = if params.get("tag").is_some() {
+                Some(
+                    params
+                        .get("tag")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                )
+            } else {
+                None
+            };
+            let status = match params.get("status").and_then(|v| v.as_str()) {
+                Some("open") => Some(NoteStatus::Open),
+                Some("done") => Some(NoteStatus::Done),
+                _ => None,
+            };
+            let n = notes::rpc_update(state, app, &id, text, tag, status)?;
+            serde_json::to_value(&n).map_err(|e| e.to_string())
+        }
+
+        "note-done" => {
+            let id = params
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or("missing id")?
+                .to_string();
+            let n = notes::rpc_update(state, app, &id, None, None, Some(NoteStatus::Done))?;
+            serde_json::to_value(&n).map_err(|e| e.to_string())
+        }
+
+        "note-delete" => {
+            let id = params
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or("missing id")?
+                .to_string();
+            notes::rpc_delete(state, app, &id)?;
+            Ok(json!({ "ok": true }))
         }
 
         "feed.decide" => {

@@ -117,6 +117,12 @@ enum Cmd {
         subcommand: String,
     },
 
+    /// Quick-capture notes (Phase 7.B). See `winmux note --help` for subcommands.
+    Note {
+        #[command(subcommand)]
+        op: NoteOp,
+    },
+
     /// Register agent hooks (e.g. Claude Code's hooks.json) so AI agents pipe
     /// permission requests + lifecycle events through winmux. Idempotent and additive.
     SetupHooks {
@@ -129,6 +135,57 @@ enum Cmd {
         /// Replace any existing winmux hook entries even if already registered.
         #[arg(long)]
         force: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum NoteOp {
+    /// Add a new note. Tag is optional — try `idea`, `bug`, `todo`, or your own.
+    Add {
+        /// Free-text body. Wrap in quotes if it contains spaces.
+        text: String,
+        #[arg(long)]
+        tag: Option<String>,
+        /// Workspace id to associate with the note (auto-detected from --pane if not set).
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Pane id to associate with the note (defaults to $WINMUX_PANE_ID env if set).
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// List notes. Defaults to open notes only; pass --done or --all to include resolved.
+    List {
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        done: bool,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark a note as done.
+    Done {
+        id: String,
+    },
+    /// Delete a note.
+    Delete {
+        id: String,
+    },
+    /// Update text/tag/status of a note.
+    Update {
+        id: String,
+        #[arg(long)]
+        text: Option<String>,
+        #[arg(long)]
+        tag: Option<String>,
+        /// "open" or "done".
+        #[arg(long)]
+        status: Option<String>,
     },
 }
 
@@ -516,6 +573,119 @@ async fn main() -> ExitCode {
             )
             .await
         }
+        Cmd::Note { op } => match op {
+            NoteOp::Add {
+                text,
+                tag,
+                workspace,
+                pane,
+            } => {
+                let pane_eff = pane
+                    .clone()
+                    .or_else(|| std::env::var("WINMUX_PANE_ID").ok())
+                    .filter(|s| !s.is_empty());
+                rpc_call(
+                    "note-add",
+                    json!({
+                        "text": text,
+                        "tag": tag,
+                        "workspace_id": workspace,
+                        "pane_id": pane_eff,
+                    }),
+                )
+                .await
+            }
+            NoteOp::List {
+                tag,
+                done,
+                all,
+                workspace,
+                limit,
+                json: as_json,
+            } => {
+                let status = if *all {
+                    None
+                } else if *done {
+                    Some("done".to_string())
+                } else {
+                    Some("open".to_string())
+                };
+                let result = rpc_call(
+                    "note-list",
+                    json!({
+                        "tag": tag,
+                        "status": status,
+                        "workspace_id": workspace,
+                        "limit": limit,
+                    }),
+                )
+                .await;
+                match result {
+                    Ok(v) => {
+                        if *as_json || cli.raw {
+                            let s = if cli.raw {
+                                serde_json::to_string(&v).unwrap_or_default()
+                            } else {
+                                serde_json::to_string_pretty(&v).unwrap_or_default()
+                            };
+                            println!("{}", s);
+                            return ExitCode::SUCCESS;
+                        }
+                        let arr = v.as_array().cloned().unwrap_or_default();
+                        if arr.is_empty() {
+                            println!("(no notes)");
+                            return ExitCode::SUCCESS;
+                        }
+                        for n in arr {
+                            let id = n.get("id").and_then(|x| x.as_str()).unwrap_or("?");
+                            let st =
+                                n.get("status").and_then(|x| x.as_str()).unwrap_or("open");
+                            let tg = n.get("tag").and_then(|x| x.as_str()).unwrap_or("-");
+                            let upd = n
+                                .get("updated_at")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("");
+                            let txt = n.get("text").and_then(|x| x.as_str()).unwrap_or("");
+                            let mark = if st == "done" { "✓" } else { " " };
+                            let snippet = if txt.len() > 80 {
+                                format!("{}…", &txt[..80])
+                            } else {
+                                txt.to_string()
+                            };
+                            println!(
+                                "{}  {:<8}  [{}]  {}  {}",
+                                mark, tg, &id[..id.len().min(20)], upd, snippet
+                            );
+                        }
+                        return ExitCode::SUCCESS;
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            NoteOp::Done { id } => rpc_call("note-done", json!({ "id": id })).await,
+            NoteOp::Delete { id } => rpc_call("note-delete", json!({ "id": id })).await,
+            NoteOp::Update {
+                id,
+                text,
+                tag,
+                status,
+            } => {
+                let mut params = json!({ "id": id });
+                if let Some(t) = text {
+                    params["text"] = json!(t);
+                }
+                if let Some(tg) = tag {
+                    params["tag"] = json!(tg);
+                }
+                if let Some(s) = status {
+                    params["status"] = json!(s);
+                }
+                rpc_call("note-update", params).await
+            }
+        },
         Cmd::ClaudeHook { subcommand } => {
             let mut buf = String::new();
             let _ = std::io::stdin().read_to_string(&mut buf);

@@ -58,6 +58,24 @@ export type FeedItem = {
 
 export type FeedResolvedEvent = { request_id: string; decision: string };
 
+export type NoteStatus = "open" | "done";
+
+export type Note = {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  text: string;
+  tag?: string;
+  status: NoteStatus;
+  workspace_id?: string | null;
+  pane_id?: string | null;
+};
+
+export type NotesFile = {
+  version: 1;
+  notes: Note[];
+};
+
 export function collectPanes(node: LayoutNode): string[] {
   if (node.kind === "pane") return [node.pane_id];
   return [...collectPanes(node.first), ...collectPanes(node.second)];

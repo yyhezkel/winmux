@@ -154,7 +154,6 @@ dependencies = [
  "bytes",
  "chrono",
  "dirs 5.0.1",
- "futures",
  "hmac",
  "notify-rust",
  "portable-pty",

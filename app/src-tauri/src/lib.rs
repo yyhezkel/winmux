@@ -894,101 +894,50 @@ fn pkwh(key: PrivateKey) -> Result<PrivateKeyWithHashAlg, String> {
 /// Returns `Some(true)` if any identity authenticated; `Some(false)` if an agent was
 /// found but no identity authenticated; `None` if no agent was reachable at all.
 ///
-/// Each backend is wrapped in `catch_unwind` because the upstream `pageant-0.0.1`
-/// crate panics with `unwrap()` on a Windows error when Pageant isn't running. We
-/// don't want a missing optional auth backend to take down the tokio worker.
+/// Both backends speak the OpenSSH agent protocol over a Windows named pipe — they
+/// only differ in pipe name (`openssh-ssh-agent` vs `pageant`). We hit them through
+/// `russh_keys::agent::client::AgentClient::connect_named_pipe`, which returns
+/// `Result` cleanly. We deliberately do NOT use `connect_pageant()`, because the
+/// `pageant-0.0.1` crate it uses internally has an `unwrap()` at
+/// `pageant_impl.rs:64` that panics on benign Windows API return codes when
+/// Pageant isn't running.
 async fn try_agent_auth(
     handle: &mut client::Handle<SshClient>,
     user: &str,
 ) -> Option<bool> {
-    use futures::FutureExt;
-    use std::panic::AssertUnwindSafe;
-
     let mut any_agent_seen = false;
 
-    // OpenSSH for Windows.
-    let openssh = AssertUnwindSafe(async {
-        let openssh_pipe = r"\\.\pipe\openssh-ssh-agent";
-        let mut agent = russh_keys::agent::client::AgentClient::connect_named_pipe(openssh_pipe)
-            .await
-            .ok()?;
-        let identities = agent.request_identities().await.ok()?;
-        if identities.is_empty() {
-            return Some((agent, identities));
-        }
-        Some((agent, identities))
-    })
-    .catch_unwind()
-    .await;
-    let openssh_result = match openssh {
-        Ok(v) => v,
-        Err(p) => {
-            tracing::warn!("openssh-ssh-agent probe panicked, skipping: {:?}", p);
-            None
-        }
-    };
-    if let Some((mut agent, identities)) = openssh_result {
-        any_agent_seen = true;
-        tracing::info!(
-            "openssh-ssh-agent: {} identit(y/ies) offered",
-            identities.len()
-        );
-        for id in identities {
-            let attempt =
-                AssertUnwindSafe(handle.authenticate_publickey_with(user, id, &mut agent))
-                    .catch_unwind()
-                    .await;
-            match attempt {
-                Ok(Ok(true)) => return Some(true),
-                Ok(Ok(false)) => continue,
-                Ok(Err(e)) => {
-                    tracing::debug!("openssh agent auth attempt: {e}");
+    for (label, pipe_path) in [
+        ("openssh-ssh-agent", r"\\.\pipe\openssh-ssh-agent"),
+        ("pageant", r"\\.\pipe\pageant"),
+    ] {
+        let mut agent =
+            match russh_keys::agent::client::AgentClient::connect_named_pipe(pipe_path).await {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::debug!("{label} pipe ({pipe_path}) not reachable: {e}");
                     continue;
                 }
-                Err(p) => {
-                    tracing::warn!("openssh agent auth panicked: {:?}", p);
-                    break;
-                }
+            };
+        let identities = match agent.request_identities().await {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::debug!("{label} request_identities: {e}");
+                continue;
             }
+        };
+        if identities.is_empty() {
+            continue;
         }
-    }
-
-    // Pageant. The pageant-0.0.1 crate calls `.unwrap()` on a Windows error when
-    // Pageant isn't running, so we have to catch panics here.
-    let pageant = AssertUnwindSafe(async {
-        let mut p = russh_keys::agent::client::AgentClient::connect_pageant().await;
-        let ids = p.request_identities().await.ok()?;
-        Some((p, ids))
-    })
-    .catch_unwind()
-    .await;
-    let pageant_result = match pageant {
-        Ok(v) => v,
-        Err(p) => {
-            tracing::warn!("pageant probe panicked (probably not running), skipping: {:?}", p);
-            None
-        }
-    };
-    if let Some((mut pg, identities)) = pageant_result {
-        if !identities.is_empty() {
-            any_agent_seen = true;
-            tracing::info!("pageant: {} identit(y/ies) offered", identities.len());
-            for id in identities {
-                let attempt =
-                    AssertUnwindSafe(handle.authenticate_publickey_with(user, id, &mut pg))
-                        .catch_unwind()
-                        .await;
-                match attempt {
-                    Ok(Ok(true)) => return Some(true),
-                    Ok(Ok(false)) => continue,
-                    Ok(Err(e)) => {
-                        tracing::debug!("pageant auth attempt: {e}");
-                        continue;
-                    }
-                    Err(p) => {
-                        tracing::warn!("pageant auth panicked: {:?}", p);
-                        break;
-                    }
+        any_agent_seen = true;
+        tracing::info!("{label}: {} identit(y/ies) offered", identities.len());
+        for id in identities {
+            match handle.authenticate_publickey_with(user, id, &mut agent).await {
+                Ok(true) => return Some(true),
+                Ok(false) => continue,
+                Err(e) => {
+                    tracing::debug!("{label} auth attempt: {e}");
+                    continue;
                 }
             }
         }

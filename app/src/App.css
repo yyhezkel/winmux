@@ -1,0 +1,460 @@
+:root {
+  background: #0b0d10;
+  color: #e6e6e6;
+  font-family: -apple-system, system-ui, "Segoe UI", sans-serif;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: #0b0d10;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  height: 100vh;
+  width: 100vw;
+  background: #0b0d10;
+}
+
+/* ─── Sidebar ─── */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: #0e1217;
+  border-right: 1px solid #1f2530;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid #1f2530;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #8aa3c2;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.ws-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ws-item:hover { background: #161b22; }
+.ws-item.active { background: #1d2330; }
+
+.ws-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ws-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #2a3340;
+  color: #8aa3c2;
+  font-family: "Cascadia Mono", monospace;
+}
+.ws-badge.ssh { background: #2c3a5a; color: #7aa2f7; }
+
+.ws-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5cd87f;
+  box-shadow: 0 0 4px #5cd87f;
+  flex-shrink: 0;
+}
+
+.ws-menu {
+  position: absolute;
+  top: 100%;
+  left: 12px;
+  z-index: 10;
+  background: #1d2330;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+.ws-menu button {
+  background: transparent;
+  border: none;
+  color: #e6e6e6;
+  text-align: left;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.ws-menu button:hover { background: #2a3340; }
+.ws-menu button.danger { color: #ff6b6b; }
+
+.ws-add {
+  margin: 8px;
+  background: #1d2330;
+  color: #8aa3c2;
+  border: 1px dashed #2a3340;
+  border-radius: 4px;
+  padding: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ws-add:hover { background: #232a39; color: #e6e6e6; }
+
+/* ─── Main pane ─── */
+
+.main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ws-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #14181d;
+  border-bottom: 1px solid #1f2530;
+  font-size: 12px;
+}
+.ws-title { font-weight: 600; color: #e6e6e6; }
+.ws-conn-info {
+  margin-left: auto;
+  color: #6b7682;
+  font-family: "Cascadia Mono", monospace;
+  font-size: 11px;
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: #6b7682;
+}
+
+/* ─── Layout / splits / panes ─── */
+
+.layout-root {
+  flex: 1;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+
+.split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.split-horizontal { flex-direction: row; }
+.split-vertical { flex-direction: column; }
+
+.split-side {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.divider {
+  flex-shrink: 0;
+  background: #1f2530;
+  position: relative;
+  z-index: 2;
+}
+.divider:hover { background: #3a4a78; }
+.divider-horizontal {
+  width: 4px;
+  cursor: col-resize;
+}
+.divider-vertical {
+  height: 4px;
+  cursor: row-resize;
+}
+
+.pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #0b0d10;
+  border: 1px solid transparent;
+  overflow: hidden;
+}
+.pane.active {
+  border-color: #3a4a78;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: #11151a;
+  border-bottom: 1px solid #1f2530;
+  font-size: 11px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  color: #6b7682;
+  flex-shrink: 0;
+}
+.pane-conn {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-btn {
+  background: transparent;
+  border: none;
+  color: #6b7682;
+  font-size: 12px;
+  padding: 0 6px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.pane-btn:hover {
+  background: #1d2330;
+  color: #e6e6e6;
+}
+.pane-btn.pane-close:hover {
+  background: #5a2a2a;
+  color: #ff8888;
+}
+
+.pane-body {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pane-terminal-slot {
+  position: absolute;
+  inset: 0;
+  background: #0b0d10;
+}
+
+.pane-connect {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #0b0d10;
+  z-index: 5;
+  padding: 30px;
+}
+
+.terminal-container {
+  position: absolute;
+  inset: 0;
+  background: #0b0d10;
+}
+
+.terminal-container .xterm {
+  height: 100%;
+}
+
+.terminal-container .xterm-viewport,
+.terminal-container .xterm-screen {
+  background: transparent !important;
+}
+
+/* ─── Connect / status ─── */
+
+.pw-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.pass-hint {
+  font-family: "Cascadia Mono", monospace;
+  font-size: 11px;
+  color: #8aa3c2;
+  white-space: nowrap;
+}
+
+.host-trust {
+  background: #14181d;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+  padding: 18px 22px;
+  max-width: 560px;
+  font-size: 12px;
+  color: #e6e6e6;
+}
+.host-trust.danger {
+  border-color: #ff6b6b;
+  background: #1f1416;
+}
+.host-trust h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+}
+.host-trust .warn {
+  color: #ff8888;
+  margin: 0 0 10px 0;
+}
+.host-trust .label {
+  color: #8aa3c2;
+}
+.host-trust code {
+  font-family: "Cascadia Mono", monospace;
+  font-size: 11px;
+  color: #f0b429;
+  word-break: break-all;
+}
+.host-trust .trust-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  justify-content: flex-end;
+}
+
+.pw-row input {
+  background: #0b0d10;
+  color: #e6e6e6;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  padding: 6px 10px;
+  width: 240px;
+  outline: none;
+  font-family: inherit;
+}
+.pw-row input:focus { border-color: #4a90e2; }
+
+.status-line {
+  font-family: "Cascadia Mono", monospace;
+  font-size: 12px;
+  color: #6b7682;
+  max-width: 600px;
+  text-align: center;
+  margin: 0;
+}
+.status-line.err { color: #ff6b6b; }
+
+/* ─── Buttons ─── */
+
+button {
+  background: #1d2330;
+  color: #e6e6e6;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+button:hover:not(:disabled) { background: #2a3340; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary {
+  background: #2c3a5a;
+  border-color: #3a4a78;
+  color: #e6e6e6;
+}
+button.primary:hover:not(:disabled) { background: #3a4a78; }
+button.big { padding: 10px 24px; font-size: 14px; }
+
+/* ─── Modal ─── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: #14181d;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+  padding: 20px 24px;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+.modal h3 { margin: 0 0 16px 0; font-size: 16px; }
+
+.modal label {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.modal label span { color: #8aa3c2; }
+
+.modal input,
+.modal select {
+  background: #0b0d10;
+  color: #e6e6e6;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.modal input:focus, .modal select:focus { border-color: #4a90e2; }
+.modal input[type="color"] { padding: 2px; height: 26px; width: 60px; }
+
+.modal-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}

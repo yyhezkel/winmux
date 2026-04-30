@@ -1,0 +1,1475 @@
+mod rpc_server;
+
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+use russh::client;
+use russh::ChannelMsg;
+use russh_keys::key::PrivateKeyWithHashAlg;
+use russh_keys::{HashAlg, PrivateKey};
+
+static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+static PANE_COUNTER: AtomicU64 = AtomicU64::new(0);
+static SPLIT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+// ─── Session types ───────────────────────────────────────────────────────────
+
+enum Session {
+    Local(LocalSession),
+    Ssh(SshSession),
+}
+
+struct LocalSession {
+    writer: Box<dyn Write + Send>,
+    master: Box<dyn MasterPty + Send>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+}
+
+struct SshSession {
+    tx: tokio::sync::mpsc::UnboundedSender<SshCmd>,
+}
+
+#[derive(Debug)]
+enum SshCmd {
+    Data(Vec<u8>),
+    Resize(u32, u32),
+    Kill,
+}
+
+type SessionMap = Arc<Mutex<HashMap<String, Session>>>;
+type PaneSessionMap = Arc<Mutex<HashMap<String, String>>>;
+type WorkspacesState = Arc<Mutex<WorkspacesFile>>;
+
+/// Tri-state for whether persistence is safe:
+/// - `Loaded`: load_from_disk succeeded (file present or absent doesn't matter — state reflects truth).
+/// - `Failed`: load_from_disk hit a real error (read or parse). Persisting would clobber data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoadState {
+    Loaded,
+    Failed,
+}
+
+#[derive(Clone, Serialize)]
+pub(crate) struct NotificationItem {
+    pub(crate) id: u64,
+    pub(crate) title: String,
+    pub(crate) body: String,
+    pub(crate) workspace_id: Option<String>,
+    pub(crate) timestamp_ms: u128,
+}
+
+#[derive(Default, Clone)]
+pub(crate) struct AppState {
+    pub(crate) sessions: SessionMap,
+    pub(crate) pane_sessions: PaneSessionMap,
+    pub(crate) workspaces: WorkspacesState,
+    pub(crate) load_state: Arc<Mutex<Option<LoadState>>>,
+    pub(crate) notifications: Arc<Mutex<Vec<NotificationItem>>>,
+    pub(crate) pane_status: Arc<Mutex<HashMap<String, String>>>,
+}
+
+pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Serialize)]
+struct PtyDataEvent {
+    session_id: String,
+    data: String,
+}
+
+#[derive(Clone, Serialize)]
+struct PtyExitEvent {
+    session_id: String,
+    reason: Option<String>,
+}
+
+// ─── Workspace data model ────────────────────────────────────────────────────
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub(crate) enum Connection {
+    Local {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shell: Option<String>,
+    },
+    Ssh {
+        host: String,
+        user: String,
+        port: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key_path: Option<String>,
+    },
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "lowercase")]
+enum SplitDirection {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub(crate) enum LayoutNode {
+    Pane {
+        pane_id: String,
+        connection: Connection,
+    },
+    Split {
+        split_id: String,
+        direction: SplitDirection,
+        first: Box<LayoutNode>,
+        second: Box<LayoutNode>,
+        ratio: f32,
+    },
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct Workspace {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cwd: Option<String>,
+    // Legacy field — folded into layout on load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) connection: Option<Connection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) layout: Option<LayoutNode>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+struct WorkspacesFile {
+    #[serde(default = "default_version")]
+    version: u32,
+    #[serde(default)]
+    active_workspace_id: Option<String>,
+    #[serde(default)]
+    workspaces: Vec<Workspace>,
+}
+
+fn default_version() -> u32 {
+    1
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CreateInput {
+    pub(crate) name: String,
+    pub(crate) connection: Connection,
+    #[serde(default)]
+    pub(crate) color: Option<String>,
+    #[serde(default)]
+    pub(crate) cwd: Option<String>,
+}
+
+// ─── ID helpers ──────────────────────────────────────────────────────────────
+
+fn next_session_id() -> String {
+    format!("s{}", SESSION_COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
+pub(crate) fn new_pane_id() -> String {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let n = PANE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("p_{:x}_{:x}", t, n)
+}
+
+pub(crate) fn new_split_id() -> String {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let n = SPLIT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("sp_{:x}_{:x}", t, n)
+}
+
+pub(crate) fn new_workspace_id() -> String {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("w_{:x}", t)
+}
+
+// ─── Persistence ─────────────────────────────────────────────────────────────
+
+fn config_dir() -> Result<PathBuf, String> {
+    let dir = dirs::config_dir()
+        .ok_or_else(|| "no config dir available".to_string())?
+        .join("winmux");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create {:?}: {e}", dir))?;
+    Ok(dir)
+}
+
+fn config_path() -> Result<PathBuf, String> {
+    Ok(config_dir()?.join("workspaces.json"))
+}
+
+fn dlog(msg: &str) {
+    if let Ok(dir) = config_dir() {
+        let p = dir.join("debug.log");
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&p)
+            .and_then(|mut f| {
+                use std::io::Write as _;
+                writeln!(f, "[{ts}] {msg}")
+            });
+    }
+}
+
+fn save_to_disk(file: &WorkspacesFile) -> Result<(), String> {
+    use std::io::Write as _;
+
+    if file.workspaces.is_empty() && file.active_workspace_id.is_none() {
+        dlog(&format!(
+            "save_to_disk: writing empty state (workspaces=0). version={}",
+            file.version
+        ));
+    }
+
+    let path = config_path()?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| "no parent dir".to_string())?
+        .to_path_buf();
+    let tmp = dir.join(format!("workspaces.{}.tmp", std::process::id()));
+    let text = serde_json::to_string_pretty(file).map_err(|e| e.to_string())?;
+
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp)
+            .map_err(|e| format!("open tmp {:?}: {e}", tmp))?;
+        f.write_all(text.as_bytes())
+            .map_err(|e| format!("write tmp: {e}"))?;
+        f.sync_all().map_err(|e| format!("fsync tmp: {e}"))?;
+    }
+
+    std::fs::rename(&tmp, &path).map_err(|e| format!("rename: {e}"))?;
+    dlog(&format!(
+        "save_to_disk: wrote {} bytes ({} workspaces) → {:?}",
+        text.len(),
+        file.workspaces.len(),
+        path
+    ));
+    Ok(())
+}
+
+fn load_from_disk() -> Result<WorkspacesFile, String> {
+    let path = config_path()?;
+    dlog(&format!("load_from_disk: path={:?} exists={}", path, path.exists()));
+    if !path.exists() {
+        dlog("load_from_disk: file absent → fresh empty state (LoadState=Loaded)");
+        return Ok(WorkspacesFile {
+            version: 1,
+            active_workspace_id: None,
+            workspaces: Vec::new(),
+        });
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {:?}: {e}", path))?;
+    dlog(&format!("load_from_disk: read {} bytes", text.len()));
+    let mut file: WorkspacesFile = serde_json::from_str(&text)
+        .map_err(|e| format!("parse {:?}: {e}", path))?;
+    dlog(&format!(
+        "load_from_disk: parsed OK, version={}, {} workspaces, active={:?}",
+        file.version,
+        file.workspaces.len(),
+        file.active_workspace_id
+    ));
+
+    let mut migrated = false;
+    for ws in file.workspaces.iter_mut() {
+        if ws.layout.is_none() {
+            let conn = ws.connection.take().unwrap_or(Connection::Local { shell: None });
+            ws.layout = Some(LayoutNode::Pane {
+                pane_id: new_pane_id(),
+                connection: conn,
+            });
+            migrated = true;
+        }
+    }
+    if migrated {
+        dlog("load_from_disk: migration ran — saving migrated layout");
+        match save_to_disk(&file) {
+            Ok(()) => dlog("load_from_disk: migration save OK"),
+            Err(e) => dlog(&format!("load_from_disk: migration save FAILED: {e}")),
+        }
+    }
+    Ok(file)
+}
+
+pub(crate) fn persist(state: &AppState) -> Result<(), String> {
+    // SAFETY GATE: do not persist if load failed. We'd clobber existing data with our
+    // empty default state.
+    let load_state = *state.load_state.lock().unwrap();
+    match load_state {
+        Some(LoadState::Loaded) => {}
+        Some(LoadState::Failed) => {
+            dlog("persist: REFUSING — load_state=Failed, would clobber existing data");
+            return Err(
+                "persistence disabled: workspaces.json failed to load earlier; \
+                 fix the file and restart"
+                    .into(),
+            );
+        }
+        None => {
+            dlog("persist: REFUSING — load_state=None (setup hasn't completed)");
+            return Err("persistence not yet initialized".into());
+        }
+    }
+    let file = state.workspaces.lock().unwrap().clone();
+    save_to_disk(&file)
+}
+
+// ─── Tree operations ─────────────────────────────────────────────────────────
+
+pub(crate) fn find_pane_connection(node: &LayoutNode, target: &str) -> Option<Connection> {
+    match node {
+        LayoutNode::Pane { pane_id, connection } if pane_id == target => Some(connection.clone()),
+        LayoutNode::Pane { .. } => None,
+        LayoutNode::Split { first, second, .. } => {
+            find_pane_connection(first, target).or_else(|| find_pane_connection(second, target))
+        }
+    }
+}
+
+pub(crate) fn collect_panes(node: &LayoutNode, out: &mut Vec<String>) {
+    match node {
+        LayoutNode::Pane { pane_id, .. } => out.push(pane_id.clone()),
+        LayoutNode::Split { first, second, .. } => {
+            collect_panes(first, out);
+            collect_panes(second, out);
+        }
+    }
+}
+
+fn split_pane_in(node: LayoutNode, target: &str, dir: SplitDirection) -> (LayoutNode, bool) {
+    match node {
+        LayoutNode::Pane { pane_id, connection } => {
+            if pane_id == target {
+                let new_pane = LayoutNode::Pane {
+                    pane_id: new_pane_id(),
+                    connection: connection.clone(),
+                };
+                let original = LayoutNode::Pane { pane_id, connection };
+                (
+                    LayoutNode::Split {
+                        split_id: new_split_id(),
+                        direction: dir,
+                        first: Box::new(original),
+                        second: Box::new(new_pane),
+                        ratio: 0.5,
+                    },
+                    true,
+                )
+            } else {
+                (LayoutNode::Pane { pane_id, connection }, false)
+            }
+        }
+        LayoutNode::Split {
+            split_id,
+            direction,
+            first,
+            second,
+            ratio,
+        } => {
+            let (new_first, found1) = split_pane_in(*first, target, dir.clone());
+            if found1 {
+                return (
+                    LayoutNode::Split {
+                        split_id,
+                        direction,
+                        first: Box::new(new_first),
+                        second,
+                        ratio,
+                    },
+                    true,
+                );
+            }
+            let (new_second, found2) = split_pane_in(*second, target, dir);
+            (
+                LayoutNode::Split {
+                    split_id,
+                    direction,
+                    first: Box::new(new_first),
+                    second: Box::new(new_second),
+                    ratio,
+                },
+                found2,
+            )
+        }
+    }
+}
+
+/// Returns (new_root_or_None, removed_pane_id_if_any).
+/// new_root is None if the entire tree was just one pane and it was the target (caller
+/// should ignore the request; can't close last pane).
+fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<String>) {
+    match node {
+        LayoutNode::Pane { pane_id, connection } => {
+            if pane_id == target {
+                // Last pane — can't remove; return unchanged.
+                (Some(LayoutNode::Pane { pane_id, connection }), None)
+            } else {
+                (Some(LayoutNode::Pane { pane_id, connection }), None)
+            }
+        }
+        LayoutNode::Split {
+            split_id,
+            direction,
+            first,
+            second,
+            ratio,
+        } => {
+            // Direct-leaf optimization: if either child is the target pane, collapse.
+            if let LayoutNode::Pane { pane_id, .. } = first.as_ref() {
+                if pane_id == target {
+                    let removed = pane_id.clone();
+                    return (Some(*second), Some(removed));
+                }
+            }
+            if let LayoutNode::Pane { pane_id, .. } = second.as_ref() {
+                if pane_id == target {
+                    let removed = pane_id.clone();
+                    return (Some(*first), Some(removed));
+                }
+            }
+            // Recurse deeper.
+            let (new_first_opt, removed1) = close_pane_in(*first, target);
+            let new_first = new_first_opt.expect("non-leaf recursion preserves node");
+            if removed1.is_some() {
+                return (
+                    Some(LayoutNode::Split {
+                        split_id,
+                        direction,
+                        first: Box::new(new_first),
+                        second,
+                        ratio,
+                    }),
+                    removed1,
+                );
+            }
+            let (new_second_opt, removed2) = close_pane_in(*second, target);
+            let new_second = new_second_opt.expect("non-leaf recursion preserves node");
+            (
+                Some(LayoutNode::Split {
+                    split_id,
+                    direction,
+                    first: Box::new(new_first),
+                    second: Box::new(new_second),
+                    ratio,
+                }),
+                removed2,
+            )
+        }
+    }
+}
+
+fn set_split_ratio_in(node: LayoutNode, target: &str, new_ratio: f32) -> LayoutNode {
+    match node {
+        p @ LayoutNode::Pane { .. } => p,
+        LayoutNode::Split {
+            split_id,
+            direction,
+            first,
+            second,
+            ratio,
+        } => {
+            if split_id == target {
+                LayoutNode::Split {
+                    split_id,
+                    direction,
+                    first,
+                    second,
+                    ratio: new_ratio.clamp(0.05, 0.95),
+                }
+            } else {
+                LayoutNode::Split {
+                    split_id,
+                    direction,
+                    first: Box::new(set_split_ratio_in(*first, target, new_ratio)),
+                    second: Box::new(set_split_ratio_in(*second, target, new_ratio)),
+                    ratio,
+                }
+            }
+        }
+    }
+}
+
+// ─── Helpers (PTY events) ────────────────────────────────────────────────────
+
+fn pick_default_shell(requested: Option<String>) -> String {
+    if let Some(s) = requested.filter(|s| !s.is_empty()) {
+        return s;
+    }
+    let path_var = std::env::var("PATH").unwrap_or_default();
+    for candidate in ["pwsh.exe", "powershell.exe", "cmd.exe"] {
+        for dir in std::env::split_paths(&path_var) {
+            if dir.join(candidate).is_file() {
+                return candidate.to_string();
+            }
+        }
+    }
+    "cmd.exe".into()
+}
+
+fn emit_data(app: &AppHandle, session_id: &str, bytes: &[u8], leftover: &mut Vec<u8>) {
+    leftover.extend_from_slice(bytes);
+    let valid_up_to = match std::str::from_utf8(leftover) {
+        Ok(_) => leftover.len(),
+        Err(e) => e.valid_up_to(),
+    };
+    if valid_up_to == 0 {
+        return;
+    }
+    let s = std::str::from_utf8(&leftover[..valid_up_to])
+        .unwrap()
+        .to_string();
+    leftover.drain(..valid_up_to);
+    let _ = app.emit(
+        "pty:data",
+        PtyDataEvent {
+            session_id: session_id.to_string(),
+            data: s,
+        },
+    );
+}
+
+fn emit_exit(app: &AppHandle, session_id: &str, reason: Option<String>) {
+    let _ = app.emit(
+        "pty:exit",
+        PtyExitEvent {
+            session_id: session_id.to_string(),
+            reason,
+        },
+    );
+}
+
+fn cleanup_session_maps(
+    sessions: &SessionMap,
+    pane_sessions: &PaneSessionMap,
+    pane_id: &str,
+    session_id: &str,
+) {
+    let _ = sessions.lock().unwrap().remove(session_id);
+    let mut p = pane_sessions.lock().unwrap();
+    if p.get(pane_id).map(|s| s.as_str()) == Some(session_id) {
+        p.remove(pane_id);
+    }
+}
+
+// ─── Local PTY spawn ─────────────────────────────────────────────────────────
+
+fn spawn_local_pty(
+    state: &AppState,
+    pane_id: String,
+    app: &AppHandle,
+    shell: Option<String>,
+    cwd: Option<String>,
+    cols: u16,
+    rows: u16,
+) -> Result<String, String> {
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("openpty failed: {e}"))?;
+
+    let shell_cmd = pick_default_shell(shell);
+    let mut cmd = CommandBuilder::new(&shell_cmd);
+    if let Some(d) = cwd.as_deref() {
+        if Path::new(d).is_dir() {
+            cmd.cwd(d);
+        }
+    }
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("spawn {shell_cmd} failed: {e}"))?;
+    drop(pair.slave);
+
+    let killer = child.clone_killer();
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("clone_reader failed: {e}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| format!("take_writer failed: {e}"))?;
+
+    let id = next_session_id();
+    let id_for_thread = id.clone();
+    let pane_for_thread = pane_id.clone();
+    let app_for_thread = app.clone();
+    let sessions_for_thread = state.sessions.clone();
+    let pane_sessions_for_thread = state.pane_sessions.clone();
+    thread::spawn(move || {
+        let mut leftover: Vec<u8> = Vec::new();
+        let mut buf = [0u8; 8192];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => emit_data(&app_for_thread, &id_for_thread, &buf[..n], &mut leftover),
+                Err(_) => break,
+            }
+        }
+        let _ = child.wait();
+        cleanup_session_maps(
+            &sessions_for_thread,
+            &pane_sessions_for_thread,
+            &pane_for_thread,
+            &id_for_thread,
+        );
+        emit_exit(&app_for_thread, &id_for_thread, None);
+    });
+
+    state.sessions.lock().unwrap().insert(
+        id.clone(),
+        Session::Local(LocalSession {
+            writer,
+            master: pair.master,
+            killer,
+        }),
+    );
+    Ok(id)
+}
+
+// ─── Known-hosts (TOFU) ──────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone)]
+struct KnownHost {
+    #[serde(rename = "type")]
+    key_type: String,
+    fingerprint: String,
+    first_seen: String,
+    last_seen: String,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+struct KnownHostsFile {
+    #[serde(default)]
+    hosts: HashMap<String, KnownHost>,
+}
+
+fn known_hosts_path() -> Result<PathBuf, String> {
+    Ok(config_dir()?.join("known_hosts.json"))
+}
+
+fn load_known_hosts() -> KnownHostsFile {
+    if let Ok(p) = known_hosts_path() {
+        if let Ok(text) = std::fs::read_to_string(&p) {
+            if let Ok(f) = serde_json::from_str::<KnownHostsFile>(&text) {
+                return f;
+            }
+        }
+    }
+    KnownHostsFile::default()
+}
+
+fn save_known_hosts(file: &KnownHostsFile) -> Result<(), String> {
+    let path = known_hosts_path()?;
+    let tmp = path.with_extension("json.tmp");
+    let text = serde_json::to_string_pretty(file).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, text).map_err(|e| format!("write tmp: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("rename: {e}"))?;
+    Ok(())
+}
+
+fn iso_now() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+#[derive(Default, Clone, Debug)]
+struct HostCheckOutcome {
+    fingerprint: String,
+    key_type: String,
+    matched: bool,
+    is_unknown: bool,
+    mismatch_old: Option<String>,
+}
+
+// ─── SSH spawn ───────────────────────────────────────────────────────────────
+
+struct SshClient {
+    target: String,
+    accept_unknown: bool,
+    result: Arc<Mutex<HostCheckOutcome>>,
+}
+
+#[async_trait::async_trait]
+impl client::Handler for SshClient {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &russh_keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        let fp = server_public_key.fingerprint(HashAlg::Sha256).to_string();
+        let key_type = server_public_key.algorithm().as_str().to_string();
+        let mut known = load_known_hosts();
+        let mut outcome = HostCheckOutcome {
+            fingerprint: fp.clone(),
+            key_type: key_type.clone(),
+            matched: false,
+            is_unknown: false,
+            mismatch_old: None,
+        };
+        let now = iso_now();
+        let existing = known.hosts.get(&self.target).cloned();
+        let accept = match existing {
+            Some(entry) if entry.fingerprint == fp => {
+                outcome.matched = true;
+                if let Some(h) = known.hosts.get_mut(&self.target) {
+                    h.last_seen = now;
+                    let _ = save_known_hosts(&known);
+                }
+                true
+            }
+            Some(entry) => {
+                outcome.mismatch_old = Some(entry.fingerprint);
+                if self.accept_unknown {
+                    // User explicitly said "replace" — overwrite the known_hosts entry.
+                    known.hosts.insert(
+                        self.target.clone(),
+                        KnownHost {
+                            key_type,
+                            fingerprint: fp,
+                            first_seen: now.clone(),
+                            last_seen: now,
+                        },
+                    );
+                    let _ = save_known_hosts(&known);
+                    true
+                } else {
+                    false
+                }
+            }
+            None => {
+                outcome.is_unknown = true;
+                if self.accept_unknown {
+                    known.hosts.insert(
+                        self.target.clone(),
+                        KnownHost {
+                            key_type,
+                            fingerprint: fp,
+                            first_seen: now.clone(),
+                            last_seen: now,
+                        },
+                    );
+                    let _ = save_known_hosts(&known);
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+        *self.result.lock().unwrap() = outcome;
+        Ok(accept)
+    }
+}
+
+fn key_load_needs_passphrase(err: &str) -> bool {
+    let s = err.to_lowercase();
+    s.contains("encrypted")
+        || s.contains("passphrase")
+        || s.contains("pem")
+        || s.contains("kdf")
+        || s.contains("decrypt")
+}
+
+/// Wraps a `PrivateKey` for authentication. RSA keys get SHA-512; everything else uses None.
+fn pkwh(key: PrivateKey) -> Result<PrivateKeyWithHashAlg, String> {
+    let key = Arc::new(key);
+    let hash_alg = if key.algorithm().is_rsa() {
+        Some(HashAlg::Sha512)
+    } else {
+        None
+    };
+    PrivateKeyWithHashAlg::new(key, hash_alg).map_err(|e| e.to_string())
+}
+
+/// Try ssh-agent auth via OpenSSH-for-Windows agent and Pageant in turn.
+/// Returns `Some(true)` if any identity authenticated; `Some(false)` if an agent was
+/// found but no identity authenticated; `None` if no agent was reachable at all.
+async fn try_agent_auth(
+    handle: &mut client::Handle<SshClient>,
+    user: &str,
+) -> Option<bool> {
+    let mut any_agent_seen = false;
+
+    // Try OpenSSH for Windows.
+    let openssh_pipe = r"\\.\pipe\openssh-ssh-agent";
+    if let Ok(mut agent) =
+        russh_keys::agent::client::AgentClient::connect_named_pipe(openssh_pipe).await
+    {
+        any_agent_seen = true;
+        if let Ok(identities) = agent.request_identities().await {
+            tracing::info!(
+                "openssh-ssh-agent: {} identit(y/ies) offered",
+                identities.len()
+            );
+            for id in identities {
+                match handle.authenticate_publickey_with(user, id, &mut agent).await {
+                    Ok(true) => return Some(true),
+                    Ok(false) => continue,
+                    Err(e) => {
+                        tracing::debug!("openssh agent auth attempt: {e}");
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+
+    // Try Pageant.
+    let mut pageant = russh_keys::agent::client::AgentClient::connect_pageant().await;
+    if let Ok(identities) = pageant.request_identities().await {
+        any_agent_seen = true;
+        tracing::info!("pageant: {} identit(y/ies) offered", identities.len());
+        for id in identities {
+            match handle
+                .authenticate_publickey_with(user, id, &mut pageant)
+                .await
+            {
+                Ok(true) => return Some(true),
+                Ok(false) => continue,
+                Err(e) => {
+                    tracing::debug!("pageant auth attempt: {e}");
+                    continue;
+                }
+            }
+        }
+    }
+
+    if any_agent_seen {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+async fn try_authenticate(
+    handle: &mut client::Handle<SshClient>,
+    user: &str,
+    key_path: Option<&str>,
+    key_passphrase: Option<&str>,
+    password: Option<&str>,
+) -> Result<bool, String> {
+    // 1) ssh-agent (OpenSSH agent / Pageant via named pipe).
+    if let Some(true) = try_agent_auth(handle, user).await {
+        return Ok(true);
+    }
+
+    // 2) Explicit key file (with optional passphrase).
+    if let Some(p) = key_path {
+        match russh_keys::load_secret_key(p, key_passphrase) {
+            Ok(key) => {
+                let pkwh = pkwh(key)?;
+                if handle
+                    .authenticate_publickey(user, pkwh)
+                    .await
+                    .map_err(|e| e.to_string())?
+                {
+                    return Ok(true);
+                }
+            }
+            Err(e) => {
+                let s = e.to_string();
+                if key_load_needs_passphrase(&s) {
+                    if key_passphrase.is_none() {
+                        return Err(format!("KEY_PASSPHRASE_REQUIRED:{}", p));
+                    }
+                    return Err(format!("KEY_PASSPHRASE_BAD:{}:{}", p, s));
+                }
+                return Err(format!("load key {p}: {s}"));
+            }
+        }
+    }
+
+    // 3) Default key paths (tried without passphrase; encrypted keys silently skipped).
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|e| e.to_string())?;
+    for name in ["id_ed25519", "id_ecdsa", "id_rsa"] {
+        let p = format!("{}/.ssh/{}", home, name);
+        if !Path::new(&p).exists() {
+            continue;
+        }
+        if let Ok(key) = russh_keys::load_secret_key(&p, None) {
+            if let Ok(pkwh) = pkwh(key) {
+                if handle
+                    .authenticate_publickey(user, pkwh)
+                    .await
+                    .map_err(|e| e.to_string())?
+                {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    // 4) Password (sent to remote, not key passphrase).
+    if let Some(pw) = password {
+        if handle
+            .authenticate_password(user, pw)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+async fn spawn_ssh(
+    state: &AppState,
+    pane_id: String,
+    app: &AppHandle,
+    host: String,
+    user: String,
+    port: u16,
+    key_path: Option<String>,
+    key_passphrase: Option<String>,
+    password: Option<String>,
+    accept_unknown_host: bool,
+    cols: u16,
+    rows: u16,
+) -> Result<String, String> {
+    let config = Arc::new(client::Config::default());
+    let target = format!("{}:{}", host, port);
+    let outcome_arc = Arc::new(Mutex::new(HostCheckOutcome::default()));
+    let sh = SshClient {
+        target: target.clone(),
+        accept_unknown: accept_unknown_host,
+        result: outcome_arc.clone(),
+    };
+
+    let connect_res = client::connect(config, (host.as_str(), port), sh).await;
+    let outcome = outcome_arc.lock().unwrap().clone();
+
+    let mut handle = match connect_res {
+        Ok(h) => h,
+        Err(e) => {
+            if outcome.is_unknown && !outcome.matched {
+                return Err(format!(
+                    "UNKNOWN_HOST:{}:{}:{}",
+                    target, outcome.key_type, outcome.fingerprint
+                ));
+            }
+            if let Some(old) = outcome.mismatch_old {
+                return Err(format!(
+                    "HOST_KEY_MISMATCH:{}:{}:{}:{}",
+                    target, outcome.key_type, old, outcome.fingerprint
+                ));
+            }
+            return Err(format!("connect {target}: {e}"));
+        }
+    };
+
+    let auth_ok = try_authenticate(
+        &mut handle,
+        &user,
+        key_path.as_deref(),
+        key_passphrase.as_deref(),
+        password.as_deref(),
+    )
+    .await?;
+    if !auth_ok {
+        return Err("authentication failed (agent, key, and password all failed)".into());
+    }
+
+    let mut channel = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("channel_open_session: {e}"))?;
+
+    channel
+        .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
+        .await
+        .map_err(|e| format!("request_pty: {e}"))?;
+    channel
+        .request_shell(true)
+        .await
+        .map_err(|e| format!("request_shell: {e}"))?;
+
+    let id = next_session_id();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SshCmd>();
+
+    let id_for_task = id.clone();
+    let pane_for_task = pane_id.clone();
+    let app_for_task = app.clone();
+    let sessions_for_task = state.sessions.clone();
+    let pane_sessions_for_task = state.pane_sessions.clone();
+    tokio::spawn(async move {
+        let mut leftover: Vec<u8> = Vec::new();
+        let mut exit_reason: Option<String> = None;
+        loop {
+            tokio::select! {
+                msg = channel.wait() => {
+                    match msg {
+                        Some(ChannelMsg::Data { data }) => {
+                            emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover);
+                        }
+                        Some(ChannelMsg::ExtendedData { data, ext: _ }) => {
+                            emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover);
+                        }
+                        Some(ChannelMsg::ExitStatus { exit_status }) => {
+                            exit_reason = Some(format!("exit {exit_status}"));
+                        }
+                        Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => {
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                cmd = rx.recv() => {
+                    match cmd {
+                        Some(SshCmd::Data(d)) => {
+                            if channel.data(&d[..]).await.is_err() { break; }
+                        }
+                        Some(SshCmd::Resize(c, r)) => {
+                            let _ = channel.window_change(c, r, 0, 0).await;
+                        }
+                        Some(SshCmd::Kill) | None => {
+                            let _ = channel.close().await;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+        cleanup_session_maps(
+            &sessions_for_task,
+            &pane_sessions_for_task,
+            &pane_for_task,
+            &id_for_task,
+        );
+        emit_exit(&app_for_task, &id_for_task, exit_reason);
+    });
+
+    state
+        .sessions
+        .lock()
+        .unwrap()
+        .insert(id.clone(), Session::Ssh(SshSession { tx }));
+    Ok(id)
+}
+
+pub(crate) fn kill_session_inner(s: &mut Session) {
+    match s {
+        Session::Local(l) => {
+            let _ = l.killer.kill();
+        }
+        Session::Ssh(ssh) => {
+            let _ = ssh.tx.send(SshCmd::Kill);
+        }
+    }
+}
+
+// ─── Workspace mutation commands ─────────────────────────────────────────────
+
+#[tauri::command]
+fn workspaces_load(state: State<'_, AppState>) -> Result<WorkspacesFile, String> {
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn workspace_create(
+    state: State<'_, AppState>,
+    input: CreateInput,
+) -> Result<WorkspacesFile, String> {
+    let ws = Workspace {
+        id: new_workspace_id(),
+        name: input.name,
+        color: input.color,
+        cwd: input.cwd,
+        connection: None,
+        layout: Some(LayoutNode::Pane {
+            pane_id: new_pane_id(),
+            connection: input.connection,
+        }),
+    };
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        file.active_workspace_id = Some(ws.id.clone());
+        file.workspaces.push(ws);
+    }
+    persist(&state)?;
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn workspace_rename(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    name: String,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            ws.name = name;
+        }
+    }
+    persist(&state)?;
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn workspace_delete(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<WorkspacesFile, String> {
+    let panes_to_kill: Vec<String> = {
+        let file = state.workspaces.lock().unwrap();
+        file.workspaces
+            .iter()
+            .find(|w| w.id == workspace_id)
+            .and_then(|w| w.layout.as_ref())
+            .map(|l| {
+                let mut v = Vec::new();
+                collect_panes(l, &mut v);
+                v
+            })
+            .unwrap_or_default()
+    };
+    for pane_id in &panes_to_kill {
+        if let Some(sid) = state.pane_sessions.lock().unwrap().remove(pane_id) {
+            if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+                kill_session_inner(&mut s);
+            }
+        }
+    }
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        file.workspaces.retain(|w| w.id != workspace_id);
+        if file.active_workspace_id.as_deref() == Some(&workspace_id) {
+            file.active_workspace_id = file.workspaces.first().map(|w| w.id.clone());
+        }
+    }
+    persist(&state)?;
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn workspace_set_active(
+    state: State<'_, AppState>,
+    workspace_id: Option<String>,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        file.active_workspace_id = workspace_id;
+    }
+    persist(&state)?;
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn workspace_split(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    pane_id: String,
+    direction: SplitDirection,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            if let Some(layout) = ws.layout.take() {
+                let (new_layout, _) = split_pane_in(layout, &pane_id, direction);
+                ws.layout = Some(new_layout);
+            }
+        }
+    }
+    persist(&state)?;
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn workspace_close_pane(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    pane_id: String,
+) -> Result<WorkspacesFile, String> {
+    let removed_pane: Option<String>;
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        let layout = ws
+            .layout
+            .take()
+            .ok_or_else(|| "no layout".to_string())?;
+        let (new_root, removed) = close_pane_in(layout, &pane_id);
+        ws.layout = new_root;
+        removed_pane = removed;
+    }
+    if let Some(pid) = removed_pane {
+        if let Some(sid) = state.pane_sessions.lock().unwrap().remove(&pid) {
+            if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+                kill_session_inner(&mut s);
+            }
+        }
+    }
+    persist(&state)?;
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn workspace_set_split_ratio(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    split_id: String,
+    ratio: f32,
+) -> Result<(), String> {
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            if let Some(layout) = ws.layout.take() {
+                ws.layout = Some(set_split_ratio_in(layout, &split_id, ratio));
+            }
+        }
+    }
+    persist(&state)?;
+    Ok(())
+}
+
+// ─── Pane connect / disconnect ───────────────────────────────────────────────
+
+#[tauri::command]
+async fn pane_connect(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+    password: Option<String>,
+    key_passphrase: Option<String>,
+    accept_unknown_host: Option<bool>,
+    cols: u16,
+    rows: u16,
+) -> Result<String, String> {
+    // Look up connection from workspaces state.
+    let (conn, cwd) = {
+        let file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        let layout = ws
+            .layout
+            .as_ref()
+            .ok_or_else(|| "no layout".to_string())?;
+        let conn = find_pane_connection(layout, &pane_id)
+            .ok_or_else(|| format!("no pane {pane_id}"))?;
+        (conn, ws.cwd.clone())
+    };
+
+    // Kill any prior session for this pane.
+    if let Some(old_sid) = state.pane_sessions.lock().unwrap().remove(&pane_id) {
+        if let Some(mut s) = state.sessions.lock().unwrap().remove(&old_sid) {
+            kill_session_inner(&mut s);
+        }
+    }
+
+    let session_id = match conn {
+        Connection::Local { shell } => {
+            spawn_local_pty(&state, pane_id.clone(), &app, shell, cwd, cols, rows)?
+        }
+        Connection::Ssh {
+            host,
+            user,
+            port,
+            key_path,
+        } => {
+            spawn_ssh(
+                &state,
+                pane_id.clone(),
+                &app,
+                host,
+                user,
+                port,
+                key_path,
+                key_passphrase,
+                password,
+                accept_unknown_host.unwrap_or(false),
+                cols,
+                rows,
+            )
+            .await?
+        }
+    };
+    state
+        .pane_sessions
+        .lock()
+        .unwrap()
+        .insert(pane_id, session_id.clone());
+    Ok(session_id)
+}
+
+#[tauri::command]
+fn pane_disconnect(state: State<'_, AppState>, pane_id: String) -> Result<(), String> {
+    if let Some(sid) = state.pane_sessions.lock().unwrap().remove(&pane_id) {
+        if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+            kill_session_inner(&mut s);
+        }
+    }
+    Ok(())
+}
+
+// ─── Session-level commands (write/resize) ───────────────────────────────────
+
+pub(crate) fn write_to_session(state: &AppState, session_id: &str, data: &[u8]) -> Result<(), String> {
+    let mut sessions = state.sessions.lock().unwrap();
+    let s = sessions
+        .get_mut(session_id)
+        .ok_or_else(|| format!("no such session {session_id}"))?;
+    match s {
+        Session::Local(l) => {
+            l.writer.write_all(data).map_err(|e| e.to_string())?;
+            l.writer.flush().map_err(|e| e.to_string())?;
+        }
+        Session::Ssh(ssh) => {
+            ssh.tx
+                .send(SshCmd::Data(data.to_vec()))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn pty_write(state: State<'_, AppState>, session_id: String, data: String) -> Result<(), String> {
+    write_to_session(&state, &session_id, data.as_bytes())
+}
+
+#[tauri::command]
+fn notifications_list(state: State<'_, AppState>) -> Vec<NotificationItem> {
+    state.notifications.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn notifications_clear(state: State<'_, AppState>) -> Result<(), String> {
+    state.notifications.lock().unwrap().clear();
+    Ok(())
+}
+
+#[tauri::command]
+fn pane_status_get(state: State<'_, AppState>) -> HashMap<String, String> {
+    state.pane_status.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn pty_resize(
+    state: State<'_, AppState>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let sessions = state.sessions.lock().unwrap();
+    let s = sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("no such session {session_id}"))?;
+    match s {
+        Session::Local(l) => l
+            .master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| e.to_string()),
+        Session::Ssh(ssh) => ssh
+            .tx
+            .send(SshCmd::Resize(cols as u32, rows as u32))
+            .map_err(|e| e.to_string()),
+    }
+}
+
+// ─── Entrypoint ──────────────────────────────────────────────────────────────
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .try_init()
+        .ok();
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .manage(AppState::default())
+        .setup(|app| {
+            let state: State<AppState> = app.state();
+            dlog("─── setup() starting ───");
+            match load_from_disk() {
+                Ok(file) => {
+                    *state.workspaces.lock().unwrap() = file;
+                    *state.load_state.lock().unwrap() = Some(LoadState::Loaded);
+                    dlog("setup: load_state = Loaded");
+                }
+                Err(e) => {
+                    *state.load_state.lock().unwrap() = Some(LoadState::Failed);
+                    dlog(&format!(
+                        "setup: load FAILED: {e} — load_state = Failed (persists will refuse)"
+                    ));
+                    tracing::warn!("workspaces load failed: {e}");
+                }
+            }
+            // Spawn JSON-RPC server on a per-user named pipe.
+            let state_clone: AppState = (*state).clone();
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                rpc_server::run(state_clone, app_handle).await;
+            });
+            dlog(&format!("setup: rpc server spawned on {}", rpc_server::pipe_name()));
+            dlog("─── setup() done ───");
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            workspaces_load,
+            workspace_create,
+            workspace_rename,
+            workspace_delete,
+            workspace_set_active,
+            workspace_split,
+            workspace_close_pane,
+            workspace_set_split_ratio,
+            pane_connect,
+            pane_disconnect,
+            pty_write,
+            pty_resize,
+            notifications_list,
+            notifications_clear,
+            pane_status_get,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

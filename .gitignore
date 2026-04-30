@@ -1,0 +1,38 @@
+# Build artifacts
+target/
+**/*.rs.bk
+src-tauri/target/
+src-tauri/gen/
+src-tauri/WixTools/
+src-tauri/Wix311.exe
+
+# Node
+node_modules/
+dist/
+.vite/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Local config / secrets / debug
+.env
+.env.local
+debug.log
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+id_ecdsa*
+
+# Local user state (these live in %APPDATA% but just in case)
+workspaces.json
+known_hosts.json

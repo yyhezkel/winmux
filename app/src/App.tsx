@@ -11,6 +11,7 @@ import {
   collectPanes,
   describeConnection,
   type Connection,
+  type EnvVar,
   type FeedItem,
   type FeedResolvedEvent,
   type LayoutNode,
@@ -34,6 +35,7 @@ function App() {
     workspaces: [],
   });
   const [showCreate, setShowCreate] = createSignal(false);
+  const [editingWorkspace, setEditingWorkspace] = createSignal<Workspace | null>(null);
   const [activePaneId, setActivePaneId] = createSignal<string | null>(null);
   const [pendingPwFor, setPendingPwFor] = createSignal<string | null>(null);
   const [pendingPassphraseFor, setPendingPassphraseFor] = createSignal<{
@@ -143,12 +145,42 @@ function App() {
     name: string;
     connection: Connection;
     color?: string;
+    setup_command?: string;
+    teardown_command?: string;
+    env?: EnvVar[];
   }) => {
     try {
       const f = await invoke<WorkspacesFile>("workspace_create", { input });
       updateFile(f);
     } catch (e) {
       console.error("workspace_create failed", e);
+    }
+  };
+
+  const handleUpdate = async (
+    id: string,
+    fields: {
+      name?: string;
+      color?: string;
+      cwd?: string;
+      setup_command?: string;
+      teardown_command?: string;
+      env?: EnvVar[];
+    }
+  ) => {
+    try {
+      const f = await invoke<WorkspacesFile>("workspace_update", {
+        workspaceId: id,
+        name: fields.name,
+        color: fields.color,
+        cwd: fields.cwd,
+        setupCommand: fields.setup_command,
+        teardownCommand: fields.teardown_command,
+        env: fields.env,
+      });
+      updateFile(f);
+    } catch (e) {
+      console.error("workspace_update failed", e);
     }
   };
 
@@ -532,7 +564,13 @@ function App() {
         onCreate={() => setShowCreate(true)}
         onAction={(id, action) => {
           if (action === "rename") handleRename(id);
-          else if (action === "delete") void handleDelete(id);
+          else if (action === "edit") {
+            const ws = file().workspaces.find((w) => w.id === id);
+            if (ws) {
+              setEditingWorkspace(ws);
+              setShowCreate(true);
+            }
+          } else if (action === "delete") void handleDelete(id);
           else if (action === "disconnect")
             void handleDisconnectWorkspace(id);
         }}
@@ -621,8 +659,13 @@ function App() {
 
       <CreateWorkspaceModal
         open={showCreate()}
-        onClose={() => setShowCreate(false)}
+        editing={editingWorkspace()}
+        onClose={() => {
+          setShowCreate(false);
+          setEditingWorkspace(null);
+        }}
         onCreate={handleCreate}
+        onUpdate={handleUpdate}
       />
 
       <button

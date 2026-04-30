@@ -8,8 +8,8 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use crate::notes::{self, NoteStatus};
 use crate::{
     collect_panes, decide_feed, find_workspace_for_pane, new_pane_id, new_workspace_id, persist,
-    update_pane_in, write_to_session, AppState, CreateInput, FeedItem, FeedItemState, LayoutNode,
-    NotificationItem, Workspace, NOTIF_COUNTER,
+    update_pane_in, write_to_session, AppState, CreateInput, EnvVar, FeedItem, FeedItemState,
+    LayoutNode, NotificationItem, Workspace, NOTIF_COUNTER,
 };
 
 const FEED_MAX_ITEMS_LIMIT: usize = 50;
@@ -174,6 +174,9 @@ async fn dispatch(
                     title: None,
                     annotation: None,
                 }),
+                setup_command: input.setup_command,
+                teardown_command: input.teardown_command,
+                env: input.env.unwrap_or_default(),
             };
             let cloned = ws.clone();
             {
@@ -184,6 +187,80 @@ async fn dispatch(
             persist(state)?;
             let _ = app.emit("workspaces:changed", ());
             serde_json::to_value(&cloned).map_err(|e| e.to_string())
+        }
+
+        "update-workspace" => {
+            let workspace_id = params
+                .get("workspace_id")
+                .or_else(|| params.get("id"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing workspace_id")?
+                .to_string();
+            let name = params
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let color = params
+                .get("color")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let cwd = params
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let setup_command = params
+                .get("setup_command")
+                .or_else(|| params.get("setup"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let teardown_command = params
+                .get("teardown_command")
+                .or_else(|| params.get("teardown"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let env: Option<Vec<EnvVar>> = params
+                .get("env")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            {
+                let mut file = state.workspaces.lock().unwrap();
+                let ws = file
+                    .workspaces
+                    .iter_mut()
+                    .find(|w| w.id == workspace_id)
+                    .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+                if let Some(n) = name {
+                    if !n.is_empty() {
+                        ws.name = n;
+                    }
+                }
+                if let Some(c) = color {
+                    ws.color = if c.is_empty() { None } else { Some(c) };
+                }
+                if let Some(d) = cwd {
+                    ws.cwd = if d.is_empty() { None } else { Some(d) };
+                }
+                if let Some(s) = setup_command {
+                    ws.setup_command = if s.is_empty() { None } else { Some(s) };
+                }
+                if let Some(t) = teardown_command {
+                    ws.teardown_command = if t.is_empty() { None } else { Some(t) };
+                }
+                if let Some(e) = env {
+                    ws.env = e;
+                }
+            }
+            persist(state)?;
+            let _ = app.emit("workspaces:changed", ());
+            let file = state.workspaces.lock().unwrap();
+            let ws = file
+                .workspaces
+                .iter()
+                .find(|w| w.id == workspace_id)
+                .cloned();
+            match ws {
+                Some(w) => serde_json::to_value(&w).map_err(|e| e.to_string()),
+                None => Ok(json!({ "ok": true })),
+            }
         }
 
         "delete-workspace" => {

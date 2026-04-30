@@ -180,6 +180,12 @@ pub(crate) enum LayoutNode {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct EnvVar {
+    pub(crate) key: String,
+    pub(crate) value: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Workspace {
     pub(crate) id: String,
     pub(crate) name: String,
@@ -192,6 +198,16 @@ pub(crate) struct Workspace {
     pub(crate) connection: Option<Connection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) layout: Option<LayoutNode>,
+    // Phase 7.C: per-workspace shell automation. Sent into the spawned shell after a
+    // small delay (so the shell has finished printing its banner). `env` is exported
+    // first, then `setup_command` runs. `teardown_command` is sent right before
+    // disconnect with a brief grace period.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) setup_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) teardown_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) env: Vec<EnvVar>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -216,6 +232,12 @@ pub(crate) struct CreateInput {
     pub(crate) color: Option<String>,
     #[serde(default)]
     pub(crate) cwd: Option<String>,
+    #[serde(default)]
+    pub(crate) setup_command: Option<String>,
+    #[serde(default)]
+    pub(crate) teardown_command: Option<String>,
+    #[serde(default)]
+    pub(crate) env: Option<Vec<EnvVar>>,
 }
 
 // ─── ID helpers ──────────────────────────────────────────────────────────────
@@ -674,6 +696,99 @@ fn set_split_ratio_in(node: LayoutNode, target: &str, new_ratio: f32) -> LayoutN
 }
 
 // ─── Helpers (PTY events) ────────────────────────────────────────────────────
+
+/// Phase 7.C: shell flavor for env-var syntax + setup-command line ending.
+#[derive(Clone, Copy, Debug)]
+enum ShellKind {
+    PowerShell,
+    Cmd,
+    Posix,
+}
+
+fn detect_shell_kind(cmd: &str) -> ShellKind {
+    let lower = cmd.to_ascii_lowercase();
+    let stem = std::path::Path::new(&lower)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&lower);
+    match stem {
+        "pwsh" | "powershell" => ShellKind::PowerShell,
+        "cmd" => ShellKind::Cmd,
+        _ => ShellKind::Posix,
+    }
+}
+
+fn format_env_line(kind: ShellKind, key: &str, value: &str) -> String {
+    match kind {
+        ShellKind::PowerShell => {
+            // Single-quote in PS doesn't expand variables; double-quote expands.
+            // We use single quotes for predictable behavior.
+            let escaped = value.replace('\'', "''");
+            format!("$env:{} = '{}'", key, escaped)
+        }
+        ShellKind::Cmd => {
+            // cmd's `set` takes raw value; backslash and quotes pass through.
+            // Strip newlines defensively.
+            let one_line = value.replace(['\n', '\r'], " ");
+            format!("set {}={}", key, one_line)
+        }
+        ShellKind::Posix => {
+            // Single-quoted POSIX literal; embedded `'` becomes `'\''`.
+            let escaped = value.replace('\'', "'\\''");
+            format!("export {}='{}'", key, escaped)
+        }
+    }
+}
+
+fn line_ending_for(_kind: ShellKind) -> &'static str {
+    // ConPTY accepts both, but Cmd is happiest with \r and PowerShell with either.
+    // Posix prefers \n; \r\n also works for it.
+    "\r\n"
+}
+
+/// Phase 7.C: after the shell has had a moment to print its banner and prompt,
+/// inject the workspace's `env` exports + `setup_command` as if the user typed them.
+fn schedule_setup_injection(
+    sessions: SessionMap,
+    session_id: String,
+    shell_kind: ShellKind,
+    env: Vec<EnvVar>,
+    setup_command: Option<String>,
+) {
+    let setup = setup_command.filter(|s| !s.is_empty());
+    if env.is_empty() && setup.is_none() {
+        return;
+    }
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let mut bytes: Vec<u8> = Vec::new();
+        let eol = line_ending_for(shell_kind);
+        for v in &env {
+            bytes.extend_from_slice(format_env_line(shell_kind, &v.key, &v.value).as_bytes());
+            bytes.extend_from_slice(eol.as_bytes());
+        }
+        if let Some(s) = setup {
+            bytes.extend_from_slice(s.as_bytes());
+            bytes.extend_from_slice(eol.as_bytes());
+        }
+        if bytes.is_empty() {
+            return;
+        }
+        let mut sessions = sessions.lock().unwrap();
+        if let Some(s) = sessions.get_mut(&session_id) {
+            match s {
+                Session::Local(l) => {
+                    use std::io::Write as _;
+                    let _ = l.writer.write_all(&bytes);
+                    let _ = l.writer.flush();
+                }
+                Session::Ssh(ssh) => {
+                    let _ = ssh.tx.send(SshCmd::Data(bytes));
+                }
+            }
+        }
+    });
+}
 
 fn pick_default_shell(requested: Option<String>) -> String {
     if let Some(s) = requested.filter(|s| !s.is_empty()) {
@@ -1418,6 +1533,9 @@ fn workspace_create(
             title: None,
             annotation: None,
         }),
+        setup_command: input.setup_command,
+        teardown_command: input.teardown_command,
+        env: input.env.unwrap_or_default(),
     };
     {
         let mut file = state.workspaces.lock().unwrap();
@@ -1425,6 +1543,55 @@ fn workspace_create(
         file.workspaces.push(ws);
     }
     persist(&state)?;
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+/// Phase 7.C: edit a workspace's mutable metadata fields. Each field is `Option`:
+/// `None` = don't touch; `Some(...)` = update. For `setup_command`/`teardown_command`/
+/// `cwd`, an empty string is treated as "clear". For `env`, an empty Vec replaces
+/// the whole list with empty.
+#[tauri::command]
+fn workspace_update(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    name: Option<String>,
+    color: Option<String>,
+    cwd: Option<String>,
+    setup_command: Option<String>,
+    teardown_command: Option<String>,
+    env: Option<Vec<EnvVar>>,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        if let Some(n) = name {
+            if !n.is_empty() {
+                ws.name = n;
+            }
+        }
+        if let Some(c) = color {
+            ws.color = if c.is_empty() { None } else { Some(c) };
+        }
+        if let Some(d) = cwd {
+            ws.cwd = if d.is_empty() { None } else { Some(d) };
+        }
+        if let Some(s) = setup_command {
+            ws.setup_command = if s.is_empty() { None } else { Some(s) };
+        }
+        if let Some(t) = teardown_command {
+            ws.teardown_command = if t.is_empty() { None } else { Some(t) };
+        }
+        if let Some(e) = env {
+            ws.env = e;
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
     Ok(state.workspaces.lock().unwrap().clone())
 }
 
@@ -1625,8 +1792,9 @@ async fn pane_connect(
     cols: u16,
     rows: u16,
 ) -> Result<String, String> {
-    // Look up connection from workspaces state.
-    let (conn, cwd) = {
+    // Look up connection from workspaces state. Phase 7.C: also lift `env` and
+    // `setup_command` from the workspace so we can inject them after the shell is up.
+    let (conn, cwd, ws_env, ws_setup) = {
         let file = state.workspaces.lock().unwrap();
         let ws = file
             .workspaces
@@ -1639,7 +1807,18 @@ async fn pane_connect(
             .ok_or_else(|| "no layout".to_string())?;
         let conn = find_pane_connection(layout, &pane_id)
             .ok_or_else(|| format!("no pane {pane_id}"))?;
-        (conn, ws.cwd.clone())
+        (
+            conn,
+            ws.cwd.clone(),
+            ws.env.clone(),
+            ws.setup_command.clone(),
+        )
+    };
+
+    // Resolve shell kind for env-line formatting (need this BEFORE we move `conn`).
+    let shell_kind = match &conn {
+        Connection::Local { shell } => detect_shell_kind(&pick_default_shell(shell.clone())),
+        Connection::Ssh { .. } => ShellKind::Posix,
     };
 
     // Kill any prior session for this pane.
@@ -1681,15 +1860,66 @@ async fn pane_connect(
         .lock()
         .unwrap()
         .insert(pane_id, session_id.clone());
+
+    // Phase 7.C: inject env exports + setup_command after a 500ms grace period.
+    schedule_setup_injection(
+        state.sessions.clone(),
+        session_id.clone(),
+        shell_kind,
+        ws_env,
+        ws_setup,
+    );
+
     Ok(session_id)
 }
 
 #[tauri::command]
-fn pane_disconnect(state: State<'_, AppState>, pane_id: String) -> Result<(), String> {
-    if let Some(sid) = state.pane_sessions.lock().unwrap().remove(&pane_id) {
-        if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
-            kill_session_inner(&mut s);
+async fn pane_disconnect(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<(), String> {
+    let sid = state.pane_sessions.lock().unwrap().remove(&pane_id);
+    let Some(sid) = sid else {
+        return Ok(());
+    };
+
+    // Phase 7.C: if the workspace has a teardown_command, send it and give the
+    // shell ~500ms to run it before we drop the channel.
+    let teardown = {
+        let file = state.workspaces.lock().unwrap();
+        file.workspaces
+            .iter()
+            .find(|w| {
+                w.layout
+                    .as_ref()
+                    .map(|l| find_pane_connection(l, &pane_id).is_some())
+                    .unwrap_or(false)
+            })
+            .and_then(|w| w.teardown_command.clone())
+            .filter(|s| !s.is_empty())
+    };
+    if let Some(t) = teardown {
+        let bytes = format!("{}\r\n", t).into_bytes();
+        {
+            let mut sessions = state.sessions.lock().unwrap();
+            if let Some(s) = sessions.get_mut(&sid) {
+                match s {
+                    Session::Local(l) => {
+                        use std::io::Write as _;
+                        let _ = l.writer.write_all(&bytes);
+                        let _ = l.writer.flush();
+                    }
+                    Session::Ssh(ssh) => {
+                        let _ = ssh.tx.send(SshCmd::Data(bytes));
+                    }
+                }
+            }
         }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+        kill_session_inner(&mut s);
     }
     Ok(())
 }
@@ -1866,6 +2096,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             workspaces_load,
             workspace_create,
+            workspace_update,
             workspace_rename,
             workspace_delete,
             workspace_set_active,

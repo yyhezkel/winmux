@@ -19,7 +19,7 @@ interface Props {
   connectedIds: Set<string>;
   onActivate: (id: string) => void;
   onCreate: () => void;
-  onAction: (id: string, action: "rename" | "delete" | "disconnect") => void;
+  onAction: (id: string, action: "rename" | "edit" | "delete" | "disconnect") => void;
 }
 
 export function Sidebar(p: Props) {
@@ -65,6 +65,9 @@ export function Sidebar(p: Props) {
                 >
                   <button onClick={() => p.onAction(w.id, "rename")}>
                     Rename
+                  </button>
+                  <button onClick={() => p.onAction(w.id, "edit")}>
+                    Edit…
                   </button>
                   <Show when={p.connectedIds.has(w.id)}>
                     <button onClick={() => p.onAction(w.id, "disconnect")}>

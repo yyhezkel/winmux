@@ -525,6 +525,94 @@ button.big { padding: 10px 24px; font-size: 14px; }
   margin-top: 16px;
 }
 
+.modal-sep {
+  border: 0;
+  border-top: 1px solid #2a3340;
+  margin: 14px 0 12px;
+}
+
+.modal label.modal-textarea-label {
+  grid-template-columns: 90px 1fr;
+  align-items: start;
+}
+.modal-textarea-label textarea {
+  background: #0b0d10;
+  color: #e6e6e6;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace;
+  outline: none;
+  resize: vertical;
+  min-height: 36px;
+}
+.modal-textarea-label textarea:focus { border-color: #4a90e2; }
+
+.modal input:disabled,
+.modal select:disabled,
+.modal-textarea-label textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.env-editor {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.env-editor-head {
+  display: contents;
+}
+.env-editor-head > span {
+  color: #8aa3c2;
+  align-self: center;
+}
+.env-editor-head .env-add {
+  justify-self: start;
+  background: #22303d;
+  color: #cfe1ff;
+  border: 1px solid #34465a;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.env-editor-head .env-add:hover { background: #2c3d4d; }
+.env-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 14px 1fr 24px;
+  gap: 6px;
+  align-items: center;
+}
+.env-row input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.env-row .env-eq {
+  color: #6b7682;
+  text-align: center;
+}
+.env-row .env-remove {
+  background: transparent;
+  color: #b06060;
+  border: 1px solid #3a2828;
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.env-row .env-remove:hover {
+  background: #3a2828;
+  color: #ff8080;
+}
+
 /* ─── Phase 6.5: agent feed cards (top-right floating stack) ─── */
 
 .feed-panel {

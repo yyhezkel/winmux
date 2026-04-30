@@ -60,6 +60,38 @@ enum Cmd {
         cwd: Option<String>,
         #[arg(long)]
         color: Option<String>,
+        /// Phase 7.C: command run after the shell prompt is ready.
+        #[arg(long)]
+        setup: Option<String>,
+        /// Phase 7.C: command sent right before disconnect.
+        #[arg(long)]
+        teardown: Option<String>,
+        /// Phase 7.C: env var (KEY=VALUE). Repeat for multiple.
+        #[arg(long = "env")]
+        env: Vec<String>,
+    },
+
+    /// Update an existing workspace's editable fields. Phase 7.C.
+    UpdateWorkspace {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        color: Option<String>,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        setup: Option<String>,
+        #[arg(long)]
+        teardown: Option<String>,
+        /// Repeat for each var. Passing --env without any clears all.
+        #[arg(long = "env")]
+        env: Vec<String>,
+        /// Force-replace env even if no --env flags given (default behavior is
+        /// "leave env alone if no --env flag was passed").
+        #[arg(long)]
+        clear_env: bool,
     },
     DeleteWorkspace {
         #[arg(long)]
@@ -464,6 +496,22 @@ fn derive_hook_summary(_subcommand: &str, payload: &Value) -> String {
     }
 }
 
+/// Parse `KEY=VALUE` repeats into the JSON shape the backend expects.
+/// Errors out if any entry has no `=`.
+fn parse_env_flags(flags: &[String]) -> Result<Vec<Value>, String> {
+    let mut out = Vec::with_capacity(flags.len());
+    for f in flags {
+        let (k, v) = f
+            .split_once('=')
+            .ok_or_else(|| format!("--env argument {:?} is missing '='", f))?;
+        if k.is_empty() {
+            return Err(format!("--env argument {:?} has empty key", f));
+        }
+        out.push(json!({ "key": k, "value": v }));
+    }
+    Ok(out)
+}
+
 fn build_connection(
     type_: &str,
     shell: Option<String>,
@@ -505,6 +553,9 @@ async fn main() -> ExitCode {
             key_path,
             cwd,
             color,
+            setup,
+            teardown,
+            env,
         } => {
             let conn = match build_connection(
                 r#type,
@@ -520,6 +571,13 @@ async fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             };
+            let env_pairs = match parse_env_flags(env) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    return ExitCode::from(2);
+                }
+            };
             rpc_call(
                 "new-workspace",
                 json!({
@@ -527,9 +585,51 @@ async fn main() -> ExitCode {
                     "connection": conn,
                     "cwd": cwd,
                     "color": color,
+                    "setup_command": setup,
+                    "teardown_command": teardown,
+                    "env": env_pairs,
                 }),
             )
             .await
+        }
+        Cmd::UpdateWorkspace {
+            id,
+            name,
+            color,
+            cwd,
+            setup,
+            teardown,
+            env,
+            clear_env,
+        } => {
+            let mut params = json!({ "workspace_id": id });
+            if let Some(v) = name {
+                params["name"] = json!(v);
+            }
+            if let Some(v) = color {
+                params["color"] = json!(v);
+            }
+            if let Some(v) = cwd {
+                params["cwd"] = json!(v);
+            }
+            if let Some(v) = setup {
+                params["setup_command"] = json!(v);
+            }
+            if let Some(v) = teardown {
+                params["teardown_command"] = json!(v);
+            }
+            // env: only send if user passed --env or --clear-env.
+            if !env.is_empty() || *clear_env {
+                let env_pairs = match parse_env_flags(env) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        return ExitCode::from(2);
+                    }
+                };
+                params["env"] = json!(env_pairs);
+            }
+            rpc_call("update-workspace", params).await
         }
         Cmd::DeleteWorkspace { id } => rpc_call("delete-workspace", json!({ "id": id })).await,
         Cmd::Send { pane, data } => {

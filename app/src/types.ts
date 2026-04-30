@@ -21,6 +21,8 @@ export type LayoutNode =
       ratio: number;
     };
 
+export type EnvVar = { key: string; value: string };
+
 export type Workspace = {
   id: string;
   name: string;
@@ -29,6 +31,10 @@ export type Workspace = {
   // Legacy field, only present on disk during a migration window.
   connection?: Connection;
   layout?: LayoutNode;
+  // Phase 7.C
+  setup_command?: string;
+  teardown_command?: string;
+  env?: EnvVar[];
 };
 
 export type WorkspacesFile = {

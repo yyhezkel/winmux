@@ -259,6 +259,63 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.pane-title {
+  color: #c8d3e0;
+  font-size: 11px;
+  font-style: italic;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-meta-editor {
+  background: #11151a;
+  border-bottom: 1px solid #1f2530;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pane-meta-title,
+.pane-meta-annot {
+  background: #0b0d10;
+  color: #e6e6e6;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+}
+.pane-meta-title:focus,
+.pane-meta-annot:focus {
+  border-color: #4a90e2;
+}
+.pane-meta-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pane-meta-hint {
+  color: #6b7682;
+  font-size: 10px;
+  font-family: "Cascadia Mono", monospace;
+  margin-left: auto;
+}
+
+.pane-annotation-bar {
+  background: #14181d;
+  border-bottom: 1px solid #1f2530;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: #c8d3e0;
+  font-family: "Cascadia Mono", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .pane-btn {
   background: transparent;
   border: none;

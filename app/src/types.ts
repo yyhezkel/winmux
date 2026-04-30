@@ -5,7 +5,13 @@ export type Connection =
 export type SplitDirection = "horizontal" | "vertical";
 
 export type LayoutNode =
-  | { kind: "pane"; pane_id: string; connection: Connection }
+  | {
+      kind: "pane";
+      pane_id: string;
+      connection: Connection;
+      title?: string;
+      annotation?: string;
+    }
   | {
       kind: "split";
       split_id: string;

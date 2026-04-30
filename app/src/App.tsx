@@ -564,6 +564,28 @@ function App() {
               onSplit={splitPane}
               onClose={closePane}
               onDisconnect={disconnectPane}
+              onSetTitle={(pid, title) => {
+                const ws = activeWs();
+                if (!ws) return;
+                invoke<WorkspacesFile>("pane_set_title", {
+                  workspaceId: ws.id,
+                  paneId: pid,
+                  title: title.trim() === "" ? null : title,
+                })
+                  .then((f) => updateFile(f))
+                  .catch((e) => console.error("pane_set_title failed", e));
+              }}
+              onSetAnnotation={(pid, annotation) => {
+                const ws = activeWs();
+                if (!ws) return;
+                invoke<WorkspacesFile>("pane_set_annotation", {
+                  workspaceId: ws.id,
+                  paneId: pid,
+                  annotation: annotation.trim() === "" ? null : annotation,
+                })
+                  .then((f) => updateFile(f))
+                  .catch((e) => console.error("pane_set_annotation failed", e));
+              }}
               onRatioDrag={(sid, r) => setRatio(sid, r, false)}
               onRatioCommit={(sid, r) => setRatio(sid, r, true)}
             />

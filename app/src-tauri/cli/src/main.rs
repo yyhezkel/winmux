@@ -95,6 +95,23 @@ enum Cmd {
         #[arg(long)]
         text: String,
     },
+
+    /// Set a persistent title on a pane (Phase 7.A). Pass an empty string to clear.
+    SetPaneTitle {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        title: String,
+    },
+
+    /// Set a persistent free-text annotation on a pane (Phase 7.A). Empty clears.
+    SetPaneAnnotation {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        annotation: String,
+    },
+
     /// Stub for Claude Code agent hooks: reads JSON from stdin, fires a notify.
     ClaudeHook {
         subcommand: String,
@@ -484,6 +501,20 @@ async fn main() -> ExitCode {
         }
         Cmd::SetStatus { pane, text } => {
             rpc_call("set-status", json!({ "pane_id": pane, "text": text })).await
+        }
+        Cmd::SetPaneTitle { pane, title } => {
+            rpc_call(
+                "set-pane-title",
+                json!({ "pane_id": pane, "title": title }),
+            )
+            .await
+        }
+        Cmd::SetPaneAnnotation { pane, annotation } => {
+            rpc_call(
+                "set-pane-annotation",
+                json!({ "pane_id": pane, "annotation": annotation }),
+            )
+            .await
         }
         Cmd::ClaudeHook { subcommand } => {
             let mut buf = String::new();

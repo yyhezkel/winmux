@@ -25,6 +25,8 @@ interface Props {
   onSplit: (paneId: string, direction: SplitDirection) => void;
   onClose: (paneId: string) => void;
   onDisconnect: (paneId: string) => void;
+  onSetTitle: (paneId: string, title: string) => void;
+  onSetAnnotation: (paneId: string, annotation: string) => void;
   onRatioDrag: (splitId: string, ratio: number) => void;
   onRatioCommit: (splitId: string, ratio: number) => void;
 }
@@ -63,6 +65,8 @@ export function LayoutView(p: Props) {
           onSplit={p.onSplit}
           onClose={p.onClose}
           onDisconnect={p.onDisconnect}
+          onSetTitle={p.onSetTitle}
+          onSetAnnotation={p.onSetAnnotation}
         />
       }
     >

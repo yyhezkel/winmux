@@ -6,9 +6,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
 use crate::{
-    collect_panes, decide_feed, new_pane_id, new_workspace_id, persist, write_to_session,
-    AppState, CreateInput, FeedItem, FeedItemState, LayoutNode, NotificationItem, Workspace,
-    NOTIF_COUNTER,
+    collect_panes, decide_feed, find_workspace_for_pane, new_pane_id, new_workspace_id, persist,
+    update_pane_in, write_to_session, AppState, CreateInput, FeedItem, FeedItemState, LayoutNode,
+    NotificationItem, Workspace, NOTIF_COUNTER,
 };
 
 const FEED_MAX_ITEMS_LIMIT: usize = 50;
@@ -170,6 +170,8 @@ async fn dispatch(
                 layout: Some(LayoutNode::Pane {
                     pane_id: new_pane_id(),
                     connection: input.connection,
+                    title: None,
+                    annotation: None,
                 }),
             };
             let cloned = ws.clone();
@@ -316,6 +318,68 @@ async fn dispatch(
                 })),
                 None => Ok(Value::Null),
             }
+        }
+
+        "set-pane-title" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            // Empty string = clear; missing key = clear; non-empty = set.
+            let title = params
+                .get("title")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .filter(|s| !s.is_empty());
+            let workspace_id = {
+                let file = state.workspaces.lock().unwrap();
+                find_workspace_for_pane(&file, &pane_id)
+                    .ok_or_else(|| format!("no pane {pane_id}"))?
+            };
+            {
+                let mut file = state.workspaces.lock().unwrap();
+                if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+                    if let Some(layout) = ws.layout.take() {
+                        ws.layout = Some(update_pane_in(layout, &pane_id, Some(title), None));
+                    }
+                }
+            }
+            persist(state)?;
+            let _ = app.emit("workspaces:changed", ());
+            Ok(json!({ "ok": true }))
+        }
+
+        "set-pane-annotation" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let annotation = params
+                .get("annotation")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .filter(|s| !s.is_empty());
+            let workspace_id = {
+                let file = state.workspaces.lock().unwrap();
+                find_workspace_for_pane(&file, &pane_id)
+                    .ok_or_else(|| format!("no pane {pane_id}"))?
+            };
+            {
+                let mut file = state.workspaces.lock().unwrap();
+                if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+                    if let Some(layout) = ws.layout.take() {
+                        ws.layout =
+                            Some(update_pane_in(layout, &pane_id, None, Some(annotation)));
+                    }
+                }
+            }
+            persist(state)?;
+            let _ = app.emit("workspaces:changed", ());
+            Ok(json!({ "ok": true }))
         }
 
         "set-status" => {

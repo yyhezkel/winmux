@@ -28,6 +28,8 @@ interface Props {
   pendingHostTrust: HostTrustPending | null;
   status: { msg: string; err: boolean } | undefined;
   statusText?: string;
+  onSetTitle: (paneId: string, title: string) => void;
+  onSetAnnotation: (paneId: string, annotation: string) => void;
   ensureTerm: (paneId: string) => TerminalInstance;
   onFocus: (paneId: string) => void;
   onConnect: (paneId: string, opts?: ConnectOpts) => void;
@@ -41,6 +43,25 @@ export function PaneView(p: Props) {
   let ti: TerminalInstance | null = null;
   const [pwInput, setPwInput] = createSignal("");
   const [passInput, setPassInput] = createSignal("");
+  // Phase 7.A: edit mode for title/annotation.
+  const [editingMeta, setEditingMeta] = createSignal(false);
+  const [titleDraft, setTitleDraft] = createSignal("");
+  const [annotDraft, setAnnotDraft] = createSignal("");
+  const [showAnnot, setShowAnnot] = createSignal(false);
+  const openMeta = () => {
+    setTitleDraft(p.pane.title ?? "");
+    setAnnotDraft(p.pane.annotation ?? "");
+    setEditingMeta(true);
+  };
+  const saveMeta = () => {
+    const newTitle = titleDraft();
+    const newAnnot = annotDraft();
+    if ((p.pane.title ?? "") !== newTitle)
+      p.onSetTitle(p.pane.pane_id, newTitle);
+    if ((p.pane.annotation ?? "") !== newAnnot)
+      p.onSetAnnotation(p.pane.pane_id, newAnnot);
+    setEditingMeta(false);
+  };
 
   onMount(() => {
     ti = p.ensureTerm(p.pane.pane_id);
@@ -74,9 +95,34 @@ export function PaneView(p: Props) {
     >
       <div class="pane-header">
         <span class="pane-conn">{describeConnection(p.pane.connection)}</span>
+        <Show when={p.pane.title}>
+          <span class="pane-title" title={p.pane.title!}>· {p.pane.title}</span>
+        </Show>
+        <Show when={p.pane.annotation}>
+          <button
+            class="pane-btn"
+            title="Show annotation"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowAnnot(!showAnnot());
+            }}
+          >
+            ⓘ
+          </button>
+        </Show>
         <Show when={p.statusText}>
           <span class="pane-status-text">{p.statusText}</span>
         </Show>
+        <button
+          class="pane-btn"
+          title="Edit title / annotation"
+          onClick={(e) => {
+            e.stopPropagation();
+            openMeta();
+          }}
+        >
+          ✎
+        </button>
         <Show when={p.isConnected}>
           <button
             class="pane-btn"
@@ -90,6 +136,52 @@ export function PaneView(p: Props) {
         <button class="pane-btn" title="Split down (Ctrl+Shift+E)" onClick={() => p.onSplit(p.pane.pane_id, "vertical")}>↕</button>
         <button class="pane-btn pane-close" title="Close pane (Ctrl+Shift+W)" onClick={() => p.onClose(p.pane.pane_id)}>×</button>
       </div>
+      <Show when={editingMeta()}>
+        <div class="pane-meta-editor" onMouseDown={(e) => e.stopPropagation()}>
+          <input
+            class="pane-meta-title"
+            placeholder="title (e.g. trying to find the X bug)"
+            maxlength="200"
+            value={titleDraft()}
+            onInput={(e) => setTitleDraft(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                saveMeta();
+              } else if (e.key === "Escape") {
+                setEditingMeta(false);
+              }
+            }}
+          />
+          <textarea
+            class="pane-meta-annot"
+            placeholder="annotation (longer free text — context, intent, links)"
+            rows="3"
+            value={annotDraft()}
+            onInput={(e) => setAnnotDraft(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                saveMeta();
+              } else if (e.key === "Escape") {
+                setEditingMeta(false);
+              }
+            }}
+          />
+          <div class="pane-meta-actions">
+            <button class="primary" onClick={saveMeta}>
+              Save
+            </button>
+            <button onClick={() => setEditingMeta(false)}>Cancel</button>
+            <span class="pane-meta-hint">
+              Enter to save title; Ctrl+Enter to save from annotation; Esc to cancel
+            </span>
+          </div>
+        </div>
+      </Show>
+      <Show when={showAnnot() && p.pane.annotation}>
+        <div class="pane-annotation-bar">{p.pane.annotation}</div>
+      </Show>
       <div class="pane-body">
         <Show when={!p.isConnected}>
           <div class="pane-connect">

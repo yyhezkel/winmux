@@ -160,6 +160,13 @@ pub(crate) enum LayoutNode {
     Pane {
         pane_id: String,
         connection: Connection,
+        // Phase 7.A: optional human-readable annotations on each leaf. Both fields
+        // serialize-skip when None so existing workspaces.json files round-trip
+        // unchanged until the user edits one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        annotation: Option<String>,
     },
     Split {
         split_id: String,
@@ -342,6 +349,8 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
             ws.layout = Some(LayoutNode::Pane {
                 pane_id: new_pane_id(),
                 connection: conn,
+                title: None,
+                annotation: None,
             });
             migrated = true;
         }
@@ -383,7 +392,9 @@ pub(crate) fn persist(state: &AppState) -> Result<(), String> {
 
 pub(crate) fn find_pane_connection(node: &LayoutNode, target: &str) -> Option<Connection> {
     match node {
-        LayoutNode::Pane { pane_id, connection } if pane_id == target => Some(connection.clone()),
+        LayoutNode::Pane {
+            pane_id, connection, ..
+        } if pane_id == target => Some(connection.clone()),
         LayoutNode::Pane { .. } => None,
         LayoutNode::Split { first, second, .. } => {
             find_pane_connection(first, target).or_else(|| find_pane_connection(second, target))
@@ -403,13 +414,25 @@ pub(crate) fn collect_panes(node: &LayoutNode, out: &mut Vec<String>) {
 
 fn split_pane_in(node: LayoutNode, target: &str, dir: SplitDirection) -> (LayoutNode, bool) {
     match node {
-        LayoutNode::Pane { pane_id, connection } => {
+        LayoutNode::Pane {
+            pane_id,
+            connection,
+            title,
+            annotation,
+        } => {
             if pane_id == target {
                 let new_pane = LayoutNode::Pane {
                     pane_id: new_pane_id(),
                     connection: connection.clone(),
+                    title: None,
+                    annotation: None,
                 };
-                let original = LayoutNode::Pane { pane_id, connection };
+                let original = LayoutNode::Pane {
+                    pane_id,
+                    connection,
+                    title,
+                    annotation,
+                };
                 (
                     LayoutNode::Split {
                         split_id: new_split_id(),
@@ -421,7 +444,15 @@ fn split_pane_in(node: LayoutNode, target: &str, dir: SplitDirection) -> (Layout
                     true,
                 )
             } else {
-                (LayoutNode::Pane { pane_id, connection }, false)
+                (
+                    LayoutNode::Pane {
+                        pane_id,
+                        connection,
+                        title,
+                        annotation,
+                    },
+                    false,
+                )
             }
         }
         LayoutNode::Split {
@@ -464,13 +495,23 @@ fn split_pane_in(node: LayoutNode, target: &str, dir: SplitDirection) -> (Layout
 /// should ignore the request; can't close last pane).
 fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<String>) {
     match node {
-        LayoutNode::Pane { pane_id, connection } => {
-            if pane_id == target {
-                // Last pane — can't remove; return unchanged.
-                (Some(LayoutNode::Pane { pane_id, connection }), None)
-            } else {
-                (Some(LayoutNode::Pane { pane_id, connection }), None)
-            }
+        LayoutNode::Pane {
+            pane_id,
+            connection,
+            title,
+            annotation,
+        } => {
+            // Last pane — can't remove; return unchanged whether or not target matches.
+            let _ = pane_id == target;
+            (
+                Some(LayoutNode::Pane {
+                    pane_id,
+                    connection,
+                    title,
+                    annotation,
+                }),
+                None,
+            )
         }
         LayoutNode::Split {
             split_id,
@@ -521,6 +562,77 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
             )
         }
     }
+}
+
+/// Phase 7.A: update title and/or annotation on a pane leaf. Each `Option<Option<…>>`
+/// arg has three states: `None` = leave unchanged, `Some(None)` = clear,
+/// `Some(Some(value))` = set.
+pub(crate) fn update_pane_in(
+    node: LayoutNode,
+    target: &str,
+    new_title: Option<Option<String>>,
+    new_annotation: Option<Option<String>>,
+) -> LayoutNode {
+    match node {
+        LayoutNode::Pane {
+            pane_id,
+            connection,
+            title,
+            annotation,
+        } => {
+            if pane_id == target {
+                LayoutNode::Pane {
+                    pane_id,
+                    connection,
+                    title: new_title.unwrap_or(title),
+                    annotation: new_annotation.unwrap_or(annotation),
+                }
+            } else {
+                LayoutNode::Pane {
+                    pane_id,
+                    connection,
+                    title,
+                    annotation,
+                }
+            }
+        }
+        LayoutNode::Split {
+            split_id,
+            direction,
+            first,
+            second,
+            ratio,
+        } => LayoutNode::Split {
+            split_id,
+            direction,
+            first: Box::new(update_pane_in(
+                *first,
+                target,
+                new_title.clone(),
+                new_annotation.clone(),
+            )),
+            second: Box::new(update_pane_in(
+                *second,
+                target,
+                new_title,
+                new_annotation,
+            )),
+            ratio,
+        },
+    }
+}
+
+/// Find the workspace_id whose layout contains the given pane_id. Used by RPC
+/// callers (CLI on remote) that know only the pane_id.
+pub(crate) fn find_workspace_for_pane(file: &WorkspacesFile, pane_id: &str) -> Option<String> {
+    for ws in &file.workspaces {
+        if let Some(layout) = &ws.layout {
+            if find_pane_connection(layout, pane_id).is_some() {
+                return Some(ws.id.clone());
+            }
+        }
+    }
+    None
 }
 
 fn set_split_ratio_in(node: LayoutNode, target: &str, new_ratio: f32) -> LayoutNode {
@@ -1296,6 +1408,8 @@ fn workspace_create(
         layout: Some(LayoutNode::Pane {
             pane_id: new_pane_id(),
             connection: input.connection,
+            title: None,
+            annotation: None,
         }),
     };
     {
@@ -1442,6 +1556,52 @@ fn workspace_set_split_ratio(
     }
     persist(&state)?;
     Ok(())
+}
+
+// ─── Pane metadata (title / annotation) ─────────────────────────────────────
+
+#[tauri::command]
+fn pane_set_title(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+    title: Option<String>,
+) -> Result<WorkspacesFile, String> {
+    let normalized = title.filter(|s| !s.is_empty());
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            if let Some(layout) = ws.layout.take() {
+                ws.layout = Some(update_pane_in(layout, &pane_id, Some(normalized), None));
+            }
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn pane_set_annotation(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+    annotation: Option<String>,
+) -> Result<WorkspacesFile, String> {
+    let normalized = annotation.filter(|s| !s.is_empty());
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            if let Some(layout) = ws.layout.take() {
+                ws.layout = Some(update_pane_in(layout, &pane_id, None, Some(normalized)));
+            }
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(state.workspaces.lock().unwrap().clone())
 }
 
 // ─── Pane connect / disconnect ───────────────────────────────────────────────
@@ -1696,6 +1856,8 @@ pub fn run() {
             workspace_set_split_ratio,
             pane_connect,
             pane_disconnect,
+            pane_set_title,
+            pane_set_annotation,
             pty_write,
             pty_resize,
             notifications_list,

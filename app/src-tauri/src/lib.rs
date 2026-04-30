@@ -1,5 +1,6 @@
 mod remote_bootstrap;
 mod rpc_server;
+mod tunnel;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -736,6 +737,9 @@ pub(crate) struct SshClient {
     target: String,
     accept_unknown: bool,
     result: Arc<Mutex<HostCheckOutcome>>,
+    /// If set, the handler accepts forwarded-tcpip channels and bridges them to the
+    /// local Named Pipe RPC server after validating this token on the first line.
+    tunnel_token: Option<Arc<String>>,
 }
 
 #[async_trait::async_trait]
@@ -807,6 +811,25 @@ impl client::Handler for SshClient {
         };
         *self.result.lock().unwrap() = outcome;
         Ok(accept)
+    }
+
+    /// Phase 6.3: when the server forwards a connection back to us (via reverse
+    /// tunnel `tcpip-forward`), bridge it to the local Named Pipe RPC server.
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<russh::client::Msg>,
+        _connected_address: &str,
+        _connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut russh::client::Session,
+    ) -> Result<(), Self::Error> {
+        if let Some(token) = self.tunnel_token.clone() {
+            tunnel::spawn_bridge(channel, token);
+        } else {
+            tracing::warn!("forwarded-tcpip channel arrived but no tunnel_token set; dropping");
+        }
+        Ok(())
     }
 }
 
@@ -1015,6 +1038,29 @@ async fn try_authenticate(
     Ok(false)
 }
 
+/// Run `echo $HOME` over a fresh exec channel. Returns (stdout, exit_code).
+async fn remote_get_home(
+    handle: &mut client::Handle<SshClient>,
+) -> Result<(String, i32), String> {
+    let mut chan = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| e.to_string())?;
+    chan.exec(true, "echo $HOME").await.map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    let mut code: i32 = 0;
+    loop {
+        match chan.wait().await {
+            Some(ChannelMsg::Data { data }) => out.extend_from_slice(&data[..]),
+            Some(ChannelMsg::ExitStatus { exit_status }) => code = exit_status as i32,
+            Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => break,
+            _ => {}
+        }
+    }
+    let _ = chan.close().await;
+    Ok((String::from_utf8_lossy(&out).to_string(), code))
+}
+
 async fn spawn_ssh(
     state: &AppState,
     pane_id: String,
@@ -1032,10 +1078,12 @@ async fn spawn_ssh(
     let config = Arc::new(client::Config::default());
     let target = format!("{}:{}", host, port);
     let outcome_arc = Arc::new(Mutex::new(HostCheckOutcome::default()));
+    let token = Arc::new(tunnel::generate_token());
     let sh = SshClient {
         target: target.clone(),
         accept_unknown: accept_unknown_host,
         result: outcome_arc.clone(),
+        tunnel_token: Some(token.clone()),
     };
 
     let connect_res = client::connect(config, (host.as_str(), port), sh).await;
@@ -1102,10 +1150,60 @@ async fn spawn_ssh(
         }
     }
 
+    // Phase 6.3: ask server to forward a port back to us. With port=0 the server
+    // picks a free one and returns it. Forwarded channels arrive in our Handler's
+    // `server_channel_open_forwarded_tcpip` and get bridged to the local pipe.
+    let remote_port = match handle.tcpip_forward("127.0.0.1", 0).await {
+        Ok(p) => {
+            dlog(&format!("tunnel: tcpip_forward got remote port {p}"));
+            p
+        }
+        Err(e) => {
+            dlog(&format!("tunnel: tcpip_forward failed: {e}"));
+            tracing::warn!("tcpip_forward failed: {e}");
+            0
+        }
+    };
+
+    if remote_port != 0 {
+        // Best-effort: write the env file so the CLI can dial back even if sshd
+        // refuses our `set_env` requests on the shell channel.
+        let (home_out, _) = match remote_get_home(&mut handle).await {
+            Ok(v) => v,
+            Err(e) => {
+                dlog(&format!("tunnel: skip env-file write — couldn't read $HOME: {e}"));
+                (String::new(), 1)
+            }
+        };
+        let home = home_out.trim();
+        if !home.is_empty() {
+            let socket_addr = format!("127.0.0.1:{}", remote_port);
+            if let Err(e) =
+                tunnel::write_remote_env_file(&mut handle, home, &socket_addr, &token, &pane_id)
+                    .await
+            {
+                dlog(&format!("tunnel: env-file write failed: {e}"));
+            }
+        }
+    }
+
     let mut channel = handle
         .channel_open_session()
         .await
         .map_err(|e| format!("channel_open_session: {e}"))?;
+
+    // Best-effort: try to set env vars on the shell. sshd's AcceptEnv may filter; if so,
+    // the env-file fallback covers it.
+    if remote_port != 0 {
+        let socket_addr = format!("127.0.0.1:{}", remote_port);
+        let _ = channel.set_env(false, "WINMUX_SOCKET_ADDR", socket_addr).await;
+        let _ = channel
+            .set_env(false, "WINMUX_TUNNEL_TOKEN", token.as_str().to_string())
+            .await;
+        let _ = channel
+            .set_env(false, "WINMUX_PANE_ID", pane_id.clone())
+            .await;
+    }
 
     channel
         .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])

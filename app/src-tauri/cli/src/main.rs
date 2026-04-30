@@ -108,13 +108,47 @@ fn default_pipe_name() -> String {
     format!(r"\\.\pipe\winmux-{}", user)
 }
 
+/// Load env vars from `$HOME/.winmux/run/last.env` if the relevant ones aren't already set.
+/// Phase 6.3: written by the Windows app for each SSH workspace as a fallback for
+/// sshd configurations that strip per-channel env vars.
+fn load_fallback_env_file() {
+    if std::env::var("WINMUX_SOCKET_ADDR").is_ok() {
+        return;
+    }
+    let home = match std::env::var_os("HOME") {
+        Some(h) => h,
+        None => return,
+    };
+    let path = std::path::Path::new(&home).join(".winmux/run/last.env");
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            let k = k.trim();
+            let v = v.trim();
+            if std::env::var_os(k).is_none() {
+                std::env::set_var(k, v);
+            }
+        }
+    }
+}
+
 async fn rpc_call(method: &str, params: Value) -> Result<Value, String> {
+    load_fallback_env_file();
+
     // Prefer TCP if WINMUX_SOCKET_ADDR is set (works on any OS, including remote tunnels).
     if let Ok(addr) = std::env::var("WINMUX_SOCKET_ADDR") {
         let stream = tokio::net::TcpStream::connect(&addr)
             .await
             .map_err(|e| format!("connect tcp {}: {}", addr, e))?;
-        return rpc_via(stream, method, params).await;
+        let token = std::env::var("WINMUX_TUNNEL_TOKEN").ok();
+        return rpc_via(stream, method, params, token.as_deref()).await;
     }
 
     // Otherwise on Windows, use a named pipe.
@@ -129,7 +163,7 @@ async fn rpc_call(method: &str, params: Value) -> Result<Value, String> {
                     name, e
                 )
             })?;
-        return rpc_via(pipe, method, params).await;
+        return rpc_via(pipe, method, params, None).await;
     }
 
     #[cfg(not(windows))]
@@ -138,11 +172,26 @@ async fn rpc_call(method: &str, params: Value) -> Result<Value, String> {
     }
 }
 
-async fn rpc_via<S>(stream: S, method: &str, params: Value) -> Result<Value, String>
+async fn rpc_via<S>(
+    stream: S,
+    method: &str,
+    params: Value,
+    token: Option<&str>,
+) -> Result<Value, String>
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
 {
     let (reader, mut writer) = tokio::io::split(stream);
+
+    // Phase 6.3: TCP transport requires a token preamble line before the JSON-RPC.
+    if let Some(t) = token {
+        let preamble = format!("{}\n", t);
+        writer
+            .write_all(preamble.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
     let req = json!({
         "jsonrpc": "2.0",
         "id": 1,

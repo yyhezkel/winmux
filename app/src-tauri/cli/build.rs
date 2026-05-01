@@ -1,12 +1,4 @@
 fn main() {
-    emit_build_metadata();
-    tauri_build::build()
-}
-
-// Phase 8.E: emit `WINMUX_GIT_HASH` and `WINMUX_BUILD_TIME` so the dev
-// introspection RPC can show what's running. Falls back to "unknown" if git
-// isn't available (e.g. building from a tarball).
-fn emit_build_metadata() {
     let hash = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
@@ -24,6 +16,6 @@ fn emit_build_metadata() {
         .unwrap_or(0);
     println!("cargo:rustc-env=WINMUX_BUILD_TIME={build_time}");
 
-    println!("cargo:rerun-if-changed=../.git/HEAD");
     println!("cargo:rerun-if-changed=../../.git/HEAD");
+    println!("cargo:rerun-if-changed=../../../.git/HEAD");
 }

@@ -1,3 +1,4 @@
+mod dev;
 mod notes;
 mod remote_bootstrap;
 mod rpc_server;
@@ -25,26 +26,26 @@ static SPLIT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // ─── Session types ───────────────────────────────────────────────────────────
 
-enum Session {
+pub(crate) enum Session {
     Local(LocalSession),
     Ssh(SshSession),
 }
 
-struct LocalSession {
-    writer: Box<dyn Write + Send>,
-    master: Box<dyn MasterPty + Send>,
-    killer: Box<dyn ChildKiller + Send + Sync>,
+pub(crate) struct LocalSession {
+    pub(crate) writer: Box<dyn Write + Send>,
+    pub(crate) master: Box<dyn MasterPty + Send>,
+    pub(crate) killer: Box<dyn ChildKiller + Send + Sync>,
 }
 
-struct SshSession {
-    tx: tokio::sync::mpsc::UnboundedSender<SshCmd>,
+pub(crate) struct SshSession {
+    pub(crate) tx: tokio::sync::mpsc::UnboundedSender<SshCmd>,
     // Phase 8.B: shared russh client handle. The I/O task and any port-forward
     // accept loop both hold an Arc; russh's Handle methods take &self, so
     // concurrent users send commands through the underlying mpsc sender.
-    handle: Arc<client::Handle<SshClient>>,
+    pub(crate) handle: Arc<client::Handle<SshClient>>,
     // Phase 8.B: workspace this session belongs to, so port-forward bookkeeping
     // can clean up when the workspace is deleted or all SSH sessions exit.
-    workspace_id: String,
+    pub(crate) workspace_id: String,
 }
 
 #[derive(Debug)]
@@ -150,6 +151,8 @@ pub(crate) struct AppState {
     pub(crate) browser_pending: BrowserPending,
     // Phase 8.C: pending browser-wait waiters, drained on iframe onload.
     pub(crate) browser_load_waiters: BrowserLoadWaiters,
+    // Phase 8.E: ring buffer of frontend console.error/warn captures.
+    pub(crate) console_buffer: dev::ConsoleBuffer,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -368,6 +371,15 @@ pub(crate) fn new_workspace_id() -> String {
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
 fn config_dir() -> Result<PathBuf, String> {
+    // Override hook so users / tests can pin the state directory regardless of
+    // how the Windows binary resolves it. If `WINMUX_CONFIG_DIR` is set we use
+    // it verbatim; otherwise default to `dirs::config_dir()/winmux` which on
+    // Windows resolves to `%APPDATA%\Roaming\winmux`.
+    if let Ok(custom) = std::env::var("WINMUX_CONFIG_DIR") {
+        let p = PathBuf::from(custom);
+        std::fs::create_dir_all(&p).map_err(|e| format!("create {:?}: {e}", p))?;
+        return Ok(p);
+    }
     let dir = dirs::config_dir()
         .ok_or_else(|| "no config dir available".to_string())?
         .join("winmux");
@@ -489,7 +501,17 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
     Ok(file)
 }
 
+// Diagnostic: tag every persist with its caller so debug.log shows the exact
+// Tauri/RPC handler that triggered each save. Helpful while chasing autosave
+// loops; safe to remove once the regression is closed out.
+#[track_caller]
 pub(crate) fn persist(state: &AppState) -> Result<(), String> {
+    let caller = std::panic::Location::caller();
+    dlog(&format!(
+        "persist: called from {}:{}",
+        caller.file(),
+        caller.line()
+    ));
     // SAFETY GATE: do not persist if load failed. We'd clobber existing data with our
     // empty default state.
     let load_state = *state.load_state.lock().unwrap();
@@ -589,6 +611,18 @@ pub(crate) fn collect_panes(node: &LayoutNode, out: &mut Vec<String>) {
         LayoutNode::Split { first, second, .. } => {
             collect_panes(first, out);
             collect_panes(second, out);
+        }
+    }
+}
+
+// Phase 8.E: visit every leaf pane and report its kind to the callback. Used
+// by the `dev.get-state` summary builder.
+pub(crate) fn collect_panes_with_kind(node: &LayoutNode, f: &mut dyn FnMut(PaneKind)) {
+    match node {
+        LayoutNode::Pane { pane_kind, .. } => f(*pane_kind),
+        LayoutNode::Split { first, second, .. } => {
+            collect_panes_with_kind(first, f);
+            collect_panes_with_kind(second, f);
         }
     }
 }
@@ -2295,6 +2329,26 @@ fn pane_browser_response(
     Ok(())
 }
 
+/// Phase 8.E: frontend console.error/warn capture. Pushes one entry into the
+/// ring buffer; the CLI surfaces them via `winmux dev console-tail`.
+#[tauri::command]
+fn dev_console_log(
+    state: State<'_, AppState>,
+    level: String,
+    message: String,
+    ts: i64,
+) -> Result<(), String> {
+    dev::push_console(
+        &state.console_buffer,
+        dev::ConsoleEntry {
+            level,
+            message,
+            ts,
+        },
+    );
+    Ok(())
+}
+
 /// Phase 8.B: per-pane toggle for the localhost-forwarding behavior. Sticky.
 #[tauri::command]
 fn pane_browser_set_forward(
@@ -2734,6 +2788,16 @@ pub fn run() {
         .setup(|app| {
             let state: State<AppState> = app.state();
             dlog("─── setup() starting ───");
+            // Phase 8.E hotfix: log the exact config dir up front so we can
+            // tell whether the binary is resolving the right path. Honors
+            // `WINMUX_CONFIG_DIR` env var override if set.
+            let cfg_dir = config_dir().ok();
+            dlog(&format!(
+                "setup: config_dir = {:?} (override env WINMUX_CONFIG_DIR = {:?})",
+                cfg_dir,
+                std::env::var("WINMUX_CONFIG_DIR").ok()
+            ));
+            tracing::info!("winmux config_dir: {:?}", cfg_dir);
             match load_from_disk() {
                 Ok(file) => {
                     *state.workspaces.lock().unwrap() = file;
@@ -2790,6 +2854,7 @@ pub fn run() {
             pane_browser_set_forward,
             pane_browser_response,
             pane_browser_loaded,
+            dev_console_log,
             pty_write,
             pty_resize,
             notifications_list,

@@ -6,12 +6,13 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
 use crate::notes::{self, NoteStatus};
+use crate::dev;
 use crate::{
-    collect_panes, decide_feed, find_browser_state, find_workspace_for_pane, new_pane_id,
-    new_workspace_id, next_browser_request_id, persist, resolve_browser_url, split_pane_in,
-    update_browser_pane, update_pane_in, write_to_session, AppState, CreateInput, EnvVar, FeedItem,
-    FeedItemState, LayoutNode, NotificationItem, PaneKind, SplitDirection, Workspace,
-    NOTIF_COUNTER,
+    collect_panes, collect_panes_with_kind, config_dir_pub, decide_feed, find_browser_state,
+    find_workspace_for_pane, new_pane_id, new_workspace_id, next_browser_request_id, persist,
+    resolve_browser_url, split_pane_in, update_browser_pane, update_pane_in, write_to_session,
+    AppState, Connection, CreateInput, EnvVar, FeedItem, FeedItemState, LayoutNode,
+    NotificationItem, PaneKind, Session, SplitDirection, Workspace, NOTIF_COUNTER,
 };
 
 const FEED_MAX_ITEMS_LIMIT: usize = 50;
@@ -1095,6 +1096,200 @@ async fn dispatch(
             Ok(json!({ "ok": true }))
         }
 
+        // Phase 8.E: introspection. Pure reads of AppState + on-disk debug.log.
+        "dev.get-state" => Ok(build_dev_state(state, 50, 50)),
+
+        "dev.console-tail" => {
+            let limit = params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(50) as usize;
+            let entries = dev::console_tail(&state.console_buffer, limit);
+            Ok(serde_json::to_value(&entries).map_err(|e| e.to_string())?)
+        }
+
+        "dev.debug-log-tail" => {
+            let limit = params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(50) as usize;
+            let dir = config_dir_pub().map_err(|e| e.to_string())?;
+            let lines = dev::debug_log_tail(&dir.join("debug.log"), limit);
+            Ok(json!(lines))
+        }
+
+        "dev.report-bug" => {
+            let description = params
+                .get("description")
+                .and_then(|v| v.as_str())
+                .ok_or("missing description")?
+                .to_string();
+            let repro_steps = params
+                .get("repro_steps")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let snapshot = build_dev_state(state, 200, 200);
+            let body = json!({
+                "description": description,
+                "repro_steps": repro_steps,
+                "captured_at_unix": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                "state": snapshot,
+            });
+            let dir = config_dir_pub().map_err(|e| e.to_string())?;
+            let path = dev::write_bug_report(&dir, &body)?;
+            Ok(json!({ "ok": true, "path": path.to_string_lossy() }))
+        }
+
         other => Err(format!("unknown method: {other}")),
     }
+}
+
+// Phase 8.E: build the dev.get-state Value. Uses module-level statics for
+// version/git_hash/build_time which are baked in at compile time by build.rs.
+fn build_dev_state(state: &AppState, log_tail_n: usize, console_tail_n: usize) -> Value {
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
+    const GIT_HASH: &str = match option_env!("WINMUX_GIT_HASH") {
+        Some(h) => h,
+        None => "unknown",
+    };
+    let build_time: u64 = option_env!("WINMUX_BUILD_TIME")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    let dir = config_dir_pub().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    // Snapshot under short locks.
+    let workspaces_clone = state.workspaces.lock().unwrap().clone();
+
+    let pane_to_workspace: std::collections::HashMap<String, String> = {
+        let mut m = std::collections::HashMap::new();
+        for ws in &workspaces_clone.workspaces {
+            if let Some(layout) = &ws.layout {
+                let mut panes = Vec::new();
+                collect_panes(layout, &mut panes);
+                for p in panes {
+                    m.insert(p, ws.id.clone());
+                }
+            }
+        }
+        m
+    };
+
+    let pane_kind_map: std::collections::HashMap<String, PaneKind> = {
+        let mut m = std::collections::HashMap::new();
+        for ws in &workspaces_clone.workspaces {
+            if let Some(layout) = &ws.layout {
+                fold_pane_kinds(layout, &mut m);
+            }
+        }
+        m
+    };
+
+    let sessions_summary: Vec<dev::SessionSummary> = {
+        let pane_sessions = state.pane_sessions.lock().unwrap().clone();
+        let sessions = state.sessions.lock().unwrap();
+        pane_sessions
+            .iter()
+            .filter_map(|(pane_id, sid)| {
+                let s = sessions.get(sid)?;
+                let (kind, conn_type, ws_id) = match s {
+                    Session::Local(_) => (
+                        "terminal",
+                        Some("local".to_string()),
+                        pane_to_workspace.get(pane_id).cloned(),
+                    ),
+                    Session::Ssh(ssh) => (
+                        "terminal",
+                        Some("ssh".to_string()),
+                        Some(ssh.workspace_id.clone()),
+                    ),
+                };
+                let _ = pane_kind_map.get(pane_id); // could be browser; sessions are for terminal only
+                Some(dev::SessionSummary {
+                    pane_id: pane_id.clone(),
+                    kind: kind.to_string(),
+                    connection_type: conn_type,
+                    workspace_id: ws_id,
+                })
+            })
+            .collect()
+    };
+
+    let forwards_summary: Vec<dev::ForwardSummary> = {
+        let m = state.forwards.lock().unwrap();
+        m.iter()
+            .map(|((ws_id, remote_port), entry)| dev::ForwardSummary {
+                workspace_id: ws_id.clone(),
+                remote_port: *remote_port,
+                local_port: entry.local_port,
+            })
+            .collect()
+    };
+
+    let feed_counts: dev::FeedCounts = {
+        let store = state.feed.lock().unwrap();
+        let mut c = dev::FeedCounts::default();
+        for it in &store.items {
+            match it.state {
+                FeedItemState::Pending | FeedItemState::Passive => c.open += 1,
+                _ => c.done += 1,
+            }
+            *c.by_kind.entry(it.kind.clone()).or_insert(0) += 1;
+        }
+        c
+    };
+
+    let notes_counts: dev::NotesCounts = {
+        let nf = state.notes.lock().unwrap();
+        let mut c = dev::NotesCounts::default();
+        for n in &nf.notes {
+            match n.status {
+                crate::notes::NoteStatus::Open => c.open += 1,
+                crate::notes::NoteStatus::Done => c.done += 1,
+            }
+            if let Some(t) = &n.tag {
+                *c.by_tag.entry(t.clone()).or_insert(0) += 1;
+            }
+        }
+        c
+    };
+
+    let log_tail = dev::debug_log_tail(&dir.join("debug.log"), log_tail_n);
+    let console_tail = dev::console_tail(&state.console_buffer, console_tail_n);
+
+    // Suppress unused warning for connection-type silencer in the SSH branch.
+    let _ = Connection::Local { shell: None };
+
+    dev::build_state_value(
+        VERSION,
+        GIT_HASH,
+        build_time,
+        &dir,
+        &workspaces_clone,
+        sessions_summary,
+        forwards_summary,
+        feed_counts,
+        notes_counts,
+        log_tail,
+        console_tail,
+    )
+}
+
+// Helper for dev.get-state — collect every pane's kind into a map keyed by pane_id.
+fn fold_pane_kinds(node: &LayoutNode, out: &mut std::collections::HashMap<String, PaneKind>) {
+    match node {
+        LayoutNode::Pane {
+            pane_id, pane_kind, ..
+        } => {
+            out.insert(pane_id.clone(), *pane_kind);
+        }
+        LayoutNode::Split { first, second, .. } => {
+            fold_pane_kinds(first, out);
+            fold_pane_kinds(second, out);
+        }
+    }
+    let _ = collect_panes_with_kind; // keep symbol live for other call sites
 }

@@ -45,14 +45,7 @@ export function Sidebar(p: Props) {
                 style={{ background: w.color || "#6b7682" }}
               />
               <span class="ws-name">{w.name}</span>
-              {(() => {
-                const b = workspaceBadge(w);
-                return (
-                  <span class={`ws-badge ${b.cls}`} title={b.title}>
-                    {b.label}
-                  </span>
-                );
-              })()}
+              <WorkspaceBadge w={w} />
               <Show when={p.connectedIds.has(w.id)}>
                 <span class="ws-live" title="connected" />
               </Show>
@@ -91,5 +84,18 @@ export function Sidebar(p: Props) {
         + New workspace
       </button>
     </div>
+  );
+}
+
+// Regression-fix v2: extracted from an inline IIFE that was re-evaluated on every
+// parent render. The IIFE form caused churn that intermittently mis-routed clicks
+// on the workspace items themselves and (separately) drove a `workspace_set_active`
+// autosave loop. As a stable child component, Solid reuses the same instance.
+function WorkspaceBadge(props: { w: Workspace }) {
+  const b = () => workspaceBadge(props.w);
+  return (
+    <span class={`ws-badge ${b().cls}`} title={b().title}>
+      {b().label}
+    </span>
   );
 }

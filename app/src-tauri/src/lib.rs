@@ -2416,6 +2416,10 @@ fn pane_browser_loaded(
     pane_id: String,
     url: String,
 ) -> Result<(), String> {
+    dlog(&format!(
+        "pane_browser_loaded: pane={} url={}",
+        pane_id, url
+    ));
     // Stamp last_loaded_url on the pane's BrowserState. Dedupe: only persist
     // if the value actually changed — iframe onload can fire repeatedly
     // (focus changes, redirects) and persisting on every fire would burn

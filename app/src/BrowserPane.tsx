@@ -144,10 +144,14 @@ export function BrowserPane(p: Props) {
 
   // Phase 8.C: tell the backend whenever the iframe finishes loading. This
   // unblocks pending pane.browser.wait RPC calls.
+  // IMPORTANT: report the user-facing URL (browser().url, e.g. http://localhost:8000)
+  // and NOT the resolved/rewritten one (http://127.0.0.1:<forward>). The wait RPC
+  // compares last_loaded_url to bs.url (user-facing), so reporting the rewritten
+  // URL would always fail to match and the wait would never short-circuit.
   const handleIframeLoad = () => {
     invoke("pane_browser_loaded", {
       paneId: p.pane.pane_id,
-      url: resolvedUrl() || browser().url || "",
+      url: browser().url || "",
     }).catch(() => {});
   };
 

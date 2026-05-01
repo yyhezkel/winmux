@@ -1768,8 +1768,16 @@ async fn spawn_ssh(
         Session::Ssh(SshSession {
             tx,
             handle: handle_for_state,
-            workspace_id: workspace_id_for_state,
+            workspace_id: workspace_id_for_state.clone(),
         }),
+    );
+    // Phase 8.B race fix: notify any browser pane in this workspace that a
+    // fresh resolve is now possible (SSH handle is live → forwards can open).
+    // Browser panes that loaded their iframe with `localhost refused to
+    // connect` because SSH wasn't ready yet will pick this up and re-resolve.
+    let _ = app.emit(
+        "pane:browser:resolve-stale",
+        serde_json::json!({ "workspace_id": workspace_id_for_state }),
     );
     Ok(id)
 }

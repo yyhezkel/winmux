@@ -272,6 +272,18 @@ body {
   cursor: pointer;
 }
 
+.browser-waiting {
+  padding: 24px;
+  color: #d3a843;
+  font-size: 13px;
+  border: 1px dashed #3a2f10;
+  border-radius: 6px;
+  background: #1a1505;
+  margin: 12px;
+}
+.browser-waiting p { margin: 0 0 6px 0; }
+.browser-waiting .browser-hint { color: #8aa3c2; font-size: 11px; margin-top: 4px; }
+
 /* Phase 8 fix v3: ErrorBoundary fallback panels. */
 .layout-error,
 .sidebar-error {

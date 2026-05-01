@@ -95,10 +95,35 @@ export function BrowserPane(p: Props) {
     p.onNavigate(p.pane.pane_id, v);
   };
 
-  const reload = () => {
-    if (iframeRef) {
-      iframeRef.src = resolvedUrl() || "about:blank";
+  // Phase 8.B race fix: a manual reload should ALWAYS bypass the
+  // lastResolvedSource cache. If the SSH session came up after the initial
+  // resolve attempt failed, the cached resolvedUrl would still be the raw
+  // localhost URL (or empty); re-resolving now picks up the live forward.
+  const forceResolveAndReload = async () => {
+    const u = browser().url;
+    if (!u) return;
+    setResolveErr(null);
+    try {
+      const rewritten = await invoke<string>("pane_browser_resolve_url", {
+        workspaceId: p.workspaceId,
+        paneId: p.pane.pane_id,
+        url: u,
+      });
+      lastResolvedSource = u;
+      lastResolvedForward = forwardOn();
+      setResolvedUrl(rewritten);
+      if (iframeRef) {
+        // Re-assign even if the URL value is unchanged so the iframe reloads.
+        iframeRef.src = rewritten || "about:blank";
+      }
+    } catch (err) {
+      setResolveErr(String(err));
+      if (iframeRef) iframeRef.src = u;
     }
+  };
+
+  const reload = () => {
+    void forceResolveAndReload();
   };
 
   // True if `url` shares an origin with the parent webview (then html2canvas
@@ -133,6 +158,31 @@ export function BrowserPane(p: Props) {
     pane_id: string;
     expression?: string;
   };
+
+  // Phase 8.B race fix: when the workspace's SSH session comes up, the
+  // backend emits `pane:browser:resolve-stale`. If we're a browser pane in
+  // that workspace, bypass the resolved-URL cache and re-fetch — typically
+  // we were sitting on a "no active SSH session" error from a too-early
+  // resolve attempt during app startup.
+  onMount(() => {
+    let cancelledStale = false;
+    let unlistenStale: UnlistenFn | undefined;
+    listen<{ workspace_id: string }>("pane:browser:resolve-stale", (e) => {
+      if (cancelledStale) return;
+      if (e.payload?.workspace_id !== p.workspaceId) return;
+      void forceResolveAndReload();
+    }).then((u) => {
+      if (cancelledStale) {
+        u();
+      } else {
+        unlistenStale = u;
+      }
+    });
+    onCleanup(() => {
+      cancelledStale = true;
+      unlistenStale?.();
+    });
+  });
 
   onMount(() => {
     let cancelled = false;
@@ -344,16 +394,31 @@ export function BrowserPane(p: Props) {
         </button>
       </div>
       <div ref={(el) => (bodyRef = el)} class="pane-body browser-body">
+        {/* Phase 8.B race fix: friendly waiting message when the SSH session
+            isn't ready yet — beats the iframe's generic "connection refused".
+            Cleared as soon as a successful resolve sets resolvedUrl. */}
+        <Show when={resolveErr()?.includes("no active SSH session")}>
+          <div class="browser-waiting">
+            <p>Waiting for SSH session to come up…</p>
+            <p class="browser-hint">
+              Connect a terminal pane in this workspace to enable port forwarding,
+              then press ↺ to retry.
+            </p>
+          </div>
+        </Show>
         <Show
           when={resolvedUrl()}
           fallback={
-            <div class="browser-placeholder">
-              <p>Enter a URL above to load a page.</p>
-              <p class="browser-hint">
-                Note: many sites (Google, banks, etc.) block iframe embedding via
-                X-Frame-Options. WebView2 native panes will lift this in a later phase.
-              </p>
-            </div>
+            <Show when={!resolveErr()?.includes("no active SSH session")}>
+              <div class="browser-placeholder">
+                <p>Enter a URL above to load a page.</p>
+                <p class="browser-hint">
+                  Note: many sites (Google, banks, etc.) block iframe embedding via
+                  X-Frame-Options. WebView2 native panes will lift this in a later
+                  phase.
+                </p>
+              </div>
+            </Show>
           }
         >
           <iframe

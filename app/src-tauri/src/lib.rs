@@ -2039,7 +2039,13 @@ fn collect_pane_connection_kinds(node: &LayoutNode, is_ssh: &mut bool) {
 
 #[tauri::command]
 fn workspaces_load(state: State<'_, AppState>) -> Result<WorkspacesFile, String> {
-    Ok(state.workspaces.lock().unwrap().clone())
+    let file = state.workspaces.lock().unwrap().clone();
+    dlog(&format!(
+        "workspaces_load: returning {} workspaces, active={:?}",
+        file.workspaces.len(),
+        file.active_workspace_id
+    ));
+    Ok(file)
 }
 
 #[tauri::command]
@@ -2121,6 +2127,70 @@ fn workspace_update(
     persist(&state)?;
     let _ = app.emit("workspaces:changed", ());
     Ok(state.workspaces.lock().unwrap().clone())
+}
+
+/// Phase 8 fix v3: emergency reset for a workspace whose layout has been
+/// corrupted (e.g. by the autosave loop that produced deeply nested splits).
+/// Replaces the layout with a single fresh terminal pane using the workspace's
+/// existing connection if it had one (terminal panes), else local default.
+#[tauri::command]
+fn workspace_reset_layout(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        // Pick a connection for the fresh pane:
+        // 1. The first terminal pane in the (corrupted) layout, if any.
+        // 2. The legacy `connection` field on the workspace.
+        // 3. Default Local with no shell override.
+        let inferred = ws
+            .layout
+            .as_ref()
+            .and_then(first_terminal_connection)
+            .or_else(|| ws.connection.clone())
+            .unwrap_or(Connection::Local { shell: None });
+        ws.layout = Some(LayoutNode::Pane {
+            pane_id: new_pane_id(),
+            pane_kind: PaneKind::Terminal,
+            connection: Some(inferred),
+            browser: None,
+            title: None,
+            annotation: None,
+        });
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+pub(crate) fn first_terminal_connection_pub(node: &LayoutNode) -> Option<Connection> {
+    first_terminal_connection(node)
+}
+
+fn first_terminal_connection(node: &LayoutNode) -> Option<Connection> {
+    match node {
+        LayoutNode::Pane {
+            pane_kind,
+            connection,
+            ..
+        } => {
+            if matches!(pane_kind, PaneKind::Terminal) {
+                connection.clone()
+            } else {
+                None
+            }
+        }
+        LayoutNode::Split { first, second, .. } => {
+            first_terminal_connection(first).or_else(|| first_terminal_connection(second))
+        }
+    }
 }
 
 #[tauri::command]
@@ -2854,6 +2924,7 @@ pub fn run() {
             pane_browser_set_forward,
             pane_browser_response,
             pane_browser_loaded,
+            workspace_reset_layout,
             dev_console_log,
             pty_write,
             pty_resize,

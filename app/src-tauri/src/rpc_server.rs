@@ -1096,6 +1096,43 @@ async fn dispatch(
             Ok(json!({ "ok": true }))
         }
 
+        // Phase 8 fix v3: emergency reset for a workspace whose layout has been
+        // corrupted (typically by the recent autosave loop). Replaces the layout
+        // with a single fresh terminal pane using the inferred connection.
+        "reset-layout" => {
+            let id = params
+                .get("id")
+                .or_else(|| params.get("workspace_id"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing id")?
+                .to_string();
+            {
+                let mut file = state.workspaces.lock().unwrap();
+                let ws = file
+                    .workspaces
+                    .iter_mut()
+                    .find(|w| w.id == id)
+                    .ok_or_else(|| format!("no workspace {id}"))?;
+                let inferred = ws
+                    .layout
+                    .as_ref()
+                    .and_then(crate::first_terminal_connection_pub)
+                    .or_else(|| ws.connection.clone())
+                    .unwrap_or(Connection::Local { shell: None });
+                ws.layout = Some(LayoutNode::Pane {
+                    pane_id: new_pane_id(),
+                    pane_kind: PaneKind::Terminal,
+                    connection: Some(inferred),
+                    browser: None,
+                    title: None,
+                    annotation: None,
+                });
+            }
+            persist(state)?;
+            let _ = app.emit("workspaces:changed", ());
+            Ok(json!({ "ok": true, "workspace_id": id }))
+        }
+
         // Phase 8.E: introspection. Pure reads of AppState + on-disk debug.log.
         "dev.get-state" => Ok(build_dev_state(state, 50, 50)),
 

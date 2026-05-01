@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, ErrorBoundary, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Sidebar } from "./Sidebar";
@@ -302,6 +302,25 @@ function App() {
       updateFile(f);
     } catch (e) {
       console.error("browser go-home failed", e);
+    }
+  };
+
+  // Utility: collapse a workspace's layout back to a single terminal pane,
+  // useful when you've split a workspace many times and want to start over.
+  const handleResetLayout = async (id: string) => {
+    if (
+      !window.confirm(
+        "Reset this workspace to a single terminal pane? All splits and browser panes in this workspace will be removed."
+      )
+    )
+      return;
+    try {
+      const f = await invoke<WorkspacesFile>("workspace_reset_layout", {
+        workspaceId: id,
+      });
+      updateFile(f);
+    } catch (e) {
+      console.error("workspace_reset_layout failed", e);
     }
   };
 
@@ -621,27 +640,53 @@ function App() {
 
   return (
     <div class="app">
-      <Sidebar
-        workspaces={file().workspaces}
-        activeId={file().active_workspace_id}
-        connectedIds={liveWorkspaceIds()}
-        onActivate={handleSetActive}
-        onCreate={() => setShowCreate(true)}
-        onAction={(id, action) => {
-          if (action === "rename") handleRename(id);
-          else if (action === "edit") {
-            const ws = file().workspaces.find((w) => w.id === id);
-            if (ws) {
-              setEditingWorkspace(ws);
-              setShowCreate(true);
-            }
-          } else if (action === "delete") void handleDelete(id);
-          else if (action === "disconnect")
-            void handleDisconnectWorkspace(id);
-        }}
-      />
+      <ErrorBoundary
+        fallback={(err) => (
+          <div class="sidebar-error">
+            <p>Sidebar failed to render.</p>
+            <pre>{String(err)}</pre>
+            <button class="primary" onClick={() => setShowCreate(true)}>
+              + New workspace
+            </button>
+          </div>
+        )}
+      >
+        <Sidebar
+          workspaces={file().workspaces}
+          activeId={file().active_workspace_id}
+          connectedIds={liveWorkspaceIds()}
+          onActivate={handleSetActive}
+          onCreate={() => setShowCreate(true)}
+          onAction={(id, action) => {
+            if (action === "rename") handleRename(id);
+            else if (action === "edit") {
+              const ws = file().workspaces.find((w) => w.id === id);
+              if (ws) {
+                setEditingWorkspace(ws);
+                setShowCreate(true);
+              }
+            } else if (action === "delete") void handleDelete(id);
+            else if (action === "disconnect")
+              void handleDisconnectWorkspace(id);
+          }}
+        />
+      </ErrorBoundary>
       <div class="main">
         <Show when={activeWs()}>
+          <ErrorBoundary
+            fallback={(err) => (
+              <div class="ws-header layout-error">
+                <span class="ws-title">{activeWs()?.name ?? "(unknown)"}</span>
+                <span class="ws-conn-info">{String(err)}</span>
+                <button
+                  class="ws-header-btn"
+                  onClick={() => handleResetLayout(activeWs()!.id)}
+                >
+                  Reset to single pane
+                </button>
+              </div>
+            )}
+          >
           <div class="ws-header">
             <span
               class="ws-dot"
@@ -650,9 +695,16 @@ function App() {
             <span class="ws-title">{activeWs()!.name}</span>
             <Show when={activeWs()!.layout?.kind === "pane"}>
               <span class="ws-conn-info">
-                {describeConnection(
-                  (activeWs()!.layout as any).connection
-                )}
+                {(() => {
+                  const layout = activeWs()!.layout as Extract<
+                    LayoutNode,
+                    { kind: "pane" }
+                  >;
+                  if (layout.pane_kind === "browser") return "browser";
+                  return layout.connection
+                    ? describeConnection(layout.connection)
+                    : "—";
+                })()}
               </span>
             </Show>
             <Show when={activeWs()!.layout?.kind === "split"}>
@@ -674,6 +726,7 @@ function App() {
               </button>
             </Show>
           </div>
+          </ErrorBoundary>
         </Show>
 
         <Show when={!activeWs()}>
@@ -687,54 +740,74 @@ function App() {
 
         <Show when={activeWs()?.layout}>
           <div class="layout-root">
-            <LayoutView
-              workspaceId={activeWs()!.id}
-              node={activeWs()!.layout!}
-              activePaneId={activePaneId()}
-              connectedPaneIds={connectedPanes()}
-              pendingPasswordFor={pendingPwFor()}
-              pendingPassphrase={pendingPassphraseFor()}
-              pendingHostTrust={pendingHostTrust()}
-              paneStatus={paneStatus()}
-              paneStatusText={paneStatusText()}
-              ensureTerm={ensureTerm}
-              onFocus={(pid) => {
-                setActivePaneId(pid);
-                terms.get(pid)?.focus();
-              }}
-              onConnect={(pid, opts) => connectPane(pid, opts)}
-              onSplit={splitPane}
-              onClose={closePane}
-              onDisconnect={disconnectPane}
-              onSetTitle={(pid, title) => {
-                const ws = activeWs();
-                if (!ws) return;
-                invoke<WorkspacesFile>("pane_set_title", {
-                  workspaceId: ws.id,
-                  paneId: pid,
-                  title: title.trim() === "" ? null : title,
-                })
-                  .then((f) => updateFile(f))
-                  .catch((e) => console.error("pane_set_title failed", e));
-              }}
-              onSetAnnotation={(pid, annotation) => {
-                const ws = activeWs();
-                if (!ws) return;
-                invoke<WorkspacesFile>("pane_set_annotation", {
-                  workspaceId: ws.id,
-                  paneId: pid,
-                  annotation: annotation.trim() === "" ? null : annotation,
-                })
-                  .then((f) => updateFile(f))
-                  .catch((e) => console.error("pane_set_annotation failed", e));
-              }}
-              onRatioDrag={(sid, r) => setRatio(sid, r, false)}
-              onRatioCommit={(sid, r) => setRatio(sid, r, true)}
-              onBrowserNavigate={browserNavigate}
-              onBrowserGoBack={browserGoBack}
-              onBrowserGoHome={browserGoHome}
-              onBrowserSetForward={browserSetForward}
-            />
+            {/* Phase 8 fix v3: ErrorBoundary so a single corrupted workspace
+                layout (e.g. from the recent autosave-loop nesting) doesn't
+                blank the whole app. Falls back to a clear reset button. */}
+            <ErrorBoundary
+              fallback={(err, _reset) => (
+                <div class="layout-error">
+                  <p>Failed to render this layout.</p>
+                  <pre class="layout-error-detail">{String(err)}</pre>
+                  <button
+                    class="primary"
+                    onClick={() => handleResetLayout(activeWs()!.id)}
+                  >
+                    Reset to single pane
+                  </button>
+                </div>
+              )}
+            >
+              <LayoutView
+                workspaceId={activeWs()!.id}
+                node={activeWs()!.layout!}
+                activePaneId={activePaneId()}
+                connectedPaneIds={connectedPanes()}
+                pendingPasswordFor={pendingPwFor()}
+                pendingPassphrase={pendingPassphraseFor()}
+                pendingHostTrust={pendingHostTrust()}
+                paneStatus={paneStatus()}
+                paneStatusText={paneStatusText()}
+                ensureTerm={ensureTerm}
+                onFocus={(pid) => {
+                  setActivePaneId(pid);
+                  terms.get(pid)?.focus();
+                }}
+                onConnect={(pid, opts) => connectPane(pid, opts)}
+                onSplit={splitPane}
+                onClose={closePane}
+                onDisconnect={disconnectPane}
+                onSetTitle={(pid, title) => {
+                  const ws = activeWs();
+                  if (!ws) return;
+                  invoke<WorkspacesFile>("pane_set_title", {
+                    workspaceId: ws.id,
+                    paneId: pid,
+                    title: title.trim() === "" ? null : title,
+                  })
+                    .then((f) => updateFile(f))
+                    .catch((e) => console.error("pane_set_title failed", e));
+                }}
+                onSetAnnotation={(pid, annotation) => {
+                  const ws = activeWs();
+                  if (!ws) return;
+                  invoke<WorkspacesFile>("pane_set_annotation", {
+                    workspaceId: ws.id,
+                    paneId: pid,
+                    annotation: annotation.trim() === "" ? null : annotation,
+                  })
+                    .then((f) => updateFile(f))
+                    .catch((e) =>
+                      console.error("pane_set_annotation failed", e)
+                    );
+                }}
+                onRatioDrag={(sid, r) => setRatio(sid, r, false)}
+                onRatioCommit={(sid, r) => setRatio(sid, r, true)}
+                onBrowserNavigate={browserNavigate}
+                onBrowserGoBack={browserGoBack}
+                onBrowserGoHome={browserGoHome}
+                onBrowserSetForward={browserSetForward}
+              />
+            </ErrorBoundary>
           </div>
         </Show>
       </div>

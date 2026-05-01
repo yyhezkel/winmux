@@ -272,6 +272,38 @@ body {
   cursor: pointer;
 }
 
+/* Phase 8 fix v3: ErrorBoundary fallback panels. */
+.layout-error,
+.sidebar-error {
+  padding: 16px;
+  color: #f7768e;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.layout-error-detail {
+  background: #14181d;
+  border: 1px solid #3a2828;
+  border-radius: 4px;
+  padding: 8px;
+  font-family: ui-monospace, Consolas, monospace;
+  white-space: pre-wrap;
+  max-width: 100%;
+  overflow: auto;
+  color: #e0af68;
+}
+.layout-error .primary,
+.sidebar-error .primary {
+  background: #4a90e2;
+  color: white;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
 .empty {
   flex: 1;
   display: flex;

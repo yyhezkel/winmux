@@ -1,5 +1,7 @@
-import { createEffect, createSignal, Show } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import html2canvas from "html2canvas";
 import type { LayoutNode, SplitDirection } from "./types";
 
 interface Props {
@@ -32,6 +34,7 @@ export function BrowserPane(p: Props) {
   const [resolvedUrl, setResolvedUrl] = createSignal(browser().url);
   const [resolveErr, setResolveErr] = createSignal<string | null>(null);
   let iframeRef: HTMLIFrameElement | undefined;
+  let bodyRef: HTMLDivElement | undefined;
 
   // Whenever the persisted URL changes (user nav, back, home, CLI), refresh
   // both the address-bar draft and the iframe's resolved src.
@@ -84,11 +87,122 @@ export function BrowserPane(p: Props) {
     }
   };
 
+  // True if `url` shares an origin with the parent webview (then html2canvas
+  // can traverse the iframe and `iframe.contentWindow.eval` is allowed).
+  const sameOrigin = (url: string): boolean => {
+    try {
+      return new URL(url, window.location.href).origin === window.location.origin;
+    } catch {
+      return false;
+    }
+  };
+
   const isTunneled = () => {
     const u = browser().url;
     if (!u || !resolvedUrl()) return false;
     return resolvedUrl() !== u;
   };
+
+  // Phase 8.C: tell the backend whenever the iframe finishes loading. This
+  // unblocks pending pane.browser.wait RPC calls.
+  const handleIframeLoad = () => {
+    invoke("pane_browser_loaded", {
+      paneId: p.pane.pane_id,
+      url: resolvedUrl() || browser().url || "",
+    }).catch(() => {});
+  };
+
+  // Phase 8.C: serve agent-side requests (eval, screenshot) for THIS pane.
+  type BrowserRequest = {
+    request_id: string;
+    kind: "eval" | "screenshot";
+    pane_id: string;
+    expression?: string;
+  };
+
+  onMount(() => {
+    let cancelled = false;
+    let unlisten: UnlistenFn | undefined;
+    listen<BrowserRequest>("browser:request", async (e) => {
+      if (cancelled) return;
+      const r = e.payload;
+      if (r.pane_id !== p.pane.pane_id) return;
+      try {
+        if (r.kind === "eval") {
+          const win = iframeRef?.contentWindow;
+          if (!win) throw new Error("iframe not ready");
+          let result: unknown;
+          try {
+            // Same-origin access throws SecurityError on cross-origin.
+            // eslint-disable-next-line @typescript-eslint/no-implied-eval
+            result = (win as unknown as { eval: (s: string) => unknown }).eval(
+              r.expression || ""
+            );
+          } catch (err) {
+            const msg = String(err);
+            if (
+              msg.includes("SecurityError") ||
+              msg.includes("Blocked") ||
+              msg.includes("cross-origin") ||
+              msg.toLowerCase().includes("permission")
+            ) {
+              throw new Error(
+                "cross-origin: WebView2 panes (Phase 8.D) needed for JS eval on arbitrary pages"
+              );
+            }
+            throw err;
+          }
+          let serialized: unknown;
+          try {
+            serialized = JSON.parse(JSON.stringify(result));
+          } catch {
+            serialized = String(result);
+          }
+          await invoke("pane_browser_response", {
+            requestId: r.request_id,
+            ok: { value: serialized },
+            err: null,
+          });
+        } else if (r.kind === "screenshot") {
+          if (!bodyRef) throw new Error("pane body not mounted");
+          // html2canvas cannot enter cross-origin iframes; ignore them so the
+          // capture succeeds with the iframe area shown as the body background.
+          // OS-level capture (real iframe pixels) lands in 8.D with WebView2.
+          const canvas = await html2canvas(bodyRef, {
+            useCORS: true,
+            backgroundColor: "#0b0d10",
+            logging: false,
+            ignoreElements: (el: Element) =>
+              el.tagName === "IFRAME" &&
+              !!(el as HTMLIFrameElement).src &&
+              !sameOrigin((el as HTMLIFrameElement).src),
+          });
+          const dataUrl = canvas.toDataURL("image/png");
+          await invoke("pane_browser_response", {
+            requestId: r.request_id,
+            ok: dataUrl,
+            err: null,
+          });
+        }
+      } catch (err) {
+        await invoke("pane_browser_response", {
+          requestId: r.request_id,
+          ok: null,
+          err: String(err),
+        }).catch(() => {});
+      }
+    }).then((u) => {
+      if (cancelled) {
+        u();
+      } else {
+        unlisten = u;
+      }
+    });
+    onCleanup(() => {
+      cancelled = true;
+      unlisten?.();
+    });
+  });
 
   return (
     <div
@@ -215,7 +329,7 @@ export function BrowserPane(p: Props) {
           ×
         </button>
       </div>
-      <div class="pane-body browser-body">
+      <div ref={(el) => (bodyRef = el)} class="pane-body browser-body">
         <Show
           when={resolvedUrl()}
           fallback={
@@ -229,11 +343,12 @@ export function BrowserPane(p: Props) {
           }
         >
           <iframe
-            ref={iframeRef!}
+            ref={(el) => (iframeRef = el)}
             class="browser-iframe"
             src={resolvedUrl()}
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             referrerpolicy="no-referrer-when-downgrade"
+            onLoad={handleIframeLoad}
           />
         </Show>
       </div>

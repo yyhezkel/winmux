@@ -7,10 +7,11 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
 use crate::notes::{self, NoteStatus};
 use crate::{
-    collect_panes, decide_feed, find_workspace_for_pane, new_pane_id, new_workspace_id, persist,
-    resolve_browser_url, split_pane_in, update_browser_pane, update_pane_in, write_to_session,
-    AppState, CreateInput, EnvVar, FeedItem, FeedItemState, LayoutNode, NotificationItem, PaneKind,
-    SplitDirection, Workspace, NOTIF_COUNTER,
+    collect_panes, decide_feed, find_browser_state, find_workspace_for_pane, new_pane_id,
+    new_workspace_id, next_browser_request_id, persist, resolve_browser_url, split_pane_in,
+    update_browser_pane, update_pane_in, write_to_session, AppState, CreateInput, EnvVar, FeedItem,
+    FeedItemState, LayoutNode, NotificationItem, PaneKind, SplitDirection, Workspace,
+    NOTIF_COUNTER,
 };
 
 const FEED_MAX_ITEMS_LIMIT: usize = 50;
@@ -585,6 +586,188 @@ async fn dispatch(
             persist(state)?;
             let _ = app.emit("workspaces:changed", ());
             Ok(json!({ "ok": true }))
+        }
+
+        // Phase 8.C: read the current URL from the pane's persisted browser state.
+        "pane.browser.url" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let bs = find_browser_state(state, &pane_id)
+                .ok_or_else(|| format!("no browser pane {pane_id}"))?;
+            Ok(json!({ "url": bs.url, "home_url": bs.home_url }))
+        }
+
+        // Phase 8.C: read the navigation history.
+        "pane.browser.history" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let bs = find_browser_state(state, &pane_id)
+                .ok_or_else(|| format!("no browser pane {pane_id}"))?;
+            Ok(json!({ "history": bs.history, "current": bs.url }))
+        }
+
+        // Phase 8.C: block until the iframe fires onload (or timeout). Returns
+        // the URL the frontend reported. Default timeout 10s.
+        "pane.browser.wait" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(10_000);
+            // Reject straight away if the pane isn't a browser pane (avoids
+            // hanging forever on a stale id).
+            find_browser_state(state, &pane_id)
+                .ok_or_else(|| format!("no browser pane {pane_id}"))?;
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            state
+                .browser_load_waiters
+                .lock()
+                .unwrap()
+                .entry(pane_id.clone())
+                .or_default()
+                .push(tx);
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                rx,
+            )
+            .await;
+            match result {
+                Ok(Ok(url)) => Ok(json!({ "url": url })),
+                Ok(Err(_)) => Err("waiter dropped".into()),
+                Err(_) => {
+                    // Best-effort: leave any other waiters in place.
+                    Err(format!("timeout after {timeout_ms} ms"))
+                }
+            }
+        }
+
+        // Phase 8.C: ask the frontend to evaluate JS on the iframe. Same-origin
+        // only — cross-origin returns a clean error suggesting Phase 8.D.
+        "pane.browser.eval" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let expression = params
+                .get("expression")
+                .or_else(|| params.get("expr"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing expression")?
+                .to_string();
+            let timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5_000);
+            find_browser_state(state, &pane_id)
+                .ok_or_else(|| format!("no browser pane {pane_id}"))?;
+            let request_id = next_browser_request_id();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            state
+                .browser_pending
+                .lock()
+                .unwrap()
+                .insert(request_id.clone(), tx);
+            let _ = app.emit(
+                "browser:request",
+                json!({
+                    "request_id": request_id,
+                    "kind": "eval",
+                    "pane_id": pane_id,
+                    "expression": expression,
+                }),
+            );
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await;
+            match result {
+                Ok(Ok(Ok(v))) => Ok(v),
+                Ok(Ok(Err(e))) => Err(e),
+                Ok(Err(_)) => Err("response channel closed".into()),
+                Err(_) => {
+                    state.browser_pending.lock().unwrap().remove(&request_id);
+                    Err(format!("eval timeout after {timeout_ms} ms"))
+                }
+            }
+        }
+
+        // Phase 8.C: take a screenshot of the pane via the frontend (html2canvas).
+        // Optional `output_path` writes the PNG to disk; otherwise returns base64.
+        // NOTE: cross-origin iframes render as blanks under html2canvas; OS-level
+        // capture lands in 8.D with WebView2 native panes.
+        "pane.browser.screenshot" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let output_path = params
+                .get("output_path")
+                .or_else(|| params.get("output"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(15_000);
+            find_browser_state(state, &pane_id)
+                .ok_or_else(|| format!("no browser pane {pane_id}"))?;
+            let request_id = next_browser_request_id();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            state
+                .browser_pending
+                .lock()
+                .unwrap()
+                .insert(request_id.clone(), tx);
+            let _ = app.emit(
+                "browser:request",
+                json!({
+                    "request_id": request_id,
+                    "kind": "screenshot",
+                    "pane_id": pane_id,
+                }),
+            );
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await;
+            let dataurl_value = match result {
+                Ok(Ok(Ok(v))) => v,
+                Ok(Ok(Err(e))) => return Err(e),
+                Ok(Err(_)) => return Err("response channel closed".into()),
+                Err(_) => {
+                    state.browser_pending.lock().unwrap().remove(&request_id);
+                    return Err(format!("screenshot timeout after {timeout_ms} ms"));
+                }
+            };
+            let dataurl = dataurl_value
+                .as_str()
+                .ok_or("frontend response was not a data URL string")?;
+            let b64 = dataurl
+                .strip_prefix("data:image/png;base64,")
+                .ok_or("frontend did not return data:image/png;base64,...")?;
+            if let Some(path) = output_path {
+                use base64::Engine as _;
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .map_err(|e| format!("base64 decode: {e}"))?;
+                std::fs::write(&path, &bytes).map_err(|e| format!("write {path}: {e}"))?;
+                Ok(json!({ "ok": true, "path": path, "bytes": bytes.len() }))
+            } else {
+                Ok(json!({ "data_url": dataurl }))
+            }
         }
 
         // Phase 8.B: resolve a URL through the workspace's port-forward map.

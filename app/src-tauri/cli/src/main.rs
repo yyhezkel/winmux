@@ -190,6 +190,50 @@ enum Cmd {
         url: String,
     },
 
+    /// Phase 8.C: read the persisted current URL of a browser pane.
+    BrowserUrl {
+        #[arg(long)]
+        pane: String,
+    },
+
+    /// Phase 8.C: read the navigation history of a browser pane.
+    BrowserHistory {
+        #[arg(long)]
+        pane: String,
+    },
+
+    /// Phase 8.C: block until the iframe fires onload (default 10s). Returns
+    /// the loaded URL on success.
+    BrowserWait {
+        #[arg(long)]
+        pane: String,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+    },
+
+    /// Phase 8.C: evaluate JS inside the iframe. Same-origin only — cross-origin
+    /// returns an error. Use Phase 8.D (WebView2) for arbitrary-page eval.
+    BrowserEval {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        expr: String,
+        #[arg(long, default_value_t = 5_000)]
+        timeout_ms: u64,
+    },
+
+    /// Phase 8.C: capture a screenshot of the pane (html2canvas). With --output,
+    /// writes a PNG to disk; otherwise prints the data URL. Cross-origin iframe
+    /// content renders as blanks under html2canvas.
+    BrowserScreenshot {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        output: Option<String>,
+        #[arg(long, default_value_t = 15_000)]
+        timeout_ms: u64,
+    },
+
     /// Stub for Claude Code agent hooks: reads JSON from stdin, fires a notify.
     ClaudeHook {
         subcommand: String,
@@ -753,6 +797,47 @@ async fn main() -> ExitCode {
             rpc_call(
                 "pane.browser.resolve-url",
                 json!({ "pane_id": pane, "url": url }),
+            )
+            .await
+        }
+        Cmd::BrowserUrl { pane } => rpc_call("pane.browser.url", json!({ "pane_id": pane })).await,
+        Cmd::BrowserHistory { pane } => {
+            rpc_call("pane.browser.history", json!({ "pane_id": pane })).await
+        }
+        Cmd::BrowserWait { pane, timeout_ms } => {
+            rpc_call(
+                "pane.browser.wait",
+                json!({ "pane_id": pane, "timeout_ms": timeout_ms }),
+            )
+            .await
+        }
+        Cmd::BrowserEval {
+            pane,
+            expr,
+            timeout_ms,
+        } => {
+            rpc_call(
+                "pane.browser.eval",
+                json!({
+                    "pane_id": pane,
+                    "expression": expr,
+                    "timeout_ms": timeout_ms,
+                }),
+            )
+            .await
+        }
+        Cmd::BrowserScreenshot {
+            pane,
+            output,
+            timeout_ms,
+        } => {
+            rpc_call(
+                "pane.browser.screenshot",
+                json!({
+                    "pane_id": pane,
+                    "output_path": output,
+                    "timeout_ms": timeout_ms,
+                }),
             )
             .await
         }

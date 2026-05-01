@@ -67,6 +67,19 @@ pub(crate) struct ForwardEntry {
 }
 pub(crate) type ForwardMap = Arc<Mutex<HashMap<(String, u16), ForwardEntry>>>;
 
+// Phase 8.C: pending request → response map for browser-pane operations that
+// need to round-trip through the frontend (eval, screenshot). Keyed by request_id.
+pub(crate) type BrowserPending = Arc<
+    Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<serde_json::Value, String>>>>,
+>;
+pub(crate) static BROWSER_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+// Phase 8.C: pending `browser-wait` waiters keyed by pane_id. The frontend calls
+// `pane_browser_loaded(pane_id, url)` on every iframe onload; that drains and
+// resolves all pending waiters for that pane.
+pub(crate) type BrowserLoadWaiters =
+    Arc<Mutex<HashMap<String, Vec<tokio::sync::oneshot::Sender<String>>>>>;
+
 /// Tri-state for whether persistence is safe:
 /// - `Loaded`: load_from_disk succeeded (file present or absent doesn't matter — state reflects truth).
 /// - `Failed`: load_from_disk hit a real error (read or parse). Persisting would clobber data.
@@ -133,6 +146,10 @@ pub(crate) struct AppState {
     pub(crate) notes: Arc<Mutex<notes::NotesFile>>,
     // Phase 8.B: per-(workspace, remote_port) port forwards.
     pub(crate) forwards: ForwardMap,
+    // Phase 8.C: pending browser requests (eval/screenshot) awaiting frontend reply.
+    pub(crate) browser_pending: BrowserPending,
+    // Phase 8.C: pending browser-wait waiters, drained on iframe onload.
+    pub(crate) browser_load_waiters: BrowserLoadWaiters,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1933,6 +1950,31 @@ pub(crate) async fn resolve_browser_url(
     Ok(format!("{}://127.0.0.1:{}{}", scheme, local_port, path))
 }
 
+// Phase 8.C: read a pane's persisted BrowserState clone, or None if the pane
+// doesn't exist or isn't a browser pane.
+pub(crate) fn find_browser_state(state: &AppState, pane_id: &str) -> Option<BrowserState> {
+    let file = state.workspaces.lock().unwrap();
+    for ws in &file.workspaces {
+        if let Some(layout) = &ws.layout {
+            if let Some(node) = find_pane_in(layout, pane_id) {
+                if let LayoutNode::Pane { browser, .. } = node {
+                    return browser.clone();
+                }
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn next_browser_request_id() -> String {
+    let n = BROWSER_REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("br_{:x}_{:x}", t, n)
+}
+
 fn find_pane_in<'a>(node: &'a LayoutNode, target: &str) -> Option<&'a LayoutNode> {
     match node {
         LayoutNode::Pane { pane_id, .. } if pane_id == target => Some(node),
@@ -2211,6 +2253,46 @@ async fn pane_browser_resolve_url(
     url: String,
 ) -> Result<String, String> {
     resolve_browser_url(&state, &workspace_id, &pane_id, &url).await
+}
+
+/// Phase 8.C: frontend reports an iframe `load` event. Drains and resolves all
+/// pending `pane.browser.wait` requests for the pane.
+#[tauri::command]
+fn pane_browser_loaded(
+    state: State<'_, AppState>,
+    pane_id: String,
+    url: String,
+) -> Result<(), String> {
+    let waiters = state
+        .browser_load_waiters
+        .lock()
+        .unwrap()
+        .remove(&pane_id)
+        .unwrap_or_default();
+    for tx in waiters {
+        let _ = tx.send(url.clone());
+    }
+    Ok(())
+}
+
+/// Phase 8.C: frontend delivers a response to a pending browser request
+/// (screenshot, eval). Called by BrowserPane.tsx after handling a `browser:request`
+/// event. The backend resolves the matching oneshot.
+#[tauri::command]
+fn pane_browser_response(
+    state: State<'_, AppState>,
+    request_id: String,
+    ok: Option<serde_json::Value>,
+    err: Option<String>,
+) -> Result<(), String> {
+    if let Some(tx) = state.browser_pending.lock().unwrap().remove(&request_id) {
+        let payload: Result<serde_json::Value, String> = match err {
+            Some(e) => Err(e),
+            None => Ok(ok.unwrap_or(serde_json::Value::Null)),
+        };
+        let _ = tx.send(payload);
+    }
+    Ok(())
 }
 
 /// Phase 8.B: per-pane toggle for the localhost-forwarding behavior. Sticky.
@@ -2706,6 +2788,8 @@ pub fn run() {
             pane_browser_go_home,
             pane_browser_resolve_url,
             pane_browser_set_forward,
+            pane_browser_response,
+            pane_browser_loaded,
             pty_write,
             pty_resize,
             notifications_list,

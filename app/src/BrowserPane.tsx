@@ -20,13 +20,20 @@ interface Props {
 }
 
 export function BrowserPane(p: Props) {
-  const browser = () =>
-    p.pane.browser ?? {
-      url: "",
-      home_url: undefined,
-      history: [] as string[],
-      forward_localhost: true,
+  // Phase 8 fix v3.1: merge with defaults so fields skipped during JSON
+  // serialization (e.g. `history` is omitted by serde when the Vec is empty,
+  // `forward_localhost` is omitted when it's the default true) come back as
+  // safe values rather than `undefined` — `browser().history.length` was
+  // crashing when navigating to a fresh browser pane.
+  const browser = () => {
+    const b = p.pane.browser;
+    return {
+      url: b?.url ?? "",
+      home_url: b?.home_url,
+      history: b?.history ?? [],
+      forward_localhost: b?.forward_localhost ?? true,
     };
+  };
   const forwardOn = () => browser().forward_localhost ?? true;
   const [urlDraft, setUrlDraft] = createSignal(browser().url);
   // Phase 8.B: the URL the iframe actually loads. Differs from browser().url

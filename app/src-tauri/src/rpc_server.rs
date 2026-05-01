@@ -630,8 +630,17 @@ async fn dispatch(
                 .unwrap_or(10_000);
             // Reject straight away if the pane isn't a browser pane (avoids
             // hanging forever on a stale id).
-            find_browser_state(state, &pane_id)
+            let bs = find_browser_state(state, &pane_id)
                 .ok_or_else(|| format!("no browser pane {pane_id}"))?;
+            // Phase 8.C fix: short-circuit when the iframe has already fired
+            // its `load` for the current url. Without this, a wait issued
+            // after the page is already loaded would block until the next
+            // navigation (or timeout).
+            if let Some(loaded) = &bs.last_loaded_url {
+                if loaded == &bs.url {
+                    return Ok(json!({ "url": bs.url, "already_loaded": true }));
+                }
+            }
             let (tx, rx) = tokio::sync::oneshot::channel();
             state
                 .browser_load_waiters

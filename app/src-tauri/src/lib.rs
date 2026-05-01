@@ -221,6 +221,11 @@ pub(crate) struct BrowserState {
     // listener. The address bar still shows the original URL.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub(crate) forward_localhost: bool,
+    // Phase 8.C fix: URL the iframe most recently fired `load` for. Lets
+    // `browser-wait` return immediately when the page is already loaded
+    // instead of timing out waiting for the next load event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_loaded_url: Option<String>,
 }
 
 impl Default for BrowserState {
@@ -230,6 +235,7 @@ impl Default for BrowserState {
             home_url: None,
             history: Vec::new(),
             forward_localhost: true,
+            last_loaded_url: None,
         }
     }
 }
@@ -665,6 +671,7 @@ pub(crate) fn split_pane_in(
                             home_url: Some(url),
                             history: Vec::new(),
                             forward_localhost: true,
+                            last_loaded_url: None,
                         };
                         (PaneKind::Browser, None, Some(bs))
                     }
@@ -2359,14 +2366,34 @@ async fn pane_browser_resolve_url(
     resolve_browser_url(&state, &workspace_id, &pane_id, &url).await
 }
 
-/// Phase 8.C: frontend reports an iframe `load` event. Drains and resolves all
-/// pending `pane.browser.wait` requests for the pane.
+/// Phase 8.C: frontend reports an iframe `load` event. Records the URL on the
+/// pane's `last_loaded_url` (so `browser-wait` can short-circuit when the page
+/// is already loaded) and drains every pending wait waiter for this pane.
 #[tauri::command]
 fn pane_browser_loaded(
     state: State<'_, AppState>,
+    app: AppHandle,
     pane_id: String,
     url: String,
 ) -> Result<(), String> {
+    // Stamp last_loaded_url on the pane's BrowserState. We don't bother
+    // emitting `workspaces:changed` because this is a low-stakes diagnostic
+    // field that the UI doesn't render — frontend only needs it indirectly
+    // via the wait short-circuit RPC. We still persist so a wait issued from
+    // a freshly-launched session can pick up where the previous session
+    // left off.
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        for ws in &mut file.workspaces {
+            if let Some(layout) = ws.layout.take() {
+                ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
+                    b.last_loaded_url = Some(url.clone());
+                }));
+            }
+        }
+    }
+    let _ = persist(&state);
+    let _ = app;
     let waiters = state
         .browser_load_waiters
         .lock()

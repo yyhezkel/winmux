@@ -42,53 +42,61 @@ export function LayoutView(p: Props) {
   return (
     <Show
       when={p.node.kind === "split"}
-      fallback={(() => {
-        const pane = p.node as Extract<LayoutNode, { kind: "pane" }>;
-        const isActive = p.activePaneId === pane.pane_id;
-        if (paneKindOf(pane) === "browser") {
-          return (
-            <BrowserPane
-              workspaceId={p.workspaceId}
-              pane={pane}
-              isActive={isActive}
-              onFocus={p.onFocus}
-              onSplit={p.onSplit}
-              onClose={p.onClose}
-              onNavigate={p.onBrowserNavigate}
-              onGoBack={p.onBrowserGoBack}
-              onGoHome={p.onBrowserGoHome}
-              onSetForward={p.onBrowserSetForward}
-              onSetTitle={p.onSetTitle}
-              onSetAnnotation={p.onSetAnnotation}
-            />
-          );
-        }
-        return (
-          <PaneView
-            workspaceId={p.workspaceId}
-            pane={pane}
-            isActive={isActive}
-            isConnected={p.connectedPaneIds.has(pane.pane_id)}
-            pendingPasswordFor={p.pendingPasswordFor}
-            pendingPassphrase={p.pendingPassphrase}
-            pendingHostTrust={p.pendingHostTrust}
-            status={p.paneStatus[pane.pane_id]}
-            statusText={p.paneStatusText[pane.pane_id]}
-            ensureTerm={p.ensureTerm}
-            onFocus={p.onFocus}
-            onConnect={p.onConnect}
-            onSplit={p.onSplit}
-            onClose={p.onClose}
-            onDisconnect={p.onDisconnect}
-            onSetTitle={p.onSetTitle}
-            onSetAnnotation={p.onSetAnnotation}
-          />
-        );
-      })()}
+      fallback={<LeafPane all={p} pane={p.node as Extract<LayoutNode, { kind: "pane" }>} />}
     >
       <SplitView
         {...(p.node as Extract<LayoutNode, { kind: "split" }>)}
         all={p}
+      />
+    </Show>
+  );
+}
+
+// Phase 8.A/regression-fix: render a leaf pane. Extracted from the previous
+// inline IIFE (`fallback={(() => { ... })()}`) — the IIFE was re-evaluated on
+// every parent render, which under some conditions caused the leaf component
+// to thrash mount/unmount and lose click events on Connect / sidebar items.
+// As a stable component, Solid reuses the same instance across re-renders.
+function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" }> }) {
+  const isActive = () => props.all.activePaneId === props.pane.pane_id;
+  return (
+    <Show
+      when={paneKindOf(props.pane) === "browser"}
+      fallback={
+        <PaneView
+          workspaceId={props.all.workspaceId}
+          pane={props.pane}
+          isActive={isActive()}
+          isConnected={props.all.connectedPaneIds.has(props.pane.pane_id)}
+          pendingPasswordFor={props.all.pendingPasswordFor}
+          pendingPassphrase={props.all.pendingPassphrase}
+          pendingHostTrust={props.all.pendingHostTrust}
+          status={props.all.paneStatus[props.pane.pane_id]}
+          statusText={props.all.paneStatusText[props.pane.pane_id]}
+          ensureTerm={props.all.ensureTerm}
+          onFocus={props.all.onFocus}
+          onConnect={props.all.onConnect}
+          onSplit={props.all.onSplit}
+          onClose={props.all.onClose}
+          onDisconnect={props.all.onDisconnect}
+          onSetTitle={props.all.onSetTitle}
+          onSetAnnotation={props.all.onSetAnnotation}
+        />
+      }
+    >
+      <BrowserPane
+        workspaceId={props.all.workspaceId}
+        pane={props.pane}
+        isActive={isActive()}
+        onFocus={props.all.onFocus}
+        onSplit={props.all.onSplit}
+        onClose={props.all.onClose}
+        onNavigate={props.all.onBrowserNavigate}
+        onGoBack={props.all.onBrowserGoBack}
+        onGoHome={props.all.onBrowserGoHome}
+        onSetForward={props.all.onBrowserSetForward}
+        onSetTitle={props.all.onSetTitle}
+        onSetAnnotation={props.all.onSetAnnotation}
       />
     </Show>
   );

@@ -37,9 +37,14 @@ export function BrowserPane(p: Props) {
   let bodyRef: HTMLDivElement | undefined;
 
   // Whenever the persisted URL changes (user nav, back, home, CLI), refresh
-  // both the address-bar draft and the iframe's resolved src.
+  // both the address-bar draft and the iframe's resolved src. Track the LAST
+  // (url, forward) pair we asked the backend to resolve so the effect doesn't
+  // re-fire just because setResolvedUrl flipped resolvedUrl ≠ browser().url
+  // (which is the whole point of forwarding — the two are intentionally
+  // different after rewrite).
   let lastUrl = browser().url;
-  let lastForward = forwardOn();
+  let lastResolvedSource = "";
+  let lastResolvedForward = forwardOn();
   createEffect(() => {
     const u = browser().url;
     const f = forwardOn();
@@ -47,26 +52,28 @@ export function BrowserPane(p: Props) {
       lastUrl = u;
       setUrlDraft(u);
     }
-    if (u !== resolvedUrl() || f !== lastForward) {
-      lastForward = f;
-      setResolveErr(null);
-      if (!u) {
-        setResolvedUrl("");
-        return;
-      }
-      invoke<string>("pane_browser_resolve_url", {
-        workspaceId: p.workspaceId,
-        paneId: p.pane.pane_id,
-        url: u,
-      })
-        .then((rewritten) => setResolvedUrl(rewritten))
-        .catch((err) => {
-          // If forwarding fails (e.g. no SSH session), fall back to the raw URL
-          // and surface the error in the chrome.
-          setResolvedUrl(u);
-          setResolveErr(String(err));
-        });
+    if (u === lastResolvedSource && f === lastResolvedForward) {
+      return; // no source change — don't re-resolve
     }
+    lastResolvedSource = u;
+    lastResolvedForward = f;
+    setResolveErr(null);
+    if (!u) {
+      setResolvedUrl("");
+      return;
+    }
+    invoke<string>("pane_browser_resolve_url", {
+      workspaceId: p.workspaceId,
+      paneId: p.pane.pane_id,
+      url: u,
+    })
+      .then((rewritten) => setResolvedUrl(rewritten))
+      .catch((err) => {
+        // If forwarding fails (e.g. no SSH session), fall back to the raw URL
+        // and surface the error in the chrome.
+        setResolvedUrl(u);
+        setResolveErr(String(err));
+      });
   });
 
   const submitUrl = () => {

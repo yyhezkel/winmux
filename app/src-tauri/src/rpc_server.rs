@@ -8,8 +8,9 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use crate::notes::{self, NoteStatus};
 use crate::{
     collect_panes, decide_feed, find_workspace_for_pane, new_pane_id, new_workspace_id, persist,
-    update_pane_in, write_to_session, AppState, CreateInput, EnvVar, FeedItem, FeedItemState,
-    LayoutNode, NotificationItem, Workspace, NOTIF_COUNTER,
+    split_pane_in, update_browser_pane, update_pane_in, write_to_session, AppState, CreateInput,
+    EnvVar, FeedItem, FeedItemState, LayoutNode, NotificationItem, PaneKind, SplitDirection,
+    Workspace, NOTIF_COUNTER,
 };
 
 const FEED_MAX_ITEMS_LIMIT: usize = 50;
@@ -170,7 +171,9 @@ async fn dispatch(
                 connection: None,
                 layout: Some(LayoutNode::Pane {
                     pane_id: new_pane_id(),
-                    connection: input.connection,
+                    pane_kind: PaneKind::Terminal,
+                    connection: Some(input.connection),
+                    browser: None,
                     title: None,
                     annotation: None,
                 }),
@@ -452,6 +455,164 @@ async fn dispatch(
                     if let Some(layout) = ws.layout.take() {
                         ws.layout =
                             Some(update_pane_in(layout, &pane_id, None, Some(annotation)));
+                    }
+                }
+            }
+            persist(state)?;
+            let _ = app.emit("workspaces:changed", ());
+            Ok(json!({ "ok": true }))
+        }
+
+        // Phase 8.A: split a pane (terminal or browser).
+        "split" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let direction = match params
+                .get("direction")
+                .and_then(|v| v.as_str())
+                .unwrap_or("horizontal")
+                .to_lowercase()
+                .as_str()
+            {
+                "horizontal" | "right" | "h" => SplitDirection::Horizontal,
+                "vertical" | "down" | "v" => SplitDirection::Vertical,
+                other => return Err(format!("bad direction: {other}")),
+            };
+            let kind = match params.get("kind").and_then(|v| v.as_str()) {
+                None | Some("terminal") => PaneKind::Terminal,
+                Some("browser") => PaneKind::Browser,
+                Some(other) => return Err(format!("bad kind: {other}")),
+            };
+            let url = params
+                .get("url")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let workspace_id = {
+                let file = state.workspaces.lock().unwrap();
+                find_workspace_for_pane(&file, &pane_id)
+                    .ok_or_else(|| format!("no pane {pane_id}"))?
+            };
+            {
+                let mut file = state.workspaces.lock().unwrap();
+                if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+                    if let Some(layout) = ws.layout.take() {
+                        let (new_layout, _) =
+                            split_pane_in(layout, &pane_id, direction, kind, url);
+                        ws.layout = Some(new_layout);
+                    }
+                }
+            }
+            persist(state)?;
+            let _ = app.emit("workspaces:changed", ());
+            Ok(json!({ "ok": true, "workspace_id": workspace_id }))
+        }
+
+        // Phase 8.A: browser pane navigation. All three resolve workspace_id from
+        // pane_id so agents on a remote can call them with just $WINMUX_PANE_ID.
+        "pane.browser.navigate" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let url = params
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or("missing url")?
+                .to_string();
+            if url.is_empty() {
+                return Err("empty url".into());
+            }
+            let workspace_id = {
+                let file = state.workspaces.lock().unwrap();
+                find_workspace_for_pane(&file, &pane_id)
+                    .ok_or_else(|| format!("no pane {pane_id}"))?
+            };
+            {
+                let mut file = state.workspaces.lock().unwrap();
+                if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+                    if let Some(layout) = ws.layout.take() {
+                        let url_clone = url.clone();
+                        ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
+                            if !b.url.is_empty() && b.url != url_clone {
+                                b.history.push(b.url.clone());
+                                if b.history.len() > 50 {
+                                    let drop = b.history.len() - 50;
+                                    b.history.drain(0..drop);
+                                }
+                            }
+                            b.url = url_clone.clone();
+                        }));
+                    }
+                }
+            }
+            persist(state)?;
+            let _ = app.emit("workspaces:changed", ());
+            Ok(json!({ "ok": true, "url": url }))
+        }
+
+        "pane.browser.go-back" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let workspace_id = {
+                let file = state.workspaces.lock().unwrap();
+                find_workspace_for_pane(&file, &pane_id)
+                    .ok_or_else(|| format!("no pane {pane_id}"))?
+            };
+            {
+                let mut file = state.workspaces.lock().unwrap();
+                if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+                    if let Some(layout) = ws.layout.take() {
+                        ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
+                            if let Some(prev) = b.history.pop() {
+                                b.url = prev;
+                            }
+                        }));
+                    }
+                }
+            }
+            persist(state)?;
+            let _ = app.emit("workspaces:changed", ());
+            Ok(json!({ "ok": true }))
+        }
+
+        "pane.browser.go-home" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let workspace_id = {
+                let file = state.workspaces.lock().unwrap();
+                find_workspace_for_pane(&file, &pane_id)
+                    .ok_or_else(|| format!("no pane {pane_id}"))?
+            };
+            {
+                let mut file = state.workspaces.lock().unwrap();
+                if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+                    if let Some(layout) = ws.layout.take() {
+                        ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
+                            if let Some(home) = b.home_url.clone() {
+                                if !b.url.is_empty() && b.url != home {
+                                    b.history.push(b.url.clone());
+                                    if b.history.len() > 50 {
+                                        let drop = b.history.len() - 50;
+                                        b.history.drain(0..drop);
+                                    }
+                                }
+                                b.url = home;
+                            }
+                        }));
                     }
                 }
             }

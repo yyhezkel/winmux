@@ -94,7 +94,9 @@ export function PaneView(p: Props) {
       onMouseDown={() => p.onFocus(p.pane.pane_id)}
     >
       <div class="pane-header">
-        <span class="pane-conn">{describeConnection(p.pane.connection)}</span>
+        <span class="pane-conn">
+          {p.pane.connection ? describeConnection(p.pane.connection) : "—"}
+        </span>
         <Show when={p.pane.title}>
           <span class="pane-title" title={p.pane.title!}>· {p.pane.title}</span>
         </Show>

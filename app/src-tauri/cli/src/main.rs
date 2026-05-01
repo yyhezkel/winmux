@@ -144,6 +144,42 @@ enum Cmd {
         annotation: String,
     },
 
+    /// Phase 8.A: split a pane (terminal or browser).
+    Split {
+        /// Pane id of the existing pane to split off.
+        #[arg(long)]
+        pane: String,
+        /// `right`/`horizontal` (default) or `down`/`vertical`.
+        #[arg(long, default_value = "right")]
+        direction: String,
+        /// `terminal` (default) inherits the pane's connection; `browser` opens an iframe.
+        #[arg(long, default_value = "terminal")]
+        kind: String,
+        /// Initial URL when --kind=browser. Defaults to about:blank.
+        #[arg(long)]
+        url: Option<String>,
+    },
+
+    /// Phase 8.A: navigate a browser pane to a new URL (history is pushed).
+    BrowserNavigate {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        url: String,
+    },
+
+    /// Phase 8.A: pop the browser pane's history once.
+    BrowserGoBack {
+        #[arg(long)]
+        pane: String,
+    },
+
+    /// Phase 8.A: reset the browser pane to its home URL.
+    BrowserGoHome {
+        #[arg(long)]
+        pane: String,
+    },
+
     /// Stub for Claude Code agent hooks: reads JSON from stdin, fires a notify.
     ClaudeHook {
         subcommand: String,
@@ -672,6 +708,36 @@ async fn main() -> ExitCode {
                 json!({ "pane_id": pane, "annotation": annotation }),
             )
             .await
+        }
+        Cmd::Split {
+            pane,
+            direction,
+            kind,
+            url,
+        } => {
+            rpc_call(
+                "split",
+                json!({
+                    "pane_id": pane,
+                    "direction": direction,
+                    "kind": kind,
+                    "url": url,
+                }),
+            )
+            .await
+        }
+        Cmd::BrowserNavigate { pane, url } => {
+            rpc_call(
+                "pane.browser.navigate",
+                json!({ "pane_id": pane, "url": url }),
+            )
+            .await
+        }
+        Cmd::BrowserGoBack { pane } => {
+            rpc_call("pane.browser.go-back", json!({ "pane_id": pane })).await
+        }
+        Cmd::BrowserGoHome { pane } => {
+            rpc_call("pane.browser.go-home", json!({ "pane_id": pane })).await
         }
         Cmd::Note { op } => match op {
             NoteOp::Add {

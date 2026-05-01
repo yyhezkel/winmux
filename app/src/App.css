@@ -92,6 +92,7 @@ body {
   font-family: "Cascadia Mono", monospace;
 }
 .ws-badge.ssh { background: #2c3a5a; color: #7aa2f7; }
+.ws-badge.browser { background: #3a2c5a; color: #bb9af7; }
 
 .ws-live {
   width: 6px;
@@ -165,6 +166,80 @@ body {
   color: #6b7682;
   font-family: "Cascadia Mono", monospace;
   font-size: 11px;
+}
+.ws-header-btn {
+  margin-left: 8px;
+  background: #1f2a36;
+  color: #cfe1ff;
+  border: 1px solid #2c3d4d;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ws-header-btn:hover { background: #2c3d4d; }
+
+/* Phase 8.A: browser pane (iframe MVP) */
+.browser-pane {
+  display: flex;
+  flex-direction: column;
+}
+.browser-header {
+  gap: 4px;
+}
+.browser-url {
+  flex: 1;
+  min-width: 120px;
+  background: #0b0d10;
+  color: #e6e6e6;
+  border: 1px solid #2a3340;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: "Cascadia Mono", ui-monospace, Consolas, monospace;
+  outline: none;
+}
+.browser-url:focus { border-color: #4a90e2; }
+.browser-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.browser-body {
+  flex: 1;
+  display: flex;
+  background: #fff;
+  position: relative;
+}
+.browser-iframe {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+.browser-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #6b7682;
+  font-size: 13px;
+  background: #0b0d10;
+  padding: 24px;
+  text-align: center;
+}
+.browser-placeholder .browser-hint {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #4d5663;
+  max-width: 380px;
+}
+.pane-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .empty {

@@ -151,17 +151,52 @@ pub(crate) enum Connection {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "lowercase")]
-enum SplitDirection {
+pub(crate) enum SplitDirection {
     Horizontal,
     Vertical,
 }
+
+// Phase 8.A: pane kind. Defaults to Terminal so older workspaces.json (no `pane_kind`
+// field) deserialize unchanged. `is_terminal_kind` lets serde elide the field on
+// terminal panes, keeping legacy round-trips byte-identical.
+#[derive(Clone, Copy, Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum PaneKind {
+    #[default]
+    Terminal,
+    Browser,
+}
+
+fn is_terminal_kind(k: &PaneKind) -> bool {
+    matches!(k, PaneKind::Terminal)
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub(crate) struct BrowserState {
+    pub(crate) url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) home_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) history: Vec<String>,
+}
+
+const BROWSER_HISTORY_MAX: usize = 50;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub(crate) enum LayoutNode {
     Pane {
         pane_id: String,
-        connection: Connection,
+        // Phase 8.A: terminal vs browser. Default = Terminal so legacy JSON works.
+        #[serde(default, skip_serializing_if = "is_terminal_kind")]
+        pane_kind: PaneKind,
+        // Phase 8.A: connection is required for terminal panes, absent for browser.
+        // Legacy JSON always has it set.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        connection: Option<Connection>,
+        // Phase 8.A: browser pane state (url, home_url, history). None for terminal panes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        browser: Option<BrowserState>,
         // Phase 7.A: optional human-readable annotations on each leaf. Both fields
         // serialize-skip when None so existing workspaces.json files round-trip
         // unchanged until the user edits one.
@@ -377,7 +412,9 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
             let conn = ws.connection.take().unwrap_or(Connection::Local { shell: None });
             ws.layout = Some(LayoutNode::Pane {
                 pane_id: new_pane_id(),
-                connection: conn,
+                pane_kind: PaneKind::Terminal,
+                connection: Some(conn),
+                browser: None,
                 title: None,
                 annotation: None,
             });
@@ -423,11 +460,68 @@ pub(crate) fn find_pane_connection(node: &LayoutNode, target: &str) -> Option<Co
     match node {
         LayoutNode::Pane {
             pane_id, connection, ..
-        } if pane_id == target => Some(connection.clone()),
+        } if pane_id == target => connection.clone(),
         LayoutNode::Pane { .. } => None,
         LayoutNode::Split { first, second, .. } => {
             find_pane_connection(first, target).or_else(|| find_pane_connection(second, target))
         }
+    }
+}
+
+// Phase 8.A: existence check independent of pane kind. find_pane_connection returns
+// None for browser panes (no connection), so callers that only need "does this pane
+// exist somewhere in this layout" must use this instead.
+pub(crate) fn pane_id_exists_in(node: &LayoutNode, target: &str) -> bool {
+    match node {
+        LayoutNode::Pane { pane_id, .. } => pane_id == target,
+        LayoutNode::Split { first, second, .. } => {
+            pane_id_exists_in(first, target) || pane_id_exists_in(second, target)
+        }
+    }
+}
+
+// Phase 8.A: mutate a browser pane's state (or no-op if pane is terminal / not found).
+pub(crate) fn update_browser_pane(
+    node: LayoutNode,
+    target: &str,
+    f: &mut dyn FnMut(&mut BrowserState),
+) -> LayoutNode {
+    match node {
+        LayoutNode::Pane {
+            pane_id,
+            pane_kind,
+            connection,
+            mut browser,
+            title,
+            annotation,
+        } => {
+            if pane_id == target && pane_kind == PaneKind::Browser {
+                if let Some(b) = browser.as_mut() {
+                    f(b);
+                }
+            }
+            LayoutNode::Pane {
+                pane_id,
+                pane_kind,
+                connection,
+                browser,
+                title,
+                annotation,
+            }
+        }
+        LayoutNode::Split {
+            split_id,
+            direction,
+            first,
+            second,
+            ratio,
+        } => LayoutNode::Split {
+            split_id,
+            direction,
+            first: Box::new(update_browser_pane(*first, target, f)),
+            second: Box::new(update_browser_pane(*second, target, f)),
+            ratio,
+        },
     }
 }
 
@@ -441,24 +535,60 @@ pub(crate) fn collect_panes(node: &LayoutNode, out: &mut Vec<String>) {
     }
 }
 
-fn split_pane_in(node: LayoutNode, target: &str, dir: SplitDirection) -> (LayoutNode, bool) {
+// Phase 8.A: `new_kind` decides whether the spawned sibling is a terminal (default,
+// inherits the existing pane's connection) or a browser (with `new_browser_url` as
+// the starting page).
+pub(crate) fn split_pane_in(
+    node: LayoutNode,
+    target: &str,
+    dir: SplitDirection,
+    new_kind: PaneKind,
+    new_browser_url: Option<String>,
+) -> (LayoutNode, bool) {
     match node {
         LayoutNode::Pane {
             pane_id,
+            pane_kind,
             connection,
+            browser,
             title,
             annotation,
         } => {
             if pane_id == target {
+                let (new_kind_resolved, new_conn, new_browser) = match new_kind {
+                    PaneKind::Terminal => {
+                        // For a terminal sibling, inherit this pane's connection if it has
+                        // one; otherwise (splitting off a browser pane) fall back to local.
+                        let conn = connection
+                            .clone()
+                            .unwrap_or(Connection::Local { shell: None });
+                        (PaneKind::Terminal, Some(conn), None)
+                    }
+                    PaneKind::Browser => {
+                        let url = new_browser_url
+                            .clone()
+                            .unwrap_or_else(|| "about:blank".to_string());
+                        let bs = BrowserState {
+                            url: url.clone(),
+                            home_url: Some(url),
+                            history: Vec::new(),
+                        };
+                        (PaneKind::Browser, None, Some(bs))
+                    }
+                };
                 let new_pane = LayoutNode::Pane {
                     pane_id: new_pane_id(),
-                    connection: connection.clone(),
+                    pane_kind: new_kind_resolved,
+                    connection: new_conn,
+                    browser: new_browser,
                     title: None,
                     annotation: None,
                 };
                 let original = LayoutNode::Pane {
                     pane_id,
+                    pane_kind,
                     connection,
+                    browser,
                     title,
                     annotation,
                 };
@@ -476,7 +606,9 @@ fn split_pane_in(node: LayoutNode, target: &str, dir: SplitDirection) -> (Layout
                 (
                     LayoutNode::Pane {
                         pane_id,
+                        pane_kind,
                         connection,
+                        browser,
                         title,
                         annotation,
                     },
@@ -491,7 +623,13 @@ fn split_pane_in(node: LayoutNode, target: &str, dir: SplitDirection) -> (Layout
             second,
             ratio,
         } => {
-            let (new_first, found1) = split_pane_in(*first, target, dir.clone());
+            let (new_first, found1) = split_pane_in(
+                *first,
+                target,
+                dir.clone(),
+                new_kind,
+                new_browser_url.clone(),
+            );
             if found1 {
                 return (
                     LayoutNode::Split {
@@ -504,7 +642,8 @@ fn split_pane_in(node: LayoutNode, target: &str, dir: SplitDirection) -> (Layout
                     true,
                 );
             }
-            let (new_second, found2) = split_pane_in(*second, target, dir);
+            let (new_second, found2) =
+                split_pane_in(*second, target, dir, new_kind, new_browser_url);
             (
                 LayoutNode::Split {
                     split_id,
@@ -526,7 +665,9 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
     match node {
         LayoutNode::Pane {
             pane_id,
+            pane_kind,
             connection,
+            browser,
             title,
             annotation,
         } => {
@@ -535,7 +676,9 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
             (
                 Some(LayoutNode::Pane {
                     pane_id,
+                    pane_kind,
                     connection,
+                    browser,
                     title,
                     annotation,
                 }),
@@ -605,21 +748,27 @@ pub(crate) fn update_pane_in(
     match node {
         LayoutNode::Pane {
             pane_id,
+            pane_kind,
             connection,
+            browser,
             title,
             annotation,
         } => {
             if pane_id == target {
                 LayoutNode::Pane {
                     pane_id,
+                    pane_kind,
                     connection,
+                    browser,
                     title: new_title.unwrap_or(title),
                     annotation: new_annotation.unwrap_or(annotation),
                 }
             } else {
                 LayoutNode::Pane {
                     pane_id,
+                    pane_kind,
                     connection,
+                    browser,
                     title,
                     annotation,
                 }
@@ -656,7 +805,7 @@ pub(crate) fn update_pane_in(
 pub(crate) fn find_workspace_for_pane(file: &WorkspacesFile, pane_id: &str) -> Option<String> {
     for ws in &file.workspaces {
         if let Some(layout) = &ws.layout {
-            if find_pane_connection(layout, pane_id).is_some() {
+            if pane_id_exists_in(layout, pane_id) {
                 return Some(ws.id.clone());
             }
         }
@@ -1529,7 +1678,9 @@ fn workspace_create(
         connection: None,
         layout: Some(LayoutNode::Pane {
             pane_id: new_pane_id(),
-            connection: input.connection,
+            pane_kind: PaneKind::Terminal,
+            connection: Some(input.connection),
+            browser: None,
             title: None,
             annotation: None,
         }),
@@ -1666,17 +1817,113 @@ fn workspace_split(
     workspace_id: String,
     pane_id: String,
     direction: SplitDirection,
+    // Phase 8.A: kind defaults to Terminal (back-compat). Browser also accepts a
+    // starting URL — falls back to about:blank if absent.
+    pane_kind: Option<PaneKind>,
+    browser_url: Option<String>,
 ) -> Result<WorkspacesFile, String> {
+    let kind = pane_kind.unwrap_or(PaneKind::Terminal);
     {
         let mut file = state.workspaces.lock().unwrap();
         if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
             if let Some(layout) = ws.layout.take() {
-                let (new_layout, _) = split_pane_in(layout, &pane_id, direction);
+                let (new_layout, _) =
+                    split_pane_in(layout, &pane_id, direction, kind, browser_url);
                 ws.layout = Some(new_layout);
             }
         }
     }
     persist(&state)?;
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+// ─── Phase 8.A: browser-pane commands ───────────────────────────────────────
+
+#[tauri::command]
+fn pane_browser_navigate(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+    url: String,
+) -> Result<WorkspacesFile, String> {
+    if url.is_empty() {
+        return Err("empty url".into());
+    }
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            if let Some(layout) = ws.layout.take() {
+                ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
+                    if !b.url.is_empty() && b.url != url {
+                        b.history.push(b.url.clone());
+                        if b.history.len() > BROWSER_HISTORY_MAX {
+                            let drop = b.history.len() - BROWSER_HISTORY_MAX;
+                            b.history.drain(0..drop);
+                        }
+                    }
+                    b.url = url.clone();
+                }));
+            }
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn pane_browser_go_back(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            if let Some(layout) = ws.layout.take() {
+                ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
+                    if let Some(prev) = b.history.pop() {
+                        b.url = prev;
+                    }
+                }));
+            }
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn pane_browser_go_home(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            if let Some(layout) = ws.layout.take() {
+                ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
+                    if let Some(home) = b.home_url.clone() {
+                        if !b.url.is_empty() && b.url != home {
+                            b.history.push(b.url.clone());
+                            if b.history.len() > BROWSER_HISTORY_MAX {
+                                let drop = b.history.len() - BROWSER_HISTORY_MAX;
+                                b.history.drain(0..drop);
+                            }
+                        }
+                        b.url = home;
+                    }
+                }));
+            }
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
     Ok(state.workspaces.lock().unwrap().clone())
 }
 
@@ -1805,8 +2052,13 @@ async fn pane_connect(
             .layout
             .as_ref()
             .ok_or_else(|| "no layout".to_string())?;
-        let conn = find_pane_connection(layout, &pane_id)
-            .ok_or_else(|| format!("no pane {pane_id}"))?;
+        let conn = find_pane_connection(layout, &pane_id).ok_or_else(|| {
+            if pane_id_exists_in(layout, &pane_id) {
+                format!("pane {pane_id} is not a terminal pane")
+            } else {
+                format!("no pane {pane_id}")
+            }
+        })?;
         (
             conn,
             ws.cwd.clone(),
@@ -2107,6 +2359,9 @@ pub fn run() {
             pane_disconnect,
             pane_set_title,
             pane_set_annotation,
+            pane_browser_navigate,
+            pane_browser_go_back,
+            pane_browser_go_home,
             pty_write,
             pty_resize,
             notifications_list,

@@ -240,7 +240,12 @@ function App() {
 
   // ─── pane operations ────────────────────────────────────────────────────
 
-  const splitPane = async (paneId: string, direction: SplitDirection) => {
+  const splitPane = async (
+    paneId: string,
+    direction: SplitDirection,
+    kind: "terminal" | "browser" = "terminal",
+    browserUrl?: string
+  ) => {
     const ws = activeWs();
     if (!ws) return;
     try {
@@ -248,10 +253,55 @@ function App() {
         workspaceId: ws.id,
         paneId,
         direction,
+        paneKind: kind,
+        browserUrl: browserUrl ?? null,
       });
       updateFile(f);
     } catch (e) {
       console.error("split failed", e);
+    }
+  };
+
+  const browserNavigate = async (paneId: string, url: string) => {
+    const ws = activeWs();
+    if (!ws) return;
+    try {
+      const f = await invoke<WorkspacesFile>("pane_browser_navigate", {
+        workspaceId: ws.id,
+        paneId,
+        url,
+      });
+      updateFile(f);
+    } catch (e) {
+      console.error("browser navigate failed", e);
+    }
+  };
+
+  const browserGoBack = async (paneId: string) => {
+    const ws = activeWs();
+    if (!ws) return;
+    try {
+      const f = await invoke<WorkspacesFile>("pane_browser_go_back", {
+        workspaceId: ws.id,
+        paneId,
+      });
+      updateFile(f);
+    } catch (e) {
+      console.error("browser go-back failed", e);
+    }
+  };
+
+  const browserGoHome = async (paneId: string) => {
+    const ws = activeWs();
+    if (!ws) return;
+    try {
+      const f = await invoke<WorkspacesFile>("pane_browser_go_home", {
+        workspaceId: ws.id,
+        paneId,
+      });
+      updateFile(f);
+    } catch (e) {
+      console.error("browser go-home failed", e);
     }
   };
 
@@ -595,6 +645,19 @@ function App() {
                 {collectPanes(activeWs()!.layout!).length} panes
               </span>
             </Show>
+            {/* Phase 8.A: split active pane into a browser pane on the right. */}
+            <Show when={activeWs()!.layout && activePaneId()}>
+              <button
+                class="ws-header-btn"
+                title="Split into browser pane"
+                onClick={() => {
+                  const pid = activePaneId();
+                  if (pid) splitPane(pid, "horizontal", "browser");
+                }}
+              >
+                🌐 + browser
+              </button>
+            </Show>
           </div>
         </Show>
 
@@ -652,6 +715,9 @@ function App() {
               }}
               onRatioDrag={(sid, r) => setRatio(sid, r, false)}
               onRatioCommit={(sid, r) => setRatio(sid, r, true)}
+              onBrowserNavigate={browserNavigate}
+              onBrowserGoBack={browserGoBack}
+              onBrowserGoHome={browserGoHome}
             />
           </div>
         </Show>

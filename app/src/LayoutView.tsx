@@ -1,12 +1,13 @@
 import { Show } from "solid-js";
 import { Divider } from "./Divider";
+import { BrowserPane } from "./BrowserPane";
 import {
   PaneView,
   type ConnectOpts,
   type HostTrustPending,
   type PassphrasePending,
 } from "./PaneView";
-import type { LayoutNode, SplitDirection } from "./types";
+import { paneKindOf, type LayoutNode, type SplitDirection } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
 
 interface Props {
@@ -29,46 +30,57 @@ interface Props {
   onSetAnnotation: (paneId: string, annotation: string) => void;
   onRatioDrag: (splitId: string, ratio: number) => void;
   onRatioCommit: (splitId: string, ratio: number) => void;
+  // Phase 8.A: browser-pane callbacks.
+  onBrowserNavigate: (paneId: string, url: string) => void;
+  onBrowserGoBack: (paneId: string) => void;
+  onBrowserGoHome: (paneId: string) => void;
 }
 
 export function LayoutView(p: Props) {
   return (
     <Show
       when={p.node.kind === "split"}
-      fallback={
-        <PaneView
-          workspaceId={p.workspaceId}
-          pane={p.node as Extract<LayoutNode, { kind: "pane" }>}
-          isActive={
-            p.activePaneId ===
-            (p.node as Extract<LayoutNode, { kind: "pane" }>).pane_id
-          }
-          isConnected={p.connectedPaneIds.has(
-            (p.node as Extract<LayoutNode, { kind: "pane" }>).pane_id
-          )}
-          pendingPasswordFor={p.pendingPasswordFor}
-          pendingPassphrase={p.pendingPassphrase}
-          pendingHostTrust={p.pendingHostTrust}
-          status={
-            p.paneStatus[
-              (p.node as Extract<LayoutNode, { kind: "pane" }>).pane_id
-            ]
-          }
-          statusText={
-            p.paneStatusText[
-              (p.node as Extract<LayoutNode, { kind: "pane" }>).pane_id
-            ]
-          }
-          ensureTerm={p.ensureTerm}
-          onFocus={p.onFocus}
-          onConnect={p.onConnect}
-          onSplit={p.onSplit}
-          onClose={p.onClose}
-          onDisconnect={p.onDisconnect}
-          onSetTitle={p.onSetTitle}
-          onSetAnnotation={p.onSetAnnotation}
-        />
-      }
+      fallback={(() => {
+        const pane = p.node as Extract<LayoutNode, { kind: "pane" }>;
+        const isActive = p.activePaneId === pane.pane_id;
+        if (paneKindOf(pane) === "browser") {
+          return (
+            <BrowserPane
+              pane={pane}
+              isActive={isActive}
+              onFocus={p.onFocus}
+              onSplit={p.onSplit}
+              onClose={p.onClose}
+              onNavigate={p.onBrowserNavigate}
+              onGoBack={p.onBrowserGoBack}
+              onGoHome={p.onBrowserGoHome}
+              onSetTitle={p.onSetTitle}
+              onSetAnnotation={p.onSetAnnotation}
+            />
+          );
+        }
+        return (
+          <PaneView
+            workspaceId={p.workspaceId}
+            pane={pane}
+            isActive={isActive}
+            isConnected={p.connectedPaneIds.has(pane.pane_id)}
+            pendingPasswordFor={p.pendingPasswordFor}
+            pendingPassphrase={p.pendingPassphrase}
+            pendingHostTrust={p.pendingHostTrust}
+            status={p.paneStatus[pane.pane_id]}
+            statusText={p.paneStatusText[pane.pane_id]}
+            ensureTerm={p.ensureTerm}
+            onFocus={p.onFocus}
+            onConnect={p.onConnect}
+            onSplit={p.onSplit}
+            onClose={p.onClose}
+            onDisconnect={p.onDisconnect}
+            onSetTitle={p.onSetTitle}
+            onSetAnnotation={p.onSetAnnotation}
+          />
+        );
+      })()}
     >
       <SplitView
         {...(p.node as Extract<LayoutNode, { kind: "split" }>)}

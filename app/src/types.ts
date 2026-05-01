@@ -4,11 +4,24 @@ export type Connection =
 
 export type SplitDirection = "horizontal" | "vertical";
 
+// Phase 8.A: pane kind. Default = terminal for legacy panes (server omits the field).
+export type PaneKind = "terminal" | "browser";
+
+export type BrowserState = {
+  url: string;
+  home_url?: string;
+  history: string[];
+};
+
 export type LayoutNode =
   | {
       kind: "pane";
       pane_id: string;
-      connection: Connection;
+      // Optional in JSON for backward-compat; treat absent as "terminal".
+      pane_kind?: PaneKind;
+      // Required for terminal panes; absent for browser panes.
+      connection?: Connection;
+      browser?: BrowserState;
       title?: string;
       annotation?: string;
     }
@@ -20,6 +33,10 @@ export type LayoutNode =
       second: LayoutNode;
       ratio: number;
     };
+
+export function paneKindOf(p: LayoutNode & { kind: "pane" }): PaneKind {
+  return p.pane_kind ?? "terminal";
+}
 
 export type EnvVar = { key: string; value: string };
 
@@ -90,7 +107,7 @@ export function collectPanes(node: LayoutNode): string[] {
 export function findPane(
   node: LayoutNode,
   paneId: string
-): { kind: "pane"; pane_id: string; connection: Connection } | null {
+): (LayoutNode & { kind: "pane" }) | null {
   if (node.kind === "pane")
     return node.pane_id === paneId ? node : null;
   return findPane(node.first, paneId) ?? findPane(node.second, paneId);

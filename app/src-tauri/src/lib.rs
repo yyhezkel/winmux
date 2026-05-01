@@ -38,6 +38,13 @@ struct LocalSession {
 
 struct SshSession {
     tx: tokio::sync::mpsc::UnboundedSender<SshCmd>,
+    // Phase 8.B: shared russh client handle. The I/O task and any port-forward
+    // accept loop both hold an Arc; russh's Handle methods take &self, so
+    // concurrent users send commands through the underlying mpsc sender.
+    handle: Arc<client::Handle<SshClient>>,
+    // Phase 8.B: workspace this session belongs to, so port-forward bookkeeping
+    // can clean up when the workspace is deleted or all SSH sessions exit.
+    workspace_id: String,
 }
 
 #[derive(Debug)]
@@ -50,6 +57,15 @@ enum SshCmd {
 type SessionMap = Arc<Mutex<HashMap<String, Session>>>;
 type PaneSessionMap = Arc<Mutex<HashMap<String, String>>>;
 type WorkspacesState = Arc<Mutex<WorkspacesFile>>;
+
+// Phase 8.B: SSH local port forwards (browser pane → remote dev server).
+// Key = (workspace_id, remote_port). Value carries the local listener port and
+// a oneshot to cancel the accept loop on cleanup.
+pub(crate) struct ForwardEntry {
+    pub(crate) local_port: u16,
+    pub(crate) cancel: Option<tokio::sync::oneshot::Sender<()>>,
+}
+pub(crate) type ForwardMap = Arc<Mutex<HashMap<(String, u16), ForwardEntry>>>;
 
 /// Tri-state for whether persistence is safe:
 /// - `Loaded`: load_from_disk succeeded (file present or absent doesn't matter — state reflects truth).
@@ -115,6 +131,8 @@ pub(crate) struct AppState {
     pub(crate) pane_status: Arc<Mutex<HashMap<String, String>>>,
     pub(crate) feed: Arc<Mutex<FeedStore>>,
     pub(crate) notes: Arc<Mutex<notes::NotesFile>>,
+    // Phase 8.B: per-(workspace, remote_port) port forwards.
+    pub(crate) forwards: ForwardMap,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -171,13 +189,36 @@ fn is_terminal_kind(k: &PaneKind) -> bool {
     matches!(k, PaneKind::Terminal)
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct BrowserState {
     pub(crate) url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) home_url: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) history: Vec<String>,
+    // Phase 8.B: when true (default) and the pane lives in an SSH workspace,
+    // navigate-resolve rewrites localhost:N / 127.0.0.1:N to a forwarded local
+    // listener. The address bar still shows the original URL.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub(crate) forward_localhost: bool,
+}
+
+impl Default for BrowserState {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            home_url: None,
+            history: Vec::new(),
+            forward_localhost: true,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 const BROWSER_HISTORY_MAX: usize = 50;
@@ -572,6 +613,7 @@ pub(crate) fn split_pane_in(
                             url: url.clone(),
                             home_url: Some(url),
                             history: Vec::new(),
+                            forward_localhost: true,
                         };
                         (PaneKind::Browser, None, Some(bs))
                     }
@@ -1434,6 +1476,7 @@ async fn spawn_ssh(
     state: &AppState,
     pane_id: String,
     app: &AppHandle,
+    workspace_id: String,
     host: String,
     user: String,
     port: u16,
@@ -1586,11 +1629,22 @@ async fn spawn_ssh(
     let id = next_session_id();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SshCmd>();
 
+    // Phase 8.B: wrap the handle in an Arc before the I/O task takes ownership.
+    // russh's Handle isn't Clone, but its methods take &self, so multiple owners
+    // of an Arc<Handle> can safely call channel_open_direct_tcpip concurrently
+    // (each call is just a message into the underlying session task).
+    let handle_arc = Arc::new(handle);
+    let handle_for_task = Arc::clone(&handle_arc);
+    let handle_for_state = Arc::clone(&handle_arc);
+    let workspace_id_for_state = workspace_id.clone();
+
     let id_for_task = id.clone();
     let pane_for_task = pane_id.clone();
     let app_for_task = app.clone();
     let sessions_for_task = state.sessions.clone();
     let pane_sessions_for_task = state.pane_sessions.clone();
+    let forwards_for_task = state.forwards.clone();
+    let workspace_for_task = workspace_id.clone();
     tokio::spawn(async move {
         let mut leftover: Vec<u8> = Vec::new();
         let mut exit_reason: Option<String> = None;
@@ -1629,21 +1683,36 @@ async fn spawn_ssh(
                 }
             }
         }
-        let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+        let _ = handle_for_task
+            .disconnect(russh::Disconnect::ByApplication, "", "en")
+            .await;
         cleanup_session_maps(
             &sessions_for_task,
             &pane_sessions_for_task,
             &pane_for_task,
             &id_for_task,
         );
+        // Phase 8.B: if this was the last SSH session for the workspace, tear
+        // down all of its port forwards.
+        let still_alive = sessions_for_task
+            .lock()
+            .unwrap()
+            .values()
+            .any(|s| matches!(s, Session::Ssh(ssh) if ssh.workspace_id == workspace_for_task));
+        if !still_alive {
+            close_workspace_forwards(&forwards_for_task, &workspace_for_task);
+        }
         emit_exit(&app_for_task, &id_for_task, exit_reason);
     });
 
-    state
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(id.clone(), Session::Ssh(SshSession { tx }));
+    state.sessions.lock().unwrap().insert(
+        id.clone(),
+        Session::Ssh(SshSession {
+            tx,
+            handle: handle_for_state,
+            workspace_id: workspace_id_for_state,
+        }),
+    );
     Ok(id)
 }
 
@@ -1654,6 +1723,238 @@ pub(crate) fn kill_session_inner(s: &mut Session) {
         }
         Session::Ssh(ssh) => {
             let _ = ssh.tx.send(SshCmd::Kill);
+        }
+    }
+}
+
+// ─── Phase 8.B: SSH local port forwards ─────────────────────────────────────
+
+// Find an SSH handle for the workspace by walking its connected terminal panes.
+// Returns the first one found, or None if no terminal pane in the workspace
+// currently has an active SSH session.
+fn find_ssh_handle_for_workspace(
+    state: &AppState,
+    workspace_id: &str,
+) -> Option<Arc<client::Handle<SshClient>>> {
+    let sessions = state.sessions.lock().unwrap();
+    for s in sessions.values() {
+        if let Session::Ssh(ssh) = s {
+            if ssh.workspace_id == workspace_id {
+                return Some(Arc::clone(&ssh.handle));
+            }
+        }
+    }
+    None
+}
+
+/// Open (or reuse) a TCP listener on `127.0.0.1:<free_port>` that bridges every
+/// inbound connection to the workspace's SSH session via a `direct-tcpip` channel
+/// targeted at `localhost:<remote_port>`. Returns the local port the iframe should
+/// connect to. Idempotent: if a forward already exists for this (workspace, remote)
+/// pair, returns the existing local port.
+pub(crate) async fn open_forward(
+    state: &AppState,
+    workspace_id: &str,
+    remote_port: u16,
+) -> Result<u16, String> {
+    {
+        let m = state.forwards.lock().unwrap();
+        if let Some(e) = m.get(&(workspace_id.to_string(), remote_port)) {
+            return Ok(e.local_port);
+        }
+    }
+    let handle = find_ssh_handle_for_workspace(state, workspace_id).ok_or_else(|| {
+        "no active SSH session for this workspace — connect a terminal pane first".to_string()
+    })?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("bind 127.0.0.1:0: {e}"))?;
+    let local_port = listener
+        .local_addr()
+        .map_err(|e| format!("local_addr: {e}"))?
+        .port();
+    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let ws_for_task = workspace_id.to_string();
+    let forwards_for_task = state.forwards.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => {
+                    dlog(&format!("forward[{}:{}]: cancelled", ws_for_task, remote_port));
+                    break;
+                }
+                accept = listener.accept() => {
+                    let (mut sock, peer) = match accept {
+                        Ok(p) => p,
+                        Err(e) => {
+                            dlog(&format!("forward[{}:{}]: accept err: {e}", ws_for_task, remote_port));
+                            continue;
+                        }
+                    };
+                    let h = Arc::clone(&handle);
+                    let ws = ws_for_task.clone();
+                    tokio::spawn(async move {
+                        let chan = h
+                            .channel_open_direct_tcpip(
+                                "localhost",
+                                remote_port as u32,
+                                peer.ip().to_string(),
+                                peer.port() as u32,
+                            )
+                            .await;
+                        let chan = match chan {
+                            Ok(c) => c,
+                            Err(e) => {
+                                dlog(&format!(
+                                    "forward[{}:{}]: open direct_tcpip: {e}",
+                                    ws, remote_port
+                                ));
+                                return;
+                            }
+                        };
+                        let mut chan_stream = chan.into_stream();
+                        if let Err(e) =
+                            tokio::io::copy_bidirectional(&mut sock, &mut chan_stream).await
+                        {
+                            // Connection-reset on close is normal; debug-log only.
+                            dlog(&format!("forward[{}:{}]: bridge closed: {e}", ws, remote_port));
+                        }
+                    });
+                }
+            }
+        }
+        // Listener drops here, removing the entry too.
+        forwards_for_task
+            .lock()
+            .unwrap()
+            .remove(&(ws_for_task.clone(), remote_port));
+    });
+
+    state.forwards.lock().unwrap().insert(
+        (workspace_id.to_string(), remote_port),
+        ForwardEntry {
+            local_port,
+            cancel: Some(cancel_tx),
+        },
+    );
+    dlog(&format!(
+        "forward[{}:{}]: opened on 127.0.0.1:{}",
+        workspace_id, remote_port, local_port
+    ));
+    Ok(local_port)
+}
+
+/// Cancel every forward task whose key has the given workspace_id.
+pub(crate) fn close_workspace_forwards(forwards: &ForwardMap, workspace_id: &str) {
+    let mut m = forwards.lock().unwrap();
+    let keys: Vec<(String, u16)> = m
+        .keys()
+        .filter(|(w, _)| w == workspace_id)
+        .cloned()
+        .collect();
+    for k in keys {
+        if let Some(mut e) = m.remove(&k) {
+            if let Some(c) = e.cancel.take() {
+                let _ = c.send(());
+            }
+        }
+    }
+}
+
+/// Pure URL helper. Returns Some((remote_port, scheme, path_and_query)) if the
+/// URL is a localhost / 127.0.0.1 http(s) URL we can forward; None otherwise.
+pub(crate) fn parse_localhost_url(url: &str) -> Option<(u16, &'static str, String)> {
+    let (scheme, rest) = if let Some(r) = url.strip_prefix("http://") {
+        ("http", r)
+    } else if let Some(r) = url.strip_prefix("https://") {
+        ("https", r)
+    } else {
+        return None;
+    };
+    let (host_port, path) = match rest.split_once('/') {
+        Some((hp, p)) => (hp, format!("/{}", p)),
+        None => (rest, String::new()),
+    };
+    let host_port = host_port.rsplit_once('@').map(|(_, h)| h).unwrap_or(host_port);
+    let (host, port) = match host_port.rsplit_once(':') {
+        Some((h, p)) => (h, p.parse::<u16>().ok()?),
+        None => (host_port, if scheme == "https" { 443 } else { 80 }),
+    };
+    if host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" {
+        Some((port, scheme, path))
+    } else {
+        None
+    }
+}
+
+/// Pane-aware URL resolver: if the pane is a browser pane in an SSH workspace
+/// and `forward_localhost` is on, replace localhost host+port with the forwarded
+/// 127.0.0.1:<local> address. Pure pass-through otherwise.
+pub(crate) async fn resolve_browser_url(
+    state: &AppState,
+    workspace_id: &str,
+    pane_id: &str,
+    url: &str,
+) -> Result<String, String> {
+    // Pull out workspace + pane state under a short lock.
+    let (forward_on, is_ssh_ws) = {
+        let file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        let mut forward_on = false;
+        if let Some(layout) = &ws.layout {
+            if let Some(pane) = find_pane_in(layout, pane_id) {
+                if let LayoutNode::Pane { browser, .. } = pane {
+                    if let Some(b) = browser {
+                        forward_on = b.forward_localhost;
+                    }
+                }
+            }
+        }
+        // Workspace counts as SSH if any of its terminal panes uses an SSH connection.
+        let mut is_ssh = false;
+        if let Some(layout) = &ws.layout {
+            collect_pane_connection_kinds(layout, &mut is_ssh);
+        }
+        (forward_on, is_ssh)
+    };
+    if !forward_on || !is_ssh_ws {
+        return Ok(url.to_string());
+    }
+    let (remote_port, scheme, path) = match parse_localhost_url(url) {
+        Some(p) => p,
+        None => return Ok(url.to_string()),
+    };
+    let local_port = open_forward(state, workspace_id, remote_port).await?;
+    Ok(format!("{}://127.0.0.1:{}{}", scheme, local_port, path))
+}
+
+fn find_pane_in<'a>(node: &'a LayoutNode, target: &str) -> Option<&'a LayoutNode> {
+    match node {
+        LayoutNode::Pane { pane_id, .. } if pane_id == target => Some(node),
+        LayoutNode::Pane { .. } => None,
+        LayoutNode::Split { first, second, .. } => {
+            find_pane_in(first, target).or_else(|| find_pane_in(second, target))
+        }
+    }
+}
+
+// Set `is_ssh = true` if the layout contains any terminal pane whose connection
+// is SSH. (Browser panes do not factor in.)
+fn collect_pane_connection_kinds(node: &LayoutNode, is_ssh: &mut bool) {
+    match node {
+        LayoutNode::Pane { connection, .. } => {
+            if matches!(connection, Some(Connection::Ssh { .. })) {
+                *is_ssh = true;
+            }
+        }
+        LayoutNode::Split { first, second, .. } => {
+            collect_pane_connection_kinds(first, is_ssh);
+            collect_pane_connection_kinds(second, is_ssh);
         }
     }
 }
@@ -1787,6 +2088,8 @@ fn workspace_delete(
             }
         }
     }
+    // Phase 8.B: tear down any port forwards for the workspace.
+    close_workspace_forwards(&state.forwards, &workspace_id);
     {
         let mut file = state.workspaces.lock().unwrap();
         file.workspaces.retain(|w| w.id != workspace_id);
@@ -1887,6 +2190,44 @@ fn pane_browser_go_back(
                     if let Some(prev) = b.history.pop() {
                         b.url = prev;
                     }
+                }));
+            }
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+/// Phase 8.B: pure URL resolve. Frontend calls this before setting iframe.src.
+/// If the pane has `forward_localhost = true`, the workspace has an active SSH
+/// session, and the URL targets `localhost:N` / `127.0.0.1:N`, the response is
+/// the rewritten `http://127.0.0.1:<local_port>...` URL. Otherwise pass-through.
+#[tauri::command]
+async fn pane_browser_resolve_url(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    pane_id: String,
+    url: String,
+) -> Result<String, String> {
+    resolve_browser_url(&state, &workspace_id, &pane_id, &url).await
+}
+
+/// Phase 8.B: per-pane toggle for the localhost-forwarding behavior. Sticky.
+#[tauri::command]
+fn pane_browser_set_forward(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+    forward: bool,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            if let Some(layout) = ws.layout.take() {
+                ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
+                    b.forward_localhost = forward;
                 }));
             }
         }
@@ -2094,6 +2435,7 @@ async fn pane_connect(
                 &state,
                 pane_id.clone(),
                 &app,
+                workspace_id.clone(),
                 host,
                 user,
                 port,
@@ -2362,6 +2704,8 @@ pub fn run() {
             pane_browser_navigate,
             pane_browser_go_back,
             pane_browser_go_home,
+            pane_browser_resolve_url,
+            pane_browser_set_forward,
             pty_write,
             pty_resize,
             notifications_list,

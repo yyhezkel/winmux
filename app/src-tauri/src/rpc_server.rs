@@ -8,9 +8,9 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use crate::notes::{self, NoteStatus};
 use crate::{
     collect_panes, decide_feed, find_workspace_for_pane, new_pane_id, new_workspace_id, persist,
-    split_pane_in, update_browser_pane, update_pane_in, write_to_session, AppState, CreateInput,
-    EnvVar, FeedItem, FeedItemState, LayoutNode, NotificationItem, PaneKind, SplitDirection,
-    Workspace, NOTIF_COUNTER,
+    resolve_browser_url, split_pane_in, update_browser_pane, update_pane_in, write_to_session,
+    AppState, CreateInput, EnvVar, FeedItem, FeedItemState, LayoutNode, NotificationItem, PaneKind,
+    SplitDirection, Workspace, NOTIF_COUNTER,
 };
 
 const FEED_MAX_ITEMS_LIMIT: usize = 50;
@@ -292,6 +292,8 @@ async fn dispatch(
                     }
                 }
             }
+            // Phase 8.B: tear down any port forwards for the workspace.
+            crate::close_workspace_forwards(&state.forwards, &id);
             {
                 let mut file = state.workspaces.lock().unwrap();
                 file.workspaces.retain(|w| w.id != id);
@@ -583,6 +585,29 @@ async fn dispatch(
             persist(state)?;
             let _ = app.emit("workspaces:changed", ());
             Ok(json!({ "ok": true }))
+        }
+
+        // Phase 8.B: resolve a URL through the workspace's port-forward map.
+        // For agents on remote that just want the rewritten URL string.
+        "pane.browser.resolve-url" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let url = params
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or("missing url")?
+                .to_string();
+            let workspace_id = {
+                let file = state.workspaces.lock().unwrap();
+                find_workspace_for_pane(&file, &pane_id)
+                    .ok_or_else(|| format!("no pane {pane_id}"))?
+            };
+            let resolved = resolve_browser_url(state, &workspace_id, &pane_id, &url).await?;
+            Ok(json!({ "url": resolved }))
         }
 
         "pane.browser.go-home" => {

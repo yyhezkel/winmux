@@ -305,6 +305,21 @@ function App() {
     }
   };
 
+  const browserSetForward = async (paneId: string, forward: boolean) => {
+    const ws = activeWs();
+    if (!ws) return;
+    try {
+      const f = await invoke<WorkspacesFile>("pane_browser_set_forward", {
+        workspaceId: ws.id,
+        paneId,
+        forward,
+      });
+      updateFile(f);
+    } catch (e) {
+      console.error("browser set-forward failed", e);
+    }
+  };
+
   const closePane = async (paneId: string) => {
     const ws = activeWs();
     if (!ws) return;
@@ -718,6 +733,7 @@ function App() {
               onBrowserNavigate={browserNavigate}
               onBrowserGoBack={browserGoBack}
               onBrowserGoHome={browserGoHome}
+              onBrowserSetForward={browserSetForward}
             />
           </div>
         </Show>

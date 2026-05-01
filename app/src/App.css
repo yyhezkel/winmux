@@ -242,6 +242,36 @@ body {
   cursor: not-allowed;
 }
 
+/* Phase 8.B: SSH-tunneled-localhost indicator + toggle */
+.browser-tunnel-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #1f3a2c;
+  color: #5cd87f;
+  font-family: "Cascadia Mono", monospace;
+  white-space: nowrap;
+}
+.browser-tunnel-err {
+  color: #e0af68;
+  font-size: 13px;
+  cursor: help;
+}
+.browser-forward-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: #8aa3c2;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.browser-forward-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+
 .empty {
   flex: 1;
   display: flex;

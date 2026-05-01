@@ -11,6 +11,10 @@ export type BrowserState = {
   url: string;
   home_url?: string;
   history: string[];
+  // Phase 8.B: when true (default), localhost:N URLs in this pane are
+  // transparently routed through an SSH local port forward to the remote
+  // workspace. Persisted; toggle via pane_browser_set_forward.
+  forward_localhost?: boolean;
 };
 
 export type LayoutNode =

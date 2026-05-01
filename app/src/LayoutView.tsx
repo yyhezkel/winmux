@@ -34,6 +34,8 @@ interface Props {
   onBrowserNavigate: (paneId: string, url: string) => void;
   onBrowserGoBack: (paneId: string) => void;
   onBrowserGoHome: (paneId: string) => void;
+  // Phase 8.B: per-pane forward toggle.
+  onBrowserSetForward: (paneId: string, forward: boolean) => void;
 }
 
 export function LayoutView(p: Props) {
@@ -46,6 +48,7 @@ export function LayoutView(p: Props) {
         if (paneKindOf(pane) === "browser") {
           return (
             <BrowserPane
+              workspaceId={p.workspaceId}
               pane={pane}
               isActive={isActive}
               onFocus={p.onFocus}
@@ -54,6 +57,7 @@ export function LayoutView(p: Props) {
               onNavigate={p.onBrowserNavigate}
               onGoBack={p.onBrowserGoBack}
               onGoHome={p.onBrowserGoHome}
+              onSetForward={p.onBrowserSetForward}
               onSetTitle={p.onSetTitle}
               onSetAnnotation={p.onSetAnnotation}
             />

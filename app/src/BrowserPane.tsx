@@ -1,7 +1,9 @@
 import { createEffect, createSignal, Show } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 import type { LayoutNode, SplitDirection } from "./types";
 
 interface Props {
+  workspaceId: string;
   pane: Extract<LayoutNode, { kind: "pane" }>;
   isActive: boolean;
   onFocus: (paneId: string) => void;
@@ -10,38 +12,82 @@ interface Props {
   onNavigate: (paneId: string, url: string) => void;
   onGoBack: (paneId: string) => void;
   onGoHome: (paneId: string) => void;
+  onSetForward: (paneId: string, forward: boolean) => void;
   onSetTitle: (paneId: string, title: string) => void;
   onSetAnnotation: (paneId: string, annotation: string) => void;
 }
 
 export function BrowserPane(p: Props) {
-  const browser = () => p.pane.browser ?? { url: "", home_url: undefined, history: [] };
+  const browser = () =>
+    p.pane.browser ?? {
+      url: "",
+      home_url: undefined,
+      history: [] as string[],
+      forward_localhost: true,
+    };
+  const forwardOn = () => browser().forward_localhost ?? true;
   const [urlDraft, setUrlDraft] = createSignal(browser().url);
+  // Phase 8.B: the URL the iframe actually loads. Differs from browser().url
+  // when localhost forwarding rewrites it to 127.0.0.1:<local_forward_port>.
+  const [resolvedUrl, setResolvedUrl] = createSignal(browser().url);
+  const [resolveErr, setResolveErr] = createSignal<string | null>(null);
   let iframeRef: HTMLIFrameElement | undefined;
 
-  // Sync the input draft whenever the persisted URL changes (e.g. CLI nav, back, home).
+  // Whenever the persisted URL changes (user nav, back, home, CLI), refresh
+  // both the address-bar draft and the iframe's resolved src.
   let lastUrl = browser().url;
+  let lastForward = forwardOn();
   createEffect(() => {
     const u = browser().url;
+    const f = forwardOn();
     if (u !== lastUrl) {
       lastUrl = u;
       setUrlDraft(u);
+    }
+    if (u !== resolvedUrl() || f !== lastForward) {
+      lastForward = f;
+      setResolveErr(null);
+      if (!u) {
+        setResolvedUrl("");
+        return;
+      }
+      invoke<string>("pane_browser_resolve_url", {
+        workspaceId: p.workspaceId,
+        paneId: p.pane.pane_id,
+        url: u,
+      })
+        .then((rewritten) => setResolvedUrl(rewritten))
+        .catch((err) => {
+          // If forwarding fails (e.g. no SSH session), fall back to the raw URL
+          // and surface the error in the chrome.
+          setResolvedUrl(u);
+          setResolveErr(String(err));
+        });
     }
   });
 
   const submitUrl = () => {
     let v = urlDraft().trim();
     if (!v) return;
-    // Auto-prepend https:// if no scheme and it isn't about:/file:/etc.
-    if (!/^[a-z][a-z0-9+\-.]*:/i.test(v)) v = "https://" + v;
+    // Auto-prepend http:// for localhost (dev servers usually are http) and
+    // https:// for everything else missing a scheme.
+    if (!/^[a-z][a-z0-9+\-.]*:/i.test(v)) {
+      const isLocal = /^(localhost|127\.0\.0\.1)(:|$|\/)/i.test(v);
+      v = (isLocal ? "http://" : "https://") + v;
+    }
     p.onNavigate(p.pane.pane_id, v);
   };
 
   const reload = () => {
     if (iframeRef) {
-      // Re-assigning src forces a reload even if the URL is unchanged.
-      iframeRef.src = browser().url || "about:blank";
+      iframeRef.src = resolvedUrl() || "about:blank";
     }
+  };
+
+  const isTunneled = () => {
+    const u = browser().url;
+    if (!u || !resolvedUrl()) return false;
+    return resolvedUrl() !== u;
   };
 
   return (
@@ -106,6 +152,33 @@ export function BrowserPane(p: Props) {
         >
           →
         </button>
+        <Show when={isTunneled()}>
+          <span
+            class="browser-tunnel-badge"
+            title={`tunneled via SSH → ${resolvedUrl()}`}
+          >
+            🔗 tunneled
+          </span>
+        </Show>
+        <Show when={resolveErr()}>
+          <span class="browser-tunnel-err" title={resolveErr()!}>
+            ⚠
+          </span>
+        </Show>
+        <label
+          class="browser-forward-toggle"
+          title="Forward localhost via SSH (Phase 8.B)"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            checked={forwardOn()}
+            onChange={(e) =>
+              p.onSetForward(p.pane.pane_id, e.currentTarget.checked)
+            }
+          />
+          fwd
+        </label>
         <Show when={p.pane.title}>
           <span class="pane-title browser-title" title={p.pane.title!}>
             · {p.pane.title}
@@ -144,7 +217,7 @@ export function BrowserPane(p: Props) {
       </div>
       <div class="pane-body browser-body">
         <Show
-          when={browser().url}
+          when={resolvedUrl()}
           fallback={
             <div class="browser-placeholder">
               <p>Enter a URL above to load a page.</p>
@@ -158,7 +231,7 @@ export function BrowserPane(p: Props) {
           <iframe
             ref={iframeRef!}
             class="browser-iframe"
-            src={browser().url}
+            src={resolvedUrl()}
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             referrerpolicy="no-referrer-when-downgrade"
           />

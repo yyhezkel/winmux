@@ -180,6 +180,16 @@ enum Cmd {
         pane: String,
     },
 
+    /// Phase 8.B: resolve a URL through the workspace's port-forward map.
+    /// Opens a forward if needed; prints the rewritten URL. Useful for agents
+    /// that want to share a URL with the user that actually works on Windows.
+    BrowserResolveUrl {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        url: String,
+    },
+
     /// Stub for Claude Code agent hooks: reads JSON from stdin, fires a notify.
     ClaudeHook {
         subcommand: String,
@@ -738,6 +748,13 @@ async fn main() -> ExitCode {
         }
         Cmd::BrowserGoHome { pane } => {
             rpc_call("pane.browser.go-home", json!({ "pane_id": pane })).await
+        }
+        Cmd::BrowserResolveUrl { pane, url } => {
+            rpc_call(
+                "pane.browser.resolve-url",
+                json!({ "pane_id": pane, "url": url }),
+            )
+            .await
         }
         Cmd::Note { op } => match op {
             NoteOp::Add {

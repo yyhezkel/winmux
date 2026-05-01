@@ -1815,13 +1815,25 @@ pub(crate) async fn open_forward(
     workspace_id: &str,
     remote_port: u16,
 ) -> Result<u16, String> {
+    dlog(&format!(
+        "open_forward: ws={} remote_port={}",
+        workspace_id, remote_port
+    ));
     {
         let m = state.forwards.lock().unwrap();
         if let Some(e) = m.get(&(workspace_id.to_string(), remote_port)) {
+            dlog(&format!(
+                "open_forward: cache hit ws={} remote={} -> local={}",
+                workspace_id, remote_port, e.local_port
+            ));
             return Ok(e.local_port);
         }
     }
     let handle = find_ssh_handle_for_workspace(state, workspace_id).ok_or_else(|| {
+        dlog(&format!(
+            "open_forward: NO SSH handle for ws={} — connect a terminal pane first",
+            workspace_id
+        ));
         "no active SSH session for this workspace — connect a terminal pane first".to_string()
     })?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1955,6 +1967,10 @@ pub(crate) async fn resolve_browser_url(
     pane_id: &str,
     url: &str,
 ) -> Result<String, String> {
+    dlog(&format!(
+        "resolve_browser_url: input ws={} pane={} url={}",
+        workspace_id, pane_id, url
+    ));
     // Pull out workspace + pane state under a short lock.
     let (forward_on, is_ssh_ws) = {
         let file = state.workspaces.lock().unwrap();
@@ -1980,15 +1996,31 @@ pub(crate) async fn resolve_browser_url(
         }
         (forward_on, is_ssh)
     };
+    dlog(&format!(
+        "resolve_browser_url: forward_on={} is_ssh_ws={}",
+        forward_on, is_ssh_ws
+    ));
     if !forward_on || !is_ssh_ws {
+        dlog("resolve_browser_url: pass-through (no forward)");
         return Ok(url.to_string());
     }
     let (remote_port, scheme, path) = match parse_localhost_url(url) {
-        Some(p) => p,
-        None => return Ok(url.to_string()),
+        Some(p) => {
+            dlog(&format!(
+                "resolve_browser_url: parsed localhost — port={} scheme={} path={:?}",
+                p.0, p.1, p.2
+            ));
+            p
+        }
+        None => {
+            dlog("resolve_browser_url: not a localhost URL — pass-through");
+            return Ok(url.to_string());
+        }
     };
     let local_port = open_forward(state, workspace_id, remote_port).await?;
-    Ok(format!("{}://127.0.0.1:{}{}", scheme, local_port, path))
+    let resolved = format!("{}://127.0.0.1:{}{}", scheme, local_port, path);
+    dlog(&format!("resolve_browser_url: -> {}", resolved));
+    Ok(resolved)
 }
 
 // Phase 8.C: read a pane's persisted BrowserState clone, or None if the pane
@@ -2376,23 +2408,27 @@ fn pane_browser_loaded(
     pane_id: String,
     url: String,
 ) -> Result<(), String> {
-    // Stamp last_loaded_url on the pane's BrowserState. We don't bother
-    // emitting `workspaces:changed` because this is a low-stakes diagnostic
-    // field that the UI doesn't render — frontend only needs it indirectly
-    // via the wait short-circuit RPC. We still persist so a wait issued from
-    // a freshly-launched session can pick up where the previous session
-    // left off.
+    // Stamp last_loaded_url on the pane's BrowserState. Dedupe: only persist
+    // if the value actually changed — iframe onload can fire repeatedly
+    // (focus changes, redirects) and persisting on every fire would burn
+    // disk + spam debug.log without benefit.
+    let mut changed = false;
     {
         let mut file = state.workspaces.lock().unwrap();
         for ws in &mut file.workspaces {
             if let Some(layout) = ws.layout.take() {
                 ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
-                    b.last_loaded_url = Some(url.clone());
+                    if b.last_loaded_url.as_deref() != Some(url.as_str()) {
+                        b.last_loaded_url = Some(url.clone());
+                        changed = true;
+                    }
                 }));
             }
         }
     }
-    let _ = persist(&state);
+    if changed {
+        let _ = persist(&state);
+    }
     let _ = app;
     let waiters = state
         .browser_load_waiters

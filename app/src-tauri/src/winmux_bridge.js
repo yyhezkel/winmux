@@ -126,6 +126,8 @@
         return findElements(args || {});
       case "snapshot":
         return { tree: snapshot(args || {}) };
+      case "wait-for":
+        return await waitFor(args || {});
       default:
         throw new Error("unknown winmux cmd: " + cmd);
     }
@@ -444,5 +446,93 @@
     }
 
     return walk(document.body || document.documentElement, 0);
+  }
+
+  // ─── Phase 8.F.3a: wait until criteria are met or timeout ──────────────
+  // Polls every 100 ms inside the iframe. Element criteria reuse
+  // `findElements` (deepest-match, AND-ed). State semantics:
+  //   visible   — match exists AND isVisible (default)
+  //   attached  — match exists in DOM (visible or hidden)
+  //   hidden    — match exists AND NOT visible
+  //   detached  — NO match in DOM
+  // url-contains is its own criterion, AND-ed with element criteria.
+  async function waitFor(c) {
+    var timeout = c.timeout_ms || c.timeoutMs || 5000;
+    var pollInterval = 100;
+    var start = Date.now();
+    var deadline = start + timeout;
+    var state = c.state || "visible";
+
+    var hasElementCriteria = !!(
+      c.selector ||
+      c.text ||
+      c.role ||
+      c.label ||
+      c.testid
+    );
+    var hasUrl = !!c.urlContains;
+    if (!hasElementCriteria && !hasUrl) {
+      throw new Error(
+        "wait-for: at least one criterion required (selector/text/role/label/testid/url_contains)"
+      );
+    }
+
+    function checkOnce() {
+      if (hasUrl) {
+        if (window.location.href.indexOf(c.urlContains) === -1) return null;
+        if (!hasElementCriteria) {
+          return { ok: true, state: "url", url: window.location.href };
+        }
+      }
+      if (hasElementCriteria) {
+        var fq = {
+          selector: c.selector,
+          text: c.text,
+          role: c.role,
+          label: c.label,
+          testid: c.testid,
+          first: true,
+        };
+        // For "visible" we narrow the search pool with visibleOnly. For
+        // other states we want full DOM and judge visibility ourselves.
+        if (state === "visible") fq.visibleOnly = true;
+        var res = findElements(fq);
+        var match = res.matches[0];
+        if (state === "visible") return match ? { ok: true, state: "visible", match: match } : null;
+        if (state === "attached") return match ? { ok: true, state: "attached", match: match } : null;
+        if (state === "hidden")
+          return match && !match.visible ? { ok: true, state: "hidden", match: match } : null;
+        if (state === "detached") return match ? null : { ok: true, state: "detached" };
+        throw new Error("wait-for: unknown state '" + state + "'");
+      }
+      return null;
+    }
+
+    while (true) {
+      var hit = checkOnce();
+      if (hit) {
+        hit.elapsed_ms = Date.now() - start;
+        return hit;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          "wait-for: timeout after " +
+            timeout +
+            "ms (state=" +
+            state +
+            ", criteria=" +
+            JSON.stringify({
+              selector: c.selector,
+              text: c.text,
+              role: c.role,
+              label: c.label,
+              testid: c.testid,
+              urlContains: c.urlContains,
+            }) +
+            ")"
+        );
+      }
+      await new Promise(function (r) { setTimeout(r, pollInterval); });
+    }
   }
 })();

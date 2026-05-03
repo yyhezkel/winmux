@@ -1237,6 +1237,43 @@ async fn dispatch(
             iframe_cmd_inner(state, app, &pane_id, "find", json!(q), timeout_ms).await
         }
 
+        "pane.browser.iframe.wait-for" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let inner_timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5_000);
+            // Strip pane_id meta; pass the rest as the criteria object so
+            // the bridge sees selector / text / role / label / testid /
+            // urlContains / state / timeout_ms verbatim.
+            let mut q = serde_json::Map::new();
+            for (k, v) in params.as_object().into_iter().flat_map(|m| m.iter()) {
+                match k.as_str() {
+                    "pane_id" | "pane" => continue,
+                    _ => {
+                        q.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            // Outer (backend) timeout = bridge timeout + 2 s buffer so the
+            // bridge gets a chance to return its own structured timeout error
+            // rather than us preempting it with the generic IPC timeout.
+            iframe_cmd_inner(
+                state,
+                app,
+                &pane_id,
+                "wait-for",
+                json!(q),
+                inner_timeout_ms + 2_000,
+            )
+            .await
+        }
+
         "pane.browser.iframe.snapshot" => {
             let pane_id = params
                 .get("pane_id")

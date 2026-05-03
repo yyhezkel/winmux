@@ -299,6 +299,38 @@ enum Cmd {
         timeout_ms: u64,
     },
 
+    /// Phase 8.F.3a: poll the iframe until the criteria are met or timeout.
+    /// At least one criterion must be specified; multiple AND together.
+    /// Default state is `visible` — the matched element must also be visible.
+    BrowserWaitFor {
+        #[arg(long)]
+        pane: String,
+        /// CSS selector to find.
+        #[arg(long)]
+        selector: Option<String>,
+        /// Visible text content (deepest-match, same as browser-find).
+        #[arg(long)]
+        text: Option<String>,
+        /// ARIA role.
+        #[arg(long)]
+        role: Option<String>,
+        /// Accessible label (`aria-label` or `<label for>`).
+        #[arg(long)]
+        label: Option<String>,
+        /// `data-testid` attribute (exact).
+        #[arg(long)]
+        testid: Option<String>,
+        /// Substring the iframe's `window.location.href` must contain.
+        #[arg(long)]
+        url_contains: Option<String>,
+        /// `visible` (default) | `attached` | `hidden` | `detached`. Detached
+        /// inverts: succeeds when NO element matches.
+        #[arg(long, default_value = "visible")]
+        state: String,
+        #[arg(long, default_value_t = 5_000)]
+        timeout_ms: u64,
+    },
+
     /// Phase 8.F.2: simplified accessibility-flavored DOM tree of the iframe.
     /// JSON by default; --text renders as a YAML-like outline.
     BrowserSnapshot {
@@ -1130,6 +1162,29 @@ async fn real_main() -> ExitCode {
             if *first { p.insert("first".into(), json!(true)); }
             if let Some(v) = limit { p.insert("limit".into(), json!(v)); }
             rpc_call("pane.browser.iframe.find", Value::Object(p)).await
+        }
+        Cmd::BrowserWaitFor {
+            pane,
+            selector,
+            text,
+            role,
+            label,
+            testid,
+            url_contains,
+            state,
+            timeout_ms,
+        } => {
+            let mut p = serde_json::Map::new();
+            p.insert("pane_id".into(), json!(pane));
+            p.insert("timeout_ms".into(), json!(timeout_ms));
+            p.insert("state".into(), json!(state));
+            if let Some(v) = selector { p.insert("selector".into(), json!(v)); }
+            if let Some(v) = text { p.insert("text".into(), json!(v)); }
+            if let Some(v) = role { p.insert("role".into(), json!(v)); }
+            if let Some(v) = label { p.insert("label".into(), json!(v)); }
+            if let Some(v) = testid { p.insert("testid".into(), json!(v)); }
+            if let Some(v) = url_contains { p.insert("urlContains".into(), json!(v)); }
+            rpc_call("pane.browser.iframe.wait-for", Value::Object(p)).await
         }
         Cmd::BrowserSnapshot {
             pane,

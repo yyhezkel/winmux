@@ -6,7 +6,14 @@ import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { LayoutView } from "./LayoutView";
 import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
+import { SettingsModal } from "./SettingsModal";
 import { TerminalInstance } from "./terminalInstance";
+import {
+  applyTheme,
+  loadSettings,
+  type Settings,
+  type UpdateInfo,
+} from "./settings";
 import {
   collectPanes,
   describeConnection,
@@ -58,6 +65,10 @@ function App() {
   // Phase 7.B: notes
   const [notes, setNotes] = createSignal<Note[]>([]);
   const [showNotes, setShowNotes] = createSignal(false);
+  // Phase 9.A: settings + Phase 9.B: update banner.
+  const [settings, setSettings] = createSignal<Settings | null>(null);
+  const [showSettings, setShowSettings] = createSignal(false);
+  const [updateBanner, setUpdateBanner] = createSignal<UpdateInfo | null>(null);
   const refreshNotes = async () => {
     try {
       const f = await invoke<NotesFile>("notes_load");
@@ -538,6 +549,15 @@ function App() {
   };
 
   onMount(async () => {
+    // Phase 9.A: load + apply settings as early as possible so the splash
+    // colors don't pop to a different palette on first paint.
+    try {
+      const s = await loadSettings();
+      setSettings(s);
+      applyTheme(s);
+    } catch (e) {
+      console.warn("settings_load failed", e);
+    }
     await refreshFromBackend();
     const ws0 = file().workspaces.find((w) => w.id === file().active_workspace_id);
     if (ws0?.layout) {
@@ -622,6 +642,19 @@ function App() {
     unlistens.push(
       await listen("workspaces:changed", () => {
         void refreshFromBackend();
+      })
+    );
+    // Phase 9.A: settings updated externally (CLI / RPC) — re-apply theme.
+    unlistens.push(
+      await listen<Settings>("settings:changed", (e) => {
+        setSettings(e.payload);
+        applyTheme(e.payload);
+      })
+    );
+    // Phase 9.B: update available — show a banner; user clicks to open notes.
+    unlistens.push(
+      await listen<UpdateInfo>("update:available", (e) => {
+        setUpdateBanner(e.payload);
       })
     );
 
@@ -830,6 +863,45 @@ function App() {
       >
         📝 {notes().filter((n) => n.status === "open").length}
       </button>
+
+      <button
+        class="settings-fab"
+        title="Settings"
+        onClick={() => setShowSettings(true)}
+      >
+        ⚙
+      </button>
+
+      <Show when={settings()}>
+        <SettingsModal
+          open={showSettings()}
+          settings={settings()!}
+          onClose={() => setShowSettings(false)}
+          onChange={(next) => setSettings(next)}
+        />
+      </Show>
+
+      <Show when={updateBanner()}>
+        <div class="update-banner" role="status">
+          <div class="update-banner-body">
+            <strong>winmux {updateBanner()!.latest_version}</strong>{" "}
+            is available — current {updateBanner()!.current_version}.
+          </div>
+          <div class="update-banner-actions">
+            <Show when={updateBanner()!.notes_url}>
+              <a
+                class="update-banner-link"
+                href={updateBanner()!.notes_url ?? "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Release notes
+              </a>
+            </Show>
+            <button class="update-banner-x" onClick={() => setUpdateBanner(null)}>×</button>
+          </div>
+        </div>
+      </Show>
 
       <NotesModal
         open={showNotes()}

@@ -40,6 +40,8 @@ opinionated stack that values native feel and developer iteration speed.
 - CLI: `winmux.exe` with `list-workspaces`, `select-workspace`, `new-workspace`, `delete-workspace`, `send`, `send-key`, `notify`, `tree`, `set-status`, plus `claude-hook` stub
 - Toast notifications via Windows WinRT
 - Live event-driven UI updates from CLI mutations
+- **Settings panel** with five built-in theme presets (Tokyo Night, Dracula, Solarized Dark/Light, Nord), full color customization, font picker, terminal options, and hooks/notifications/updates toggles. Live theme apply via CSS vars; persisted to `%APPDATA%\winmux\settings.json`. *(Phase 9.A)*
+- **Update checker** that polls a manifest URL on startup and surfaces a banner with release notes when a newer version is available. No auto-install — just a heads-up. *(Phase 9.B)*
 
 ## Install (release)
 

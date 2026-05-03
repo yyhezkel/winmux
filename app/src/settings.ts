@@ -1,0 +1,205 @@
+// Phase 9.A: settings type mirror + helpers (load/save/apply CSS vars).
+// The Rust backend owns the canonical schema in src-tauri/src/settings.rs;
+// this file is the typed mirror used by the frontend.
+
+import { invoke } from "@tauri-apps/api/core";
+
+export interface AnsiPalette {
+  black: string;
+  red: string;
+  green: string;
+  yellow: string;
+  blue: string;
+  magenta: string;
+  cyan: string;
+  white: string;
+  bright_black: string;
+  bright_red: string;
+  bright_green: string;
+  bright_yellow: string;
+  bright_blue: string;
+  bright_magenta: string;
+  bright_cyan: string;
+  bright_white: string;
+}
+
+export interface Theme {
+  preset: string;
+  accent: string;
+  background: string;
+  surface: string;
+  border: string;
+  text_primary: string;
+  text_secondary: string;
+  success: string;
+  warning: string;
+  error: string;
+  ansi: AnsiPalette;
+}
+
+export interface FontSettings {
+  ui_family: string;
+  ui_size_pt: number;
+  terminal_family: string;
+  terminal_size_pt: number;
+}
+
+export interface TerminalSettings {
+  cursor_style: "block" | "bar" | "underline";
+  scrollback_lines: number;
+  bidi_enabled: boolean;
+  allow_proposed_api: boolean;
+}
+
+export interface HooksSettings {
+  enabled: boolean;
+  agents: string[];
+  policy_preset: string;
+}
+
+export interface NotificationSettings {
+  toast_enabled: boolean;
+  sound_enabled: boolean;
+}
+
+export interface UpdatesSettings {
+  check_on_startup: boolean;
+  auto_download: boolean;
+  manifest_url?: string | null;
+  last_check_iso?: string | null;
+  last_seen_version?: string | null;
+}
+
+export interface Settings {
+  version: number;
+  theme: Theme;
+  font: FontSettings;
+  terminal: TerminalSettings;
+  hooks: HooksSettings;
+  notifications: NotificationSettings;
+  updates: UpdatesSettings;
+}
+
+export interface PresetEntry {
+  id: string;
+  label: string;
+  theme: Theme;
+}
+
+export interface FontFamilies {
+  ui: string[];
+  mono: string[];
+}
+
+export interface UpdateInfo {
+  current_version: string;
+  latest_version?: string | null;
+  available: boolean;
+  notes_url?: string | null;
+  msi_url?: string | null;
+  released_at?: string | null;
+  manifest_url?: string | null;
+  error?: string | null;
+  last_check_iso: string;
+}
+
+// ─── disk I/O via Tauri commands ─────────────────────────────────────────
+
+export const loadSettings = (): Promise<Settings> =>
+  invoke<Settings>("settings_load");
+
+export const saveSettings = (settings: Settings): Promise<Settings> =>
+  invoke<Settings>("settings_save", { settings });
+
+export const getPresets = (): Promise<PresetEntry[]> =>
+  invoke<PresetEntry[]>("settings_get_presets");
+
+export const applyPreset = (preset: string): Promise<Settings> =>
+  invoke<Settings>("settings_apply_preset", { preset });
+
+export const resetSettings = (): Promise<Settings> =>
+  invoke<Settings>("settings_reset");
+
+export const listSystemFonts = (): Promise<FontFamilies> =>
+  invoke<FontFamilies>("list_system_fonts");
+
+export const checkForUpdates = (): Promise<UpdateInfo> =>
+  invoke<UpdateInfo>("check_for_updates_now");
+
+// ─── theme apply ─────────────────────────────────────────────────────────
+
+/**
+ * Write the current theme into CSS variables on `<html>`. App.css reads
+ * them (var(--w-bg) etc.) so the entire UI re-tints instantly. Called on
+ * startup after load and on every `settings:changed` event.
+ */
+export function applyTheme(s: Settings): void {
+  const r = document.documentElement.style;
+  const t = s.theme;
+  r.setProperty("--w-bg", t.background);
+  r.setProperty("--w-surface", t.surface);
+  r.setProperty("--w-border", t.border);
+  r.setProperty("--w-text", t.text_primary);
+  r.setProperty("--w-text-dim", t.text_secondary);
+  r.setProperty("--w-accent", t.accent);
+  r.setProperty("--w-success", t.success);
+  r.setProperty("--w-warning", t.warning);
+  r.setProperty("--w-error", t.error);
+  // Derive a couple of secondary tones from the base ones rather than
+  // requiring users to set all of them.
+  r.setProperty("--w-surface-hi", mix(t.surface, t.text_primary, 0.06));
+  r.setProperty("--w-border-hi", mix(t.border, t.text_primary, 0.1));
+  r.setProperty("--w-text-faint", mix(t.text_secondary, t.background, 0.4));
+  r.setProperty("--w-accent-hi", mix(t.accent, "#ffffff", 0.18));
+
+  r.setProperty("--w-font-ui", quoteFamily(s.font.ui_family));
+  r.setProperty("--w-font-mono", quoteFamily(s.font.terminal_family));
+}
+
+function quoteFamily(family: string): string {
+  // Wrap with single quotes if the family has a space and isn't already
+  // quoted; append safe fallbacks so a missing font doesn't break layout.
+  const trimmed = family.trim();
+  const isMono =
+    /mono|consolas|cascadia|courier|menlo|fira|jetbrains|iosevka|hack|source code|lucida console/i.test(
+      trimmed
+    );
+  const head = trimmed && !/[",']/.test(trimmed) && /\s/.test(trimmed)
+    ? `"${trimmed}"`
+    : trimmed;
+  const fallback = isMono
+    ? '"Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace'
+    : '-apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
+  return `${head}, ${fallback}`;
+}
+
+// Minimal hex color blender (#rrggbb only). Best-effort — non-hex values
+// pass through unchanged, which still works because CSS will fall back
+// when it sees an invalid value.
+function mix(base: string, with_: string, amount: number): string {
+  const a = parseHex(base);
+  const b = parseHex(with_);
+  if (!a || !b) return base;
+  const t = Math.max(0, Math.min(1, amount));
+  const m = (i: number) => Math.round(a[i] * (1 - t) + b[i] * t);
+  return `rgb(${m(0)}, ${m(1)}, ${m(2)})`;
+}
+
+function parseHex(c: string): [number, number, number] | null {
+  const s = c.trim().replace(/^#/, "");
+  if (s.length === 3) {
+    const r = parseInt(s[0] + s[0], 16);
+    const g = parseInt(s[1] + s[1], 16);
+    const b = parseInt(s[2] + s[2], 16);
+    if ([r, g, b].some((v) => Number.isNaN(v))) return null;
+    return [r, g, b];
+  }
+  if (s.length === 6) {
+    const r = parseInt(s.slice(0, 2), 16);
+    const g = parseInt(s.slice(2, 4), 16);
+    const b = parseInt(s.slice(4, 6), 16);
+    if ([r, g, b].some((v) => Number.isNaN(v))) return null;
+    return [r, g, b];
+  }
+  return null;
+}

@@ -387,10 +387,23 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+
+    /// Phase 9.A: read or modify persisted app settings.
+    /// See `winmux settings --help` for subcommands.
+    Settings {
+        #[command(subcommand)]
+        op: SettingsOp,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 enum DevOp {
+    /// Phase 9.B: poll the manifest URL and report current/latest versions.
+    CheckUpdates {
+        /// Pretty-print JSON (default is compact).
+        #[arg(long)]
+        pretty: bool,
+    },
     /// Snapshot of app state: version, git hash, workspaces summary, active
     /// sessions, tunnel state, feed/notes counts, debug.log tail, console tail.
     GetState {
@@ -420,6 +433,44 @@ enum DevOp {
         description: Option<String>,
         #[arg(long)]
         repro_steps: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SettingsOp {
+    /// Print current settings as JSON (pretty by default).
+    Show {
+        /// One-line compact JSON instead of pretty.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set a single dotted-path field, e.g. `--key theme.preset --value dracula`
+    /// or `--key terminal.scrollback_lines --value 8000`.
+    Set {
+        #[arg(long)]
+        key: String,
+        #[arg(long)]
+        value: String,
+    },
+    /// Apply a built-in theme preset (tokyo-night | dracula | solarized-dark |
+    /// nord | solarized-light).
+    Preset {
+        name: String,
+    },
+    /// List available theme presets.
+    Presets {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write the current settings to a file.
+    Export {
+        #[arg(long)]
+        output: std::path::PathBuf,
+    },
+    /// Replace settings with the contents of a file (full overwrite).
+    Import {
+        #[arg(long)]
+        input: std::path::PathBuf,
     },
 }
 
@@ -1270,6 +1321,21 @@ async fn real_main() -> ExitCode {
             .await
         }
         Cmd::Dev { op } => match op {
+            DevOp::CheckUpdates { pretty } => {
+                let v = rpc_call("updates.check", json!({})).await;
+                match v {
+                    Ok(val) => {
+                        let s = if *pretty {
+                            serde_json::to_string_pretty(&val).unwrap_or_default()
+                        } else {
+                            serde_json::to_string(&val).unwrap_or_default()
+                        };
+                        println!("{s}");
+                        std::process::exit(0);
+                    }
+                    Err(e) => Err(e),
+                }
+            }
             DevOp::GetState { pretty: _, text } => {
                 match rpc_call("dev.get-state", json!({})).await {
                     Ok(v) => {
@@ -1672,6 +1738,81 @@ async fn real_main() -> ExitCode {
             hooks::run_all(&adapters, *dry_run, *force);
             return ExitCode::SUCCESS;
         }
+        Cmd::Settings { op } => match op {
+            SettingsOp::Show { json } => {
+                let v = rpc_call("settings.load", json!({})).await;
+                match v {
+                    Ok(val) => {
+                        let s = if *json {
+                            serde_json::to_string(&val).unwrap_or_default()
+                        } else {
+                            serde_json::to_string_pretty(&val).unwrap_or_default()
+                        };
+                        println!("{s}");
+                        std::process::exit(0);
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            SettingsOp::Set { key, value } => {
+                rpc_call(
+                    "settings.set",
+                    json!({ "key": key, "value": value }),
+                )
+                .await
+            }
+            SettingsOp::Preset { name } => {
+                rpc_call("settings.preset", json!({ "preset": name })).await
+            }
+            SettingsOp::Presets { json: as_json } => {
+                let v = rpc_call("settings.get-presets", json!({})).await;
+                match v {
+                    Ok(val) => {
+                        let s = if *as_json {
+                            serde_json::to_string(&val).unwrap_or_default()
+                        } else {
+                            serde_json::to_string_pretty(&val).unwrap_or_default()
+                        };
+                        println!("{s}");
+                        std::process::exit(0);
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            SettingsOp::Export { output } => {
+                let v = rpc_call("settings.load", json!({})).await;
+                match v {
+                    Ok(val) => {
+                        let s = serde_json::to_string_pretty(&val).unwrap_or_default();
+                        match std::fs::write(output, s) {
+                            Ok(()) => {
+                                eprintln!("settings exported to {:?}", output);
+                                std::process::exit(0);
+                            }
+                            Err(e) => Err(format!("write {:?}: {e}", output)),
+                        }
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            SettingsOp::Import { input } => {
+                let text = match std::fs::read_to_string(input) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("error: read {:?}: {e}", input);
+                        return ExitCode::from(2);
+                    }
+                };
+                let parsed: serde_json::Value = match serde_json::from_str(&text) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("error: parse {:?}: {e}", input);
+                        return ExitCode::from(2);
+                    }
+                };
+                rpc_call("settings.save", json!({ "settings": parsed })).await
+            }
+        },
     };
 
     match result {

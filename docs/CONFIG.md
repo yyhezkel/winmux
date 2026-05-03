@@ -10,6 +10,8 @@ All under `%APPDATA%\winmux\`:
 | File | Written by | Read by |
 |---|---|---|
 | `workspaces.json` | `lib.rs::save_to_disk` (atomic temp+rename, `fsync`) | `lib.rs::load_from_disk` at `setup()` |
+| `notes.json` | `notes.rs::save_notes_to_disk` | `notes.rs::load_notes_from_disk` at `setup()` |
+| `settings.json` | `settings.rs::save_to_disk` (Phase 9.A) | `settings.rs::load_from_disk` at `setup()` |
 | `known_hosts.json` | `lib.rs::save_known_hosts` after host key match/replace | `lib.rs::load_known_hosts` per SSH connect |
 | `debug.log` | `lib.rs::dlog` (append-only, all modules) | humans |
 
@@ -197,6 +199,78 @@ WINMUX_SOCKET_ADDR=127.0.0.1:23456
 WINMUX_TUNNEL_TOKEN=A1B2C3...32 alphanum chars total
 WINMUX_PANE_ID=p_18abc_1
 ```
+
+## `settings.json`  *(Phase 9.A)*
+
+Persistent app preferences — theme, fonts, terminal behavior, hooks, notifications, and the update-checker. Loaded at `setup()`, defaults written on first run, atomically saved on every change. Mutations emit `settings:changed` so the frontend re-applies the theme live.
+
+### Schema
+
+```ts
+type Settings = {
+  version: 1;
+  theme: {
+    preset: "tokyo-night" | "dracula" | "solarized-dark" | "nord" | "solarized-light" | "custom";
+    accent: string;          // "#7aa2f7"
+    background: string;
+    surface: string;
+    border: string;
+    text_primary: string;
+    text_secondary: string;
+    success: string;
+    warning: string;
+    error: string;
+    ansi: {                  // 16 xterm colors used by xterm.js
+      black: string; red: string; green: string; yellow: string;
+      blue: string; magenta: string; cyan: string; white: string;
+      bright_black: string; bright_red: string; bright_green: string; bright_yellow: string;
+      bright_blue: string; bright_magenta: string; bright_cyan: string; bright_white: string;
+    };
+  };
+  font: {
+    ui_family: string;       // "system-ui"
+    ui_size_pt: number;
+    terminal_family: string; // "Cascadia Mono"
+    terminal_size_pt: number;
+  };
+  terminal: {
+    cursor_style: "block" | "bar" | "underline";
+    scrollback_lines: number;
+    bidi_enabled: boolean;
+    allow_proposed_api: boolean;
+  };
+  hooks: {
+    enabled: boolean;
+    agents: string[];        // ["claude"]
+    policy_preset: "paranoid" | "default" | "relaxed" | "auto";
+  };
+  notifications: {
+    toast_enabled: boolean;
+    sound_enabled: boolean;
+  };
+  updates: {
+    check_on_startup: boolean;
+    auto_download: boolean;       // currently always false (no signing keys yet)
+    manifest_url?: string;        // defaults to a placeholder until repo goes public
+    last_check_iso?: string;
+    last_seen_version?: string;
+  };
+};
+```
+
+### Theme presets
+
+Built-in presets are returned by `settings.get-presets` (RPC) or `winmux settings presets` (CLI). Selecting one overwrites all theme fields; manual color edits flip `theme.preset` to `"custom"`.
+
+- `tokyo-night` (default)
+- `dracula`
+- `solarized-dark`
+- `nord`
+- `solarized-light`
+
+### Live theme apply
+
+The frontend reads `settings.theme` on startup and writes the colors as CSS custom properties on `<html>` (`--w-bg`, `--w-accent`, etc.) — `App.css` references all colors through these vars, so a theme change re-tints the entire UI without reload. Subscribed to the `settings:changed` event so updates from the CLI reflect live.
 
 ## Environment variables
 

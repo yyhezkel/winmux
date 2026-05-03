@@ -7,6 +7,8 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
 use crate::notes::{self, NoteStatus};
 use crate::dev;
+use crate::settings;
+use crate::updater;
 use crate::{
     collect_panes, collect_panes_with_kind, config_dir_pub, decide_feed, find_browser_state,
     find_workspace_for_pane, iframe_cmd_inner, new_pane_id, new_workspace_id,
@@ -1090,6 +1092,67 @@ async fn dispatch(
             notes::rpc_delete(state, app, &id)?;
             Ok(json!({ "ok": true }))
         }
+
+        // ─── Phase 9.A: settings ─────────────────────────────────────────
+        "settings.load" => {
+            let s = state.settings.lock().unwrap().clone();
+            serde_json::to_value(&s).map_err(|e| e.to_string())
+        }
+        "settings.save" => {
+            // Accept either a full Settings object (overwrite) under
+            // params.settings, or a partial JSON patch under params.patch.
+            if let Some(full) = params.get("settings").cloned() {
+                let parsed: settings::Settings =
+                    serde_json::from_value(full).map_err(|e| format!("bad settings: {e}"))?;
+                {
+                    let mut s = state.settings.lock().unwrap();
+                    *s = parsed;
+                }
+                let s = state.settings.lock().unwrap().clone();
+                settings::save_to_disk_pub(&s)?;
+                let _ = app.emit("settings:changed", &s);
+                return serde_json::to_value(&s).map_err(|e| e.to_string());
+            }
+            if let Some(patch) = params.get("patch").cloned() {
+                let s = settings::rpc_patch(state, app, patch)?;
+                return serde_json::to_value(&s).map_err(|e| e.to_string());
+            }
+            Err("missing `settings` or `patch`".into())
+        }
+        "settings.set" => {
+            let key = params
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or("missing key")?
+                .to_string();
+            let value = params
+                .get("value")
+                .ok_or("missing value")?
+                .clone();
+            // Coerce the value through string-or-direct so CLI users can pass
+            // both `--value dracula` (raw string) and `--value true` / numeric.
+            let value_str = match &value {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            let s = settings::rpc_set_path(state, app, &key, &value_str)?;
+            serde_json::to_value(&s).map_err(|e| e.to_string())
+        }
+        "settings.preset" => {
+            let id = params
+                .get("preset")
+                .or_else(|| params.get("id"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing preset")?
+                .to_string();
+            let s = settings::rpc_apply_preset(state, app, &id)?;
+            serde_json::to_value(&s).map_err(|e| e.to_string())
+        }
+        "settings.get-presets" => serde_json::to_value(&settings::list_presets())
+            .map_err(|e| e.to_string()),
+
+        // ─── Phase 9.B: update checker ───────────────────────────────────
+        "updates.check" => Ok(updater::rpc_check_now(state, app).await),
 
         "feed.decide" => {
             let req_id = params

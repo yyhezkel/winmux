@@ -260,6 +260,14 @@ Last N (default 50) lines of `<appdata>/winmux/debug.log`. Same as
 `Get-Content -Tail N` against the log, but works through the running app's
 RPC so you don't need to know the path.
 
+### `winmux dev check-updates [--pretty]`  *(Phase 9.B)*
+
+Polls the manifest URL configured in `settings.updates.manifest_url`,
+returns the parsed `UpdateInfo` with `current_version`, `latest_version`,
+`available`, `notes_url`, `msi_url`, `released_at`, and `last_check_iso`.
+Persists `last_check_iso` and `last_seen_version` into `settings.json`. If
+the manifest URL is unreachable, returns `error` rather than failing.
+
 ### `winmux dev report-bug [--description "..."] [--repro-steps "..."]`
 
 Captures a bug report at `<appdata>/winmux/bug-reports/bug-<unix>.json`
@@ -268,6 +276,23 @@ containing `{ description, repro_steps, captured_at_unix, state }` where
 
 If `--description` is omitted, reads from stdin until EOF (Ctrl-Z + Enter on
 Windows, Ctrl-D on Unix). Prints the saved file path on success.
+
+## `winmux settings` — read/modify persisted settings  *(Phase 9.A)*
+
+Wrapper around the `settings.*` RPC methods. Useful for theming from a
+script or for CI snapshots of a known-good config.
+
+| Subcommand | What it does |
+|---|---|
+| `winmux settings show [--json]` | Print the full settings JSON (pretty by default). |
+| `winmux settings set --key <dotted.path> --value <v>` | Patch a single field, e.g. `--key theme.preset --value dracula` or `--key terminal.scrollback_lines --value 8000`. |
+| `winmux settings preset <name>` | Apply a built-in theme preset (`tokyo-night`, `dracula`, `solarized-dark`, `nord`, `solarized-light`). |
+| `winmux settings presets [--json]` | List available presets with their swatch colors. |
+| `winmux settings export --output <file>` | Write the current settings to a file. |
+| `winmux settings import --input <file>` | Replace settings with the file contents (full overwrite). |
+
+All mutations emit `settings:changed` so the running app re-applies the
+theme live.
 
 ## `winmux-mcp` — MCP server for agents (Phase 8.F.4)
 

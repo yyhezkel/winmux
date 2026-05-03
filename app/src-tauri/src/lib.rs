@@ -2,7 +2,9 @@ mod dev;
 mod notes;
 mod remote_bootstrap;
 mod rpc_server;
+mod settings;
 mod tunnel;
+mod updater;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -153,6 +155,8 @@ pub(crate) struct AppState {
     pub(crate) pane_status: Arc<Mutex<HashMap<String, String>>>,
     pub(crate) feed: Arc<Mutex<FeedStore>>,
     pub(crate) notes: Arc<Mutex<notes::NotesFile>>,
+    // Phase 9.A: persistent app settings (theme, fonts, terminal, hooks, etc.)
+    pub(crate) settings: Arc<Mutex<settings::Settings>>,
     // Phase 8.B: per-(workspace, remote_port) port forwards.
     pub(crate) forwards: ForwardMap,
     // Phase 8.C: pending browser requests (eval/screenshot) awaiting frontend reply.
@@ -3190,6 +3194,31 @@ pub fn run() {
                     dlog(&format!("setup: notes load failed: {e} (starting empty)"));
                 }
             }
+            // Phase 9.A: load settings (or write defaults on first run).
+            match settings::load_from_disk() {
+                Ok(s) => {
+                    dlog(&format!("setup: settings loaded (theme.preset={})", s.theme.preset));
+                    *state.settings.lock().unwrap() = s;
+                }
+                Err(e) => {
+                    dlog(&format!("setup: settings load failed: {e} (using defaults)"));
+                }
+            }
+            // Phase 9.B: spawn the update checker if enabled. Fully best-effort —
+            // never blocks startup; failures (offline, manifest missing, repo
+            // private) just log to debug.log and emit nothing.
+            {
+                let s = state.settings.lock().unwrap().clone();
+                if s.updates.check_on_startup {
+                    let app_handle = app.handle().clone();
+                    let state_clone: AppState = (*state).clone();
+                    tauri::async_runtime::spawn(async move {
+                        // Small delay so the splash + initial render finish first.
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        let _ = updater::check(&state_clone, &app_handle).await;
+                    });
+                }
+            }
             // Spawn JSON-RPC server on a per-user named pipe.
             let state_clone: AppState = (*state).clone();
             let app_handle = app.handle().clone();
@@ -3236,6 +3265,13 @@ pub fn run() {
             notes::notes_add,
             notes::notes_update,
             notes::notes_delete,
+            settings::settings_load,
+            settings::settings_save,
+            settings::settings_get_presets,
+            settings::settings_apply_preset,
+            settings::settings_reset,
+            settings::list_system_fonts,
+            updater::check_for_updates_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

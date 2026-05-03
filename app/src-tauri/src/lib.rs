@@ -1397,18 +1397,50 @@ async fn try_agent_auth(
         ("openssh-ssh-agent", r"\\.\pipe\openssh-ssh-agent"),
         ("pageant", r"\\.\pipe\pageant"),
     ] {
-        let mut agent =
-            match russh_keys::agent::client::AgentClient::connect_named_pipe(pipe_path).await {
-                Ok(a) => a,
-                Err(e) => {
-                    tracing::debug!("{label} pipe ({pipe_path}) not reachable: {e}");
-                    continue;
-                }
-            };
-        let identities = match agent.request_identities().await {
-            Ok(ids) => ids,
-            Err(e) => {
-                tracing::debug!("{label} request_identities: {e}");
+        dlog(&format!("ssh.auth: agent probe {label} ({pipe_path})"));
+        // Hard 2-second cap on the connect — if Pageant's pipe is alive but
+        // its server is wedged, `connect_named_pipe` can block indefinitely.
+        let connect_fut =
+            russh_keys::agent::client::AgentClient::connect_named_pipe(pipe_path);
+        let mut agent = match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            connect_fut,
+        )
+        .await
+        {
+            Ok(Ok(a)) => {
+                dlog(&format!("ssh.auth: agent probe {label} CONNECTED"));
+                a
+            }
+            Ok(Err(e)) => {
+                dlog(&format!("ssh.auth: agent probe {label} not reachable: {e}"));
+                continue;
+            }
+            Err(_) => {
+                dlog(&format!(
+                    "ssh.auth: agent probe {label} TIMED OUT after 2s — skipping"
+                ));
+                continue;
+            }
+        };
+        let identities = match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            agent.request_identities(),
+        )
+        .await
+        {
+            Ok(Ok(ids)) => {
+                dlog(&format!("ssh.auth: agent {label} offered {} identit(y/ies)", ids.len()));
+                ids
+            }
+            Ok(Err(e)) => {
+                dlog(&format!("ssh.auth: agent {label} request_identities: {e}"));
+                continue;
+            }
+            Err(_) => {
+                dlog(&format!(
+                    "ssh.auth: agent {label} request_identities TIMED OUT after 2s — skipping"
+                ));
                 continue;
             }
         };
@@ -1416,13 +1448,19 @@ async fn try_agent_auth(
             continue;
         }
         any_agent_seen = true;
-        tracing::info!("{label}: {} identit(y/ies) offered", identities.len());
         for id in identities {
+            dlog(&format!("ssh.auth: agent {label} attempting authenticate_publickey_with"));
             match handle.authenticate_publickey_with(user, id, &mut agent).await {
-                Ok(true) => return Some(true),
-                Ok(false) => continue,
+                Ok(true) => {
+                    dlog(&format!("ssh.auth: agent {label} authenticated OK"));
+                    return Some(true);
+                }
+                Ok(false) => {
+                    dlog(&format!("ssh.auth: agent {label} key not accepted by server"));
+                    continue;
+                }
                 Err(e) => {
-                    tracing::debug!("{label} auth attempt: {e}");
+                    dlog(&format!("ssh.auth: agent {label} auth error: {e}"));
                     continue;
                 }
             }
@@ -1430,8 +1468,10 @@ async fn try_agent_auth(
     }
 
     if any_agent_seen {
+        dlog("ssh.auth: agent probes done — no agent identity worked");
         Some(false)
     } else {
+        dlog("ssh.auth: no agent reachable on any pipe");
         None
     }
 }
@@ -1443,26 +1483,40 @@ async fn try_authenticate(
     key_passphrase: Option<&str>,
     password: Option<&str>,
 ) -> Result<bool, String> {
+    dlog(&format!(
+        "ssh.auth: begin user={} key_path={:?} key_passphrase={} password={}",
+        user,
+        key_path,
+        if key_passphrase.is_some() { "yes" } else { "no" },
+        if password.is_some() { "yes" } else { "no" }
+    ));
+
     // 1) ssh-agent (OpenSSH agent / Pageant via named pipe).
+    dlog("ssh.auth: step 1 — try_agent_auth");
     if let Some(true) = try_agent_auth(handle, user).await {
+        dlog("ssh.auth: step 1 OK (agent)");
         return Ok(true);
     }
 
     // 2) Explicit key file (with optional passphrase).
     if let Some(p) = key_path {
+        dlog(&format!("ssh.auth: step 2 — explicit key file {p}"));
         match russh_keys::load_secret_key(p, key_passphrase) {
             Ok(key) => {
+                dlog(&format!("ssh.auth: key {p} loaded — attempting authenticate_publickey"));
                 let pkwh = pkwh(key)?;
-                if handle
+                let r = handle
                     .authenticate_publickey(user, pkwh)
                     .await
-                    .map_err(|e| e.to_string())?
-                {
+                    .map_err(|e| e.to_string())?;
+                dlog(&format!("ssh.auth: step 2 publickey result = {r}"));
+                if r {
                     return Ok(true);
                 }
             }
             Err(e) => {
                 let s = e.to_string();
+                dlog(&format!("ssh.auth: load_secret_key {p} ERR: {s}"));
                 if key_load_needs_passphrase(&s) {
                     if key_passphrase.is_none() {
                         return Err(format!("KEY_PASSPHRASE_REQUIRED:{}", p));
@@ -1478,18 +1532,21 @@ async fn try_authenticate(
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .map_err(|e| e.to_string())?;
+    dlog(&format!("ssh.auth: step 3 — default key paths under {home}/.ssh/"));
     for name in ["id_ed25519", "id_ecdsa", "id_rsa"] {
         let p = format!("{}/.ssh/{}", home, name);
         if !Path::new(&p).exists() {
             continue;
         }
+        dlog(&format!("ssh.auth: step 3 trying {p}"));
         if let Ok(key) = russh_keys::load_secret_key(&p, None) {
             if let Ok(pkwh) = pkwh(key) {
-                if handle
+                let r = handle
                     .authenticate_publickey(user, pkwh)
                     .await
-                    .map_err(|e| e.to_string())?
-                {
+                    .map_err(|e| e.to_string())?;
+                dlog(&format!("ssh.auth: step 3 {p} result = {r}"));
+                if r {
                     return Ok(true);
                 }
             }
@@ -1498,15 +1555,18 @@ async fn try_authenticate(
 
     // 4) Password (sent to remote, not key passphrase).
     if let Some(pw) = password {
-        if handle
+        dlog("ssh.auth: step 4 — password");
+        let r = handle
             .authenticate_password(user, pw)
             .await
-            .map_err(|e| e.to_string())?
-        {
+            .map_err(|e| e.to_string())?;
+        dlog(&format!("ssh.auth: step 4 password result = {r}"));
+        if r {
             return Ok(true);
         }
     }
 
+    dlog("ssh.auth: ALL methods exhausted, no auth succeeded");
     Ok(false)
 }
 
@@ -1548,6 +1608,10 @@ async fn spawn_ssh(
     cols: u16,
     rows: u16,
 ) -> Result<String, String> {
+    dlog(&format!(
+        "spawn_ssh: entry ws={} pane={} target={}@{}:{}",
+        workspace_id, pane_id, user, host, port
+    ));
     let config = Arc::new(client::Config::default());
     let target = format!("{}:{}", host, port);
     let outcome_arc = Arc::new(Mutex::new(HostCheckOutcome::default()));
@@ -1559,7 +1623,13 @@ async fn spawn_ssh(
         tunnel_token: Some(token.clone()),
     };
 
+    dlog(&format!("spawn_ssh: client::connect to {} starting", target));
     let connect_res = client::connect(config, (host.as_str(), port), sh).await;
+    dlog(&format!(
+        "spawn_ssh: client::connect to {} returned (ok={})",
+        target,
+        connect_res.is_ok()
+    ));
     let outcome = outcome_arc.lock().unwrap().clone();
 
     let mut handle = match connect_res {
@@ -1581,6 +1651,7 @@ async fn spawn_ssh(
         }
     };
 
+    dlog("spawn_ssh: try_authenticate begin");
     let auth_ok = try_authenticate(
         &mut handle,
         &user,
@@ -1589,12 +1660,14 @@ async fn spawn_ssh(
         password.as_deref(),
     )
     .await?;
+    dlog(&format!("spawn_ssh: try_authenticate returned ok={auth_ok}"));
     if !auth_ok {
         return Err("authentication failed (agent, key, and password all failed)".into());
     }
 
     // Phase 6.2: best-effort bootstrap of the winmux Linux binary on the remote.
     // We never block the user's shell on this — failures are surfaced via pane:status.
+    dlog("spawn_ssh: bootstrap starting");
     emit_pane_status_event(app, &pane_id, "bootstrapping winmux…");
     match remote_bootstrap::bootstrap(&mut handle, app, false).await {
         Ok(remote_bootstrap::BootstrapStatus::AlreadyOk) => {

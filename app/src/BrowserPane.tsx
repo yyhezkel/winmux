@@ -428,6 +428,7 @@ export function BrowserPane(p: Props) {
           <iframe
             ref={(el) => (iframeRef = el)}
             class="browser-iframe"
+            data-pane-id={p.pane.pane_id}
             src={resolvedUrl()}
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             referrerpolicy="no-referrer-when-downgrade"

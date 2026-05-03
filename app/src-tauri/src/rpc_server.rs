@@ -9,10 +9,11 @@ use crate::notes::{self, NoteStatus};
 use crate::dev;
 use crate::{
     collect_panes, collect_panes_with_kind, config_dir_pub, decide_feed, find_browser_state,
-    find_workspace_for_pane, new_pane_id, new_workspace_id, next_browser_request_id, persist,
-    resolve_browser_url, split_pane_in, update_browser_pane, update_pane_in, write_to_session,
-    AppState, Connection, CreateInput, EnvVar, FeedItem, FeedItemState, LayoutNode,
-    NotificationItem, PaneKind, Session, SplitDirection, Workspace, NOTIF_COUNTER,
+    find_workspace_for_pane, iframe_cmd_inner, new_pane_id, new_workspace_id,
+    next_browser_request_id, persist, resolve_browser_url, split_pane_in, update_browser_pane,
+    update_pane_in, write_to_session, AppState, Connection, CreateInput, EnvVar, FeedItem,
+    FeedItemState, LayoutNode, NotificationItem, PaneKind, Session, SplitDirection, Workspace,
+    NOTIF_COUNTER,
 };
 
 const FEED_MAX_ITEMS_LIMIT: usize = 50;
@@ -1140,6 +1141,103 @@ async fn dispatch(
             persist(state)?;
             let _ = app.emit("workspaces:changed", ());
             Ok(json!({ "ok": true, "workspace_id": id }))
+        }
+
+        // ─── Phase 8.F.1: iframe automation via postMessage bridge ─────────
+        "pane.browser.iframe.click" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let selector = params
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .ok_or("missing selector")?
+                .to_string();
+            let button = params
+                .get("button")
+                .and_then(|v| v.as_str())
+                .unwrap_or("left")
+                .to_string();
+            let timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5_000);
+            iframe_cmd_inner(
+                state,
+                app,
+                &pane_id,
+                "click",
+                json!({ "selector": selector, "button": button }),
+                timeout_ms,
+            )
+            .await
+        }
+
+        "pane.browser.iframe.type" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let selector = params
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .ok_or("missing selector")?
+                .to_string();
+            let text = params
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or("missing text")?
+                .to_string();
+            let clear_first = params
+                .get("clear_first")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5_000);
+            iframe_cmd_inner(
+                state,
+                app,
+                &pane_id,
+                "type",
+                json!({ "selector": selector, "text": text, "clear_first": clear_first }),
+                timeout_ms,
+            )
+            .await
+        }
+
+        "pane.browser.iframe.eval" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let expression = params
+                .get("expression")
+                .or_else(|| params.get("expr"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing expression")?
+                .to_string();
+            let timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5_000);
+            iframe_cmd_inner(
+                state,
+                app,
+                &pane_id,
+                "eval",
+                json!({ "expression": expression }),
+                timeout_ms,
+            )
+            .await
         }
 
         // Phase 8.E: introspection. Pure reads of AppState + on-disk debug.log.

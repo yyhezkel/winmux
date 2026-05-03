@@ -81,6 +81,14 @@ pub(crate) static BROWSER_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub(crate) type BrowserLoadWaiters =
     Arc<Mutex<HashMap<String, Vec<tokio::sync::oneshot::Sender<String>>>>>;
 
+// Phase 8.F.1: pending iframe-bridge requests, keyed by request_id. The parent
+// webview's bridge forwards iframe responses back via `pane_browser_iframe_response`,
+// which resolves the matching oneshot here.
+pub(crate) type IframePending = Arc<
+    Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<serde_json::Value, String>>>>,
+>;
+pub(crate) static IFRAME_REQ_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 /// Tri-state for whether persistence is safe:
 /// - `Loaded`: load_from_disk succeeded (file present or absent doesn't matter — state reflects truth).
 /// - `Failed`: load_from_disk hit a real error (read or parse). Persisting would clobber data.
@@ -153,6 +161,8 @@ pub(crate) struct AppState {
     pub(crate) browser_load_waiters: BrowserLoadWaiters,
     // Phase 8.E: ring buffer of frontend console.error/warn captures.
     pub(crate) console_buffer: dev::ConsoleBuffer,
+    // Phase 8.F.1: iframe-bridge pending requests.
+    pub(crate) iframe_pending: IframePending,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -2547,6 +2557,125 @@ fn pane_browser_response(
     Ok(())
 }
 
+// ─── Phase 8.F.1: iframe-bridge round-trip ─────────────────────────────────
+
+fn next_iframe_request_id() -> String {
+    let n = IFRAME_REQ_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("ifr_{:x}_{:x}", t, n)
+}
+
+/// Send a command into the iframe of `pane_id`, wait for the iframe's
+/// postMessage response to come back through the parent bridge, return it.
+///
+/// Wire path: this fn → eval'd JS in main webview → `iframe.contentWindow.postMessage`
+/// → bridge JS in iframe → `runCommand(cmd, args)` → `window.parent.postMessage`
+/// → bridge JS in parent → `pane_browser_iframe_response` Tauri cmd → resolves
+/// the oneshot in `iframe_pending` keyed by `request_id`.
+pub(crate) async fn iframe_cmd_inner(
+    state: &AppState,
+    app: &AppHandle,
+    pane_id: &str,
+    cmd: &str,
+    args: serde_json::Value,
+    timeout_ms: u64,
+) -> Result<serde_json::Value, String> {
+    let request_id = next_iframe_request_id();
+    dlog(&format!(
+        "iframe_cmd: pane={} cmd={} request_id={} timeout_ms={}",
+        pane_id, cmd, request_id, timeout_ms
+    ));
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .iframe_pending
+        .lock()
+        .unwrap()
+        .insert(request_id.clone(), tx);
+
+    let message = serde_json::to_string(&serde_json::json!({
+        "winmux": true,
+        "role": "command",
+        "request_id": request_id,
+        "cmd": cmd,
+        "args": args,
+    }))
+    .map_err(|e| format!("serialize message: {e}"))?;
+
+    // Escape pane_id for inclusion in a JS string literal.
+    let pane_id_js = pane_id.replace('\\', "\\\\").replace('\'', "\\'");
+    let script = format!(
+        "(function(){{\
+           const ifr = document.querySelector('iframe[data-pane-id=\"{pane}\"]');\
+           if (!ifr || !ifr.contentWindow) {{ console.error('winmux: no iframe pane', '{pane}'); return; }}\
+           ifr.contentWindow.postMessage({msg}, '*');\
+         }})();",
+        pane = pane_id_js,
+        msg = message
+    );
+
+    let win = app
+        .get_webview_window("main")
+        .ok_or("no main window")?;
+    win.eval(&script).map_err(|e| format!("eval: {e}"))?;
+
+    let result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await;
+    match result {
+        Ok(Ok(Ok(v))) => Ok(v),
+        Ok(Ok(Err(e))) => Err(e),
+        Ok(Err(_)) => Err("response channel closed".into()),
+        Err(_) => {
+            state.iframe_pending.lock().unwrap().remove(&request_id);
+            Err(format!("iframe cmd timeout after {timeout_ms}ms"))
+        }
+    }
+}
+
+#[tauri::command]
+async fn pane_browser_iframe_cmd(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    pane_id: String,
+    cmd: String,
+    args: serde_json::Value,
+    timeout_ms: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    iframe_cmd_inner(
+        &state,
+        &app,
+        &pane_id,
+        &cmd,
+        args,
+        timeout_ms.unwrap_or(5_000),
+    )
+    .await
+}
+
+/// Frontend bridge calls this with the iframe's postMessage response. Resolves
+/// the oneshot waiting in `iframe_pending`.
+#[tauri::command]
+fn pane_browser_iframe_response(
+    state: State<'_, AppState>,
+    request_id: String,
+    ok: bool,
+    result: Option<serde_json::Value>,
+    error: Option<String>,
+) -> Result<(), String> {
+    let tx = state.iframe_pending.lock().unwrap().remove(&request_id);
+    if let Some(tx) = tx {
+        let payload = if ok {
+            Ok(result.unwrap_or(serde_json::Value::Null))
+        } else {
+            Err(error.unwrap_or_else(|| "iframe error".to_string()))
+        };
+        let _ = tx.send(payload);
+    }
+    Ok(())
+}
+
 /// Phase 8.E: frontend console.error/warn capture. Pushes one entry into the
 /// ring buffer; the CLI surfaces them via `winmux dev console-tail`.
 #[tauri::command]
@@ -3016,6 +3145,26 @@ pub fn run() {
                 std::env::var("WINMUX_CONFIG_DIR").ok()
             ));
             tracing::info!("winmux config_dir: {:?}", cfg_dir);
+
+            // Phase 8.F.1: create the main window programmatically so we can
+            // inject the iframe-bridge initialization script into every frame
+            // (including cross-origin iframes — that's the only path Tauri 2
+            // exposes for setting WebView2's AddScriptToExecuteOnDocumentCreated).
+            // tauri.conf.json's `windows: []` skips the default window so this
+            // is the only one created. Settings here mirror the previous conf:
+            // title "winmux", inner size 1100x700.
+            const BRIDGE_JS: &str = include_str!("winmux_bridge.js");
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .title("winmux")
+            .inner_size(1100.0, 700.0)
+            .initialization_script_for_all_frames(BRIDGE_JS)
+            .build()
+            .map_err(|e| Box::<dyn std::error::Error>::from(format!("main window: {e}")))?;
+            dlog("setup: main webview created with iframe bridge");
             match load_from_disk() {
                 Ok(file) => {
                     *state.workspaces.lock().unwrap() = file;
@@ -3072,6 +3221,8 @@ pub fn run() {
             pane_browser_set_forward,
             pane_browser_response,
             pane_browser_loaded,
+            pane_browser_iframe_cmd,
+            pane_browser_iframe_response,
             workspace_reset_layout,
             dev_console_log,
             pty_write,

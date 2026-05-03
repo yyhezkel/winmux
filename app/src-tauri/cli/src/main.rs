@@ -844,10 +844,26 @@ fn derive_hook_summary(_subcommand: &str, payload: &Value) -> String {
     }
     let s = serde_json::to_string(payload).unwrap_or_default();
     if s.len() > 280 {
-        format!("{}…", &s[..280])
+        format!("{}…", truncate_at_char_boundary(&s, 280))
     } else {
         s
     }
+}
+
+/// Truncate at or before `max_bytes`, never inside a multi-byte UTF-8
+/// character. The naive `&s[..max_bytes]` panics for Hebrew / Arabic / CJK
+/// (and emoji) when `max_bytes` lands in the middle of a code-point —
+/// observed in the wild when Claude Code sent a Stop hook with a Hebrew
+/// `last_assistant_message`.
+pub(crate) fn truncate_at_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }
 
 /// Parse `KEY=VALUE` repeats into the JSON shape the backend expects.
@@ -1380,7 +1396,7 @@ async fn real_main() -> ExitCode {
                             let txt = n.get("text").and_then(|x| x.as_str()).unwrap_or("");
                             let mark = if st == "done" { "✓" } else { " " };
                             let snippet = if txt.len() > 80 {
-                                format!("{}…", &txt[..80])
+                                format!("{}…", truncate_at_char_boundary(txt, 80))
                             } else {
                                 txt.to_string()
                             };

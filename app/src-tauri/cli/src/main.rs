@@ -1443,6 +1443,37 @@ async fn real_main() -> ExitCode {
                 serde_json::from_str(buf.trim()).unwrap_or_else(|_| json!({ "raw": buf.trim() }))
             };
 
+            // Phase setup-hooks-fix v3.5: honor Claude Code's `permission_mode`.
+            // When the user has flipped to `acceptEdits` / `bypassPermissions`
+            // (Shift+Tab in the agent, or starting `claude --dangerously-skip-permissions`),
+            // Claude Code does not actually wait on our hook decision before
+            // proceeding — but it still INVOKES us. If we then synchronously
+            // ring the user's winmux for a card they have to manually
+            // dismiss, that's pure noise. Short-circuit with allow + reason
+            // so the user sees nothing and Claude Code is happy.
+            if subcommand == "pre-tool-use" {
+                let permission_mode = payload
+                    .get("permission_mode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default");
+                if matches!(
+                    permission_mode,
+                    "acceptEdits" | "bypassPermissions" | "skip"
+                ) {
+                    let out = json!({
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "allow",
+                            "permissionDecisionReason": format!(
+                                "winmux: agent has permission_mode={permission_mode}, deferring to it"
+                            )
+                        }
+                    });
+                    println!("{}", serde_json::to_string(&out).unwrap_or_default());
+                    return ExitCode::SUCCESS;
+                }
+            }
+
             let blocking = matches!(subcommand.as_str(), "tool-permission" | "pre-tool-use");
             let kind = if blocking { "permission_request" } else { "passive" };
 
@@ -1554,9 +1585,37 @@ async fn real_main() -> ExitCode {
                     }
                 }
                 Err(e) => {
-                    // Real wire error — keep on stderr so the user sees it.
-                    eprintln!("winmux claude-hook: {}", e);
-                    return ExitCode::from(3);
+                    // Phase setup-hooks fix v3.5 — graceful pipe failure.
+                    // If we can't talk to winmux (pipe not running, EOF
+                    // mid-frame, timeout) we don't want to fail the entire
+                    // hook. For pre-tool-use we emit `permissionDecision:
+                    // "ask"` so Claude Code falls back to its built-in UI
+                    // (better than a hard error). Lifecycle hooks stay
+                    // silent (they don't need a response anyway). Legacy
+                    // subcommands keep the old exit-code shape.
+                    eprintln!(
+                        "winmux claude-hook: pipe error: {} (falling back to Claude Code UI)",
+                        e
+                    );
+                    match subcommand.as_str() {
+                        "pre-tool-use" => {
+                            let out = json!({
+                                "hookSpecificOutput": {
+                                    "hookEventName": "PreToolUse",
+                                    "permissionDecision": "ask",
+                                    "permissionDecisionReason": "winmux unreachable",
+                                }
+                            });
+                            println!("{}", serde_json::to_string(&out).unwrap_or_default());
+                            return ExitCode::SUCCESS;
+                        }
+                        "notification" | "session-start" | "session-end" | "stop" => {
+                            return ExitCode::SUCCESS;
+                        }
+                        _ => {
+                            return ExitCode::from(3);
+                        }
+                    }
                 }
             }
         }

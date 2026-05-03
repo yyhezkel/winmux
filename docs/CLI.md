@@ -268,3 +268,62 @@ containing `{ description, repro_steps, captured_at_unix, state }` where
 
 If `--description` is omitted, reads from stdin until EOF (Ctrl-Z + Enter on
 Windows, Ctrl-D on Unix). Prints the saved file path on success.
+
+## `winmux-mcp` — MCP server for agents (Phase 8.F.4)
+
+A standalone stdio MCP server that lets MCP-aware agents (Claude Code,
+Cursor, Cline, etc.) drive winmux's browser panes natively. Each tool call
+becomes a JSON-RPC request through the local named pipe to the running
+winmux app.
+
+### Setup
+
+After building or installing winmux, register it with your agent. For
+Claude Code, edit `~/.claude/mcp.json` (or the project-local equivalent):
+
+```json
+{
+  "mcpServers": {
+    "winmux": {
+      "command": "C:\Users\<user>\Documents\programing\winmux\app\src-tauri\target\release\winmux-mcp.exe"
+    }
+  }
+}
+```
+
+If installed via the MSI: `C:\Program Files\winmux\winmux-mcp.exe`.
+
+The winmux desktop app must be running. Each tool call opens a fresh
+named-pipe connection to `\.\pipe\winmux-<USER>` and closes after the
+response. Set `WINMUX_PIPE_PATH` to override the pipe path.
+
+### Tools exposed
+
+Discovery: `list_workspaces`, `tree`.
+
+Browser navigation: `browser_navigate`, `browser_url`, `browser_history`,
+`browser_go_back`, `browser_go_home`.
+
+Browser automation (via the postMessage iframe bridge): `browser_eval`,
+`browser_click`, `browser_type`, `browser_find`, `browser_snapshot`,
+`browser_wait_for`.
+
+Agent affordances: `notify`, `note_add`.
+
+Each tool's `inputSchema` mirrors the matching CLI subcommand's flags. See
+`winmux dev` and the per-subcommand `--help` output for argument shapes.
+
+### Manual protocol probe
+
+The server speaks newline-delimited JSON-RPC 2.0 over stdio. Test without
+an agent:
+
+```pwsh
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | winmux-mcp.exe
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | winmux-mcp.exe
+echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_workspaces","arguments":{}}}' | winmux-mcp.exe
+```
+
+The first response carries `serverInfo` + `capabilities.tools`. The
+second lists 15 tool definitions. The third returns the live
+`WorkspacesFile` from the running app.

@@ -859,8 +859,28 @@ fn build_connection(
     }
 }
 
+// Phase 8.F.2 fix: Windows debug builds give the main thread a 1 MB stack.
+// Clap's derive macro for our 30+ subcommands (especially `BrowserFind` with
+// 13 Option fields) generates a lot of format-string state that — combined
+// with tokio's runtime + serde — overflows that 1 MB during arg parsing on
+// some invocations. Spawn the real work on a worker thread with an 8 MB
+// stack and join.
+fn main() -> ExitCode {
+    match std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(real_main)
+        .and_then(|h| h.join().map_err(|_| std::io::Error::other("worker panicked")))
+    {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("error: worker thread spawn/join failed: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 #[tokio::main]
-async fn main() -> ExitCode {
+async fn real_main() -> ExitCode {
     let cli = Cli::parse();
     let result: Result<Value, String> = match &cli.command {
         Cmd::ListWorkspaces => rpc_call("list-workspaces", json!({})).await,

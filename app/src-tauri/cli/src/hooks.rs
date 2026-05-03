@@ -61,111 +61,219 @@ impl HookAdapter for Claude {
             return AgentStatus::NotDetected;
         }
 
-        let path = claude_dir.join("hooks.json");
-
-        // The hook command points at the canonical install path, NOT current_exe(),
-        // so a future bootstrap re-upload (different binary, same symlink target)
-        // doesn't invalidate the registered hooks.
         let exe_path = match home.to_str() {
             Some(s) => format!("{}/.winmux/bin/winmux", s),
             None => return AgentStatus::Error("non-UTF-8 $HOME".into()),
         };
 
-        // Read existing config (if any). Defensive BOM strip mirrors the manifest
-        // loader in remote_bootstrap.rs.
-        let mut config: Value = match fs::read_to_string(&path) {
-            Ok(text) => match serde_json::from_str(text.trim_start_matches('\u{FEFF}')) {
-                Ok(v) => v,
-                Err(e) => {
-                    return AgentStatus::Error(format!("parse {}: {}", path.display(), e))
-                }
-            },
-            Err(_) => json!({}),
-        };
+        // Phase setup-hooks-fix: current Claude Code reads hooks from
+        // `~/.claude/settings.json` under a top-level `"hooks"` key — NOT
+        // from a separate `~/.claude/hooks.json`. We write BOTH so:
+        //   • settings.json is what Claude Code actually consumes,
+        //   • hooks.json stays for any legacy tooling that might still read it.
+        // settings.json is shared with non-hook config (theme, etc.) — we
+        // read-modify-write only the `hooks` subtree.
 
-        let mut would_register: Vec<String> = Vec::new();
-        let mut already_present: Vec<String> = Vec::new();
-        let mut to_apply: Vec<(String, String)> = Vec::new();
+        let settings_path = claude_dir.join("settings.json");
+        let legacy_path = claude_dir.join("hooks.json");
 
-        for (event, subcmd) in CLAUDE_EVENTS {
-            let cmd = format!("{} claude-hook {}", exe_path, subcmd);
-            let entries = config[event].as_array().cloned().unwrap_or_default();
-            let has_winmux = entries.iter().any(is_winmux_entry);
+        // settings.json is the load-bearing target. Its outcome drives the
+        // status surface. The legacy file is updated on a best-effort basis.
+        let settings_outcome =
+            apply_to_settings(&claude_dir, &settings_path, &exe_path, dry, force);
+        let _ = apply_to_legacy(&claude_dir, &legacy_path, &exe_path, dry, force);
+        settings_outcome
+    }
+}
 
-            if has_winmux && !force {
-                already_present.push((*event).into());
-                continue;
-            }
-
-            would_register.push((*event).into());
-            to_apply.push(((*event).into(), cmd));
-        }
-
-        if dry {
-            return AgentStatus::DryRun {
-                would_register,
-                path,
-                already_present,
-            };
-        }
-
-        if to_apply.is_empty() {
-            return AgentStatus::Done {
-                registered: vec![],
-                backup: None,
-                path,
-                unchanged: true,
-            };
-        }
-
-        // Backup BEFORE writing.
-        let backup = if path.exists() {
-            let stamp = chrono::Local::now().format("%Y%m%dT%H%M%S").to_string();
-            let bk = claude_dir.join(format!("hooks.json.bak.{}", stamp));
-            if let Err(e) = fs::copy(&path, &bk) {
-                return AgentStatus::Error(format!("backup {}: {}", bk.display(), e));
-            }
-            Some(bk)
-        } else {
-            None
-        };
-
-        // Apply each event mutation.
-        for (event, cmd) in &to_apply {
-            let mut entries = config[event.as_str()].as_array().cloned().unwrap_or_default();
-            entries.retain(|e| !is_winmux_entry(e));
-            entries.push(json!({
-                "matcher": "*",
-                "hooks": [
-                    { "type": "command", "command": cmd }
-                ]
-            }));
-            config[event.as_str()] = json!(entries);
-        }
-
-        // Atomic write (.tmp + rename, in the same dir for cross-fs safety).
-        let tmp = claude_dir.join(format!(
-            "hooks.json.winmux-tmp.{}",
-            std::process::id()
+/// Writes our hooks under `["hooks"][event]` in `~/.claude/settings.json`,
+/// preserving every other key. Atomic + timestamped backup.
+fn apply_to_settings(
+    claude_dir: &std::path::Path,
+    path: &std::path::Path,
+    exe_path: &str,
+    dry: bool,
+    force: bool,
+) -> AgentStatus {
+    let mut root: Value = match fs::read_to_string(path) {
+        Ok(text) => match serde_json::from_str(text.trim_start_matches('\u{FEFF}')) {
+            Ok(v) => v,
+            Err(e) => return AgentStatus::Error(format!("parse {}: {}", path.display(), e)),
+        },
+        Err(_) => json!({}),
+    };
+    if !root.is_object() {
+        return AgentStatus::Error(format!(
+            "{} is not a JSON object (got {:?}); refusing to overwrite",
+            path.display(),
+            kind_of(&root)
         ));
-        let text = match serde_json::to_string_pretty(&config) {
-            Ok(t) => t,
-            Err(e) => return AgentStatus::Error(format!("serialize: {e}")),
-        };
-        if let Err(e) = fs::write(&tmp, &text) {
-            return AgentStatus::Error(format!("write tmp: {e}"));
-        }
-        if let Err(e) = fs::rename(&tmp, &path) {
-            let _ = fs::remove_file(&tmp);
-            return AgentStatus::Error(format!("rename: {e}"));
-        }
+    }
+    if !root.get("hooks").is_some_and(|h| h.is_object()) {
+        root["hooks"] = json!({});
+    }
 
-        AgentStatus::Done {
-            registered: to_apply.into_iter().map(|(e, _)| e).collect(),
-            backup,
-            path,
-            unchanged: false,
+    let mut would_register: Vec<String> = Vec::new();
+    let mut already_present: Vec<String> = Vec::new();
+    let mut to_apply: Vec<(String, String)> = Vec::new();
+
+    for (event, subcmd) in CLAUDE_EVENTS {
+        let cmd = format!("{} claude-hook {}", exe_path, subcmd);
+        let entries = root["hooks"][event]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let has_winmux = entries.iter().any(is_winmux_entry);
+        if has_winmux && !force {
+            already_present.push((*event).into());
+            continue;
         }
+        would_register.push((*event).into());
+        to_apply.push(((*event).into(), cmd));
+    }
+
+    if dry {
+        return AgentStatus::DryRun {
+            would_register,
+            path: path.to_path_buf(),
+            already_present,
+        };
+    }
+
+    if to_apply.is_empty() {
+        return AgentStatus::Done {
+            registered: vec![],
+            backup: None,
+            path: path.to_path_buf(),
+            unchanged: true,
+        };
+    }
+
+    let backup = if path.exists() {
+        let stamp = chrono::Local::now().format("%Y%m%dT%H%M%S").to_string();
+        let bk = claude_dir.join(format!("settings.json.bak.{}", stamp));
+        if let Err(e) = fs::copy(path, &bk) {
+            return AgentStatus::Error(format!("backup {}: {}", bk.display(), e));
+        }
+        Some(bk)
+    } else {
+        None
+    };
+
+    for (event, cmd) in &to_apply {
+        let mut entries = root["hooks"][event.as_str()]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        entries.retain(|e| !is_winmux_entry(e));
+        entries.push(json!({
+            "matcher": "*",
+            "hooks": [{ "type": "command", "command": cmd }]
+        }));
+        root["hooks"][event.as_str()] = json!(entries);
+    }
+
+    let tmp = claude_dir.join(format!("settings.json.winmux-tmp.{}", std::process::id()));
+    let text = match serde_json::to_string_pretty(&root) {
+        Ok(t) => t,
+        Err(e) => return AgentStatus::Error(format!("serialize: {e}")),
+    };
+    if let Err(e) = fs::write(&tmp, &text) {
+        return AgentStatus::Error(format!("write tmp: {e}"));
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return AgentStatus::Error(format!("rename: {e}"));
+    }
+
+    AgentStatus::Done {
+        registered: to_apply.into_iter().map(|(e, _)| e).collect(),
+        backup,
+        path: path.to_path_buf(),
+        unchanged: false,
+    }
+}
+
+/// Best-effort write to the legacy top-level `~/.claude/hooks.json` (the
+/// shape Claude Code USED to read). Modern Claude Code ignores this file;
+/// kept so any third-party tooling that still scrapes it stays in sync.
+fn apply_to_legacy(
+    claude_dir: &std::path::Path,
+    path: &std::path::Path,
+    exe_path: &str,
+    dry: bool,
+    force: bool,
+) -> AgentStatus {
+    let mut config: Value = match fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(text.trim_start_matches('\u{FEFF}')).unwrap_or(json!({})),
+        Err(_) => json!({}),
+    };
+    if !config.is_object() {
+        config = json!({});
+    }
+
+    let mut to_apply: Vec<(String, String)> = Vec::new();
+    for (event, subcmd) in CLAUDE_EVENTS {
+        let cmd = format!("{} claude-hook {}", exe_path, subcmd);
+        let entries = config[event].as_array().cloned().unwrap_or_default();
+        let has_winmux = entries.iter().any(is_winmux_entry);
+        if has_winmux && !force {
+            continue;
+        }
+        to_apply.push(((*event).into(), cmd));
+    }
+    if dry || to_apply.is_empty() {
+        return AgentStatus::Done {
+            registered: vec![],
+            backup: None,
+            path: path.to_path_buf(),
+            unchanged: true,
+        };
+    }
+
+    let backup = if path.exists() {
+        let stamp = chrono::Local::now().format("%Y%m%dT%H%M%S").to_string();
+        let bk = claude_dir.join(format!("hooks.json.bak.{}", stamp));
+        let _ = fs::copy(path, &bk);
+        Some(bk)
+    } else {
+        None
+    };
+
+    for (event, cmd) in &to_apply {
+        let mut entries = config[event.as_str()]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        entries.retain(|e| !is_winmux_entry(e));
+        entries.push(json!({
+            "matcher": "*",
+            "hooks": [{ "type": "command", "command": cmd }]
+        }));
+        config[event.as_str()] = json!(entries);
+    }
+
+    let tmp = claude_dir.join(format!("hooks.json.winmux-tmp.{}", std::process::id()));
+    let text = serde_json::to_string_pretty(&config).unwrap_or_default();
+    let _ = fs::write(&tmp, &text);
+    let _ = fs::rename(&tmp, path);
+
+    AgentStatus::Done {
+        registered: to_apply.into_iter().map(|(e, _)| e).collect(),
+        backup,
+        path: path.to_path_buf(),
+        unchanged: false,
+    }
+}
+
+fn kind_of(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
     }
 }
 

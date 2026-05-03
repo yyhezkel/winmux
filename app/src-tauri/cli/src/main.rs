@@ -234,6 +234,12 @@ enum Cmd {
         timeout_ms: u64,
     },
 
+    /// Phase 8.E: developer / introspection tools. See `winmux dev --help`.
+    Dev {
+        #[command(subcommand)]
+        op: DevOp,
+    },
+
     /// Stub for Claude Code agent hooks: reads JSON from stdin, fires a notify.
     ClaudeHook {
         subcommand: String,
@@ -257,6 +263,40 @@ enum Cmd {
         /// Replace any existing winmux hook entries even if already registered.
         #[arg(long)]
         force: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DevOp {
+    /// Snapshot of app state: version, git hash, workspaces summary, active
+    /// sessions, tunnel state, feed/notes counts, debug.log tail, console tail.
+    GetState {
+        /// Pretty-print JSON (default for `winmux dev` is compact).
+        #[arg(long)]
+        pretty: bool,
+        /// Human-readable summary instead of JSON.
+        #[arg(long)]
+        text: bool,
+    },
+    /// Last N captured frontend console events (errors + warns).
+    ConsoleTail {
+        #[arg(short = 'n', long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Last N lines of `<appdata>/winmux/debug.log`.
+    DebugLogTail {
+        #[arg(short = 'n', long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Capture a bug report (state snapshot + description) under
+    /// `<appdata>/winmux/bug-reports/bug-<unix>.json`. Reads description from
+    /// stdin (terminate with empty line + Ctrl-Z+Enter on Windows / Ctrl-D on
+    /// Unix) when --description is omitted.
+    ReportBug {
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        repro_steps: Option<String>,
     },
 }
 
@@ -349,6 +389,73 @@ fn load_fallback_env_file() {
             }
         }
     }
+}
+
+// Phase 8.E: render `winmux dev get-state` as a short human summary instead
+// of dumping the full JSON. Used when --text is passed.
+fn render_dev_state_text(v: &Value) -> String {
+    let mut out = String::new();
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("?").to_string();
+    out.push_str(&format!("winmux {} ({})\n", s("version"), s("git_hash")));
+    out.push_str(&format!("appdata: {}\n", s("appdata_dir")));
+    if let Some(ws) = v.get("workspaces") {
+        out.push_str(&format!(
+            "workspaces: {} (active: {})\n",
+            ws.get("count").and_then(|x| x.as_u64()).unwrap_or(0),
+            ws.get("active_id")
+                .and_then(|x| x.as_str())
+                .unwrap_or("none")
+        ));
+    }
+    if let Some(sessions) = v.get("sessions").and_then(|x| x.as_array()) {
+        out.push_str(&format!("active sessions: {}\n", sessions.len()));
+        for s in sessions {
+            out.push_str(&format!(
+                "  pane={} kind={} conn={}\n",
+                s.get("pane_id").and_then(|x| x.as_str()).unwrap_or("?"),
+                s.get("kind").and_then(|x| x.as_str()).unwrap_or("?"),
+                s.get("connection_type")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("?")
+            ));
+        }
+    }
+    if let Some(forwards) = v
+        .get("tunnels")
+        .and_then(|t| t.get("browser_forwards"))
+        .and_then(|x| x.as_array())
+    {
+        out.push_str(&format!("port forwards: {}\n", forwards.len()));
+        for f in forwards {
+            out.push_str(&format!(
+                "  ws={} remote={} -> local={}\n",
+                f.get("workspace_id").and_then(|x| x.as_str()).unwrap_or("?"),
+                f.get("remote_port").and_then(|x| x.as_u64()).unwrap_or(0),
+                f.get("local_port").and_then(|x| x.as_u64()).unwrap_or(0),
+            ));
+        }
+    }
+    if let Some(notes) = v.get("notes") {
+        out.push_str(&format!(
+            "notes: {} open / {} done\n",
+            notes.get("open").and_then(|x| x.as_u64()).unwrap_or(0),
+            notes.get("done").and_then(|x| x.as_u64()).unwrap_or(0),
+        ));
+    }
+    if let Some(feed) = v.get("feed") {
+        out.push_str(&format!(
+            "feed: {} open / {} done\n",
+            feed.get("open").and_then(|x| x.as_u64()).unwrap_or(0),
+            feed.get("done").and_then(|x| x.as_u64()).unwrap_or(0),
+        ));
+    }
+    if let Some(log) = v.get("log_tail").and_then(|x| x.as_array()) {
+        out.push_str(&format!("debug.log: {} tail lines\n", log.len()));
+    }
+    if let Some(c) = v.get("console_tail").and_then(|x| x.as_array()) {
+        out.push_str(&format!("console: {} captured events\n", c.len()));
+    }
+    out
 }
 
 async fn rpc_call(method: &str, params: Value) -> Result<Value, String> {
@@ -841,6 +948,58 @@ async fn main() -> ExitCode {
             )
             .await
         }
+        Cmd::Dev { op } => match op {
+            DevOp::GetState { pretty: _, text } => {
+                match rpc_call("dev.get-state", json!({})).await {
+                    Ok(v) => {
+                        if *text {
+                            // Bypass the JSON-pretty pipeline and print directly.
+                            print!("{}", render_dev_state_text(&v));
+                            std::process::exit(0);
+                        }
+                        Ok(v)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            DevOp::ConsoleTail { limit } => {
+                rpc_call("dev.console-tail", json!({ "limit": limit })).await
+            }
+            DevOp::DebugLogTail { limit } => {
+                rpc_call("dev.debug-log-tail", json!({ "limit": limit })).await
+            }
+            DevOp::ReportBug {
+                description,
+                repro_steps,
+            } => {
+                use std::io::Read;
+                let desc = match description {
+                    Some(d) => Ok(d.clone()),
+                    None => {
+                        eprintln!("Describe the issue (Ctrl-Z then Enter to finish on Windows, Ctrl-D on Unix):");
+                        let mut s = String::new();
+                        std::io::stdin()
+                            .read_to_string(&mut s)
+                            .map_err(|e| format!("read stdin: {e}"))
+                            .map(|_| s.trim().to_string())
+                    }
+                };
+                match desc {
+                    Ok(d) if !d.is_empty() => {
+                        rpc_call(
+                            "dev.report-bug",
+                            json!({
+                                "description": d,
+                                "repro_steps": repro_steps,
+                            }),
+                        )
+                        .await
+                    }
+                    Ok(_) => Err("description is required".into()),
+                    Err(e) => Err(e),
+                }
+            }
+        },
         Cmd::Note { op } => match op {
             NoteOp::Add {
                 text,

@@ -221,3 +221,50 @@ echo '{"summary":"Claude finished thinking"}' \
 | `list-workspaces`, `tree`, `select-workspace`, `new-workspace`, `delete-workspace`, `notify`, `set-status` | yes | yes | no |
 | `send`, `send-key` | yes | yes | **yes** — pane must be connected |
 | `claude-hook` | yes (will use the local pipe) | yes (the typical use) | no for passive; for blocking, the app must be running and the user must respond |
+
+## `winmux dev` — introspection (Phase 8.E)
+
+A small developer-facing subcommand tree for inspecting the running app and
+producing bug reports. Useful for debugging your own setup and for handing
+support a complete state snapshot in one file.
+
+### `winmux dev get-state [--text]`
+
+Snapshot of the app's current in-memory + on-disk state. JSON by default,
+suitable for piping to `jq`. Pass `--text` for a short human summary.
+
+The JSON has these top-level fields:
+
+- `version`, `git_hash`, `build_time_unix` — what binary you're talking to.
+- `appdata_dir` — where state files live.
+- `workspaces` — `{ count, active_id, by_id: { ws_id: { name, pane_count,
+  kind_breakdown: { terminal, browser } } } }`.
+- `sessions.active` — every connected pane: `{ pane_id, kind, connection_type,
+  workspace_id }`.
+- `tunnels.forwards` — open SSH local-port forwards (Phase 8.B): `{
+  workspace_id, remote_port, local_port }`.
+- `feed` — `{ open, done, by_kind }`.
+- `notes` — `{ open, done, by_tag }`.
+- `log_tail` — last 50 lines of `<appdata>/winmux/debug.log`.
+- `console_tail` — last 50 captured frontend console events (errors + warns).
+
+### `winmux dev console-tail [-n N]`
+
+Last N (default 50) frontend console events. Each entry is `{ level, message,
+ts }`. The frontend wraps `console.error` and `console.warn` to forward into
+this ring buffer (capped at 200) without breaking original console output.
+
+### `winmux dev debug-log-tail [-n N]`
+
+Last N (default 50) lines of `<appdata>/winmux/debug.log`. Same as
+`Get-Content -Tail N` against the log, but works through the running app's
+RPC so you don't need to know the path.
+
+### `winmux dev report-bug [--description "..."] [--repro-steps "..."]`
+
+Captures a bug report at `<appdata>/winmux/bug-reports/bug-<unix>.json`
+containing `{ description, repro_steps, captured_at_unix, state }` where
+`state` is the full `dev get-state` output (with larger log + console tails).
+
+If `--description` is omitted, reads from stdin until EOF (Ctrl-Z + Enter on
+Windows, Ctrl-D on Unix). Prints the saved file path on success.

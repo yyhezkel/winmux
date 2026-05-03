@@ -32,16 +32,27 @@ pub trait HookAdapter {
     fn run(&self, dry: bool, force: bool) -> AgentStatus;
 }
 
-/// Map of (Claude Code event name → our `claude-hook <subcmd>`).
+/// Map of (Claude Code event name → our `claude-hook <subcmd>` → matcher regex).
 ///
 /// The blocking subcommands (`pre-tool-use`) are determined server-side based on
 /// the subcommand string; see `Cmd::ClaudeHook` in `main.rs`.
-const CLAUDE_EVENTS: &[(&str, &str)] = &[
-    ("PreToolUse", "pre-tool-use"),
-    ("Notification", "notification"),
-    ("SessionStart", "session-start"),
-    ("SessionEnd", "session-end"),
-    ("Stop", "stop"),
+///
+/// Phase setup-hooks-fix v3: PreToolUse matcher narrowed to risky/mutating
+/// tools only (Bash, file edits, subagents). Read-only tools (Read, Grep,
+/// Glob, LS, ToolSearch, TodoWrite, WebFetch, WebSearch, MCP server tools)
+/// skip our hook entirely so the user only sees cards for things that
+/// actually need explicit consent. The other events fire on every
+/// occurrence — they're not tool-gated, matcher "*" is correct there.
+const CLAUDE_EVENTS: &[(&str, &str, &str)] = &[
+    (
+        "PreToolUse",
+        "pre-tool-use",
+        "Bash|Write|Edit|MultiEdit|NotebookEdit|Task",
+    ),
+    ("Notification", "notification", "*"),
+    ("SessionStart", "session-start", "*"),
+    ("SessionEnd", "session-end", "*"),
+    ("Stop", "stop", "*"),
 ];
 
 pub struct Claude;
@@ -115,9 +126,10 @@ fn apply_to_settings(
 
     let mut would_register: Vec<String> = Vec::new();
     let mut already_present: Vec<String> = Vec::new();
-    let mut to_apply: Vec<(String, String)> = Vec::new();
+    // (event_name, command, matcher)
+    let mut to_apply: Vec<(String, String, String)> = Vec::new();
 
-    for (event, subcmd) in CLAUDE_EVENTS {
+    for (event, subcmd, matcher) in CLAUDE_EVENTS {
         let cmd = format!("{} claude-hook {}", exe_path, subcmd);
         let entries = root["hooks"][event]
             .as_array()
@@ -129,7 +141,7 @@ fn apply_to_settings(
             continue;
         }
         would_register.push((*event).into());
-        to_apply.push(((*event).into(), cmd));
+        to_apply.push(((*event).into(), cmd, (*matcher).into()));
     }
 
     if dry {
@@ -160,14 +172,14 @@ fn apply_to_settings(
         None
     };
 
-    for (event, cmd) in &to_apply {
+    for (event, cmd, matcher) in &to_apply {
         let mut entries = root["hooks"][event.as_str()]
             .as_array()
             .cloned()
             .unwrap_or_default();
         entries.retain(|e| !is_winmux_entry(e));
         entries.push(json!({
-            "matcher": "*",
+            "matcher": matcher,
             "hooks": [{ "type": "command", "command": cmd }]
         }));
         root["hooks"][event.as_str()] = json!(entries);
@@ -187,7 +199,7 @@ fn apply_to_settings(
     }
 
     AgentStatus::Done {
-        registered: to_apply.into_iter().map(|(e, _)| e).collect(),
+        registered: to_apply.into_iter().map(|(e, _, _)| e).collect(),
         backup,
         path: path.to_path_buf(),
         unchanged: false,
@@ -212,15 +224,16 @@ fn apply_to_legacy(
         config = json!({});
     }
 
-    let mut to_apply: Vec<(String, String)> = Vec::new();
-    for (event, subcmd) in CLAUDE_EVENTS {
+    // (event_name, command, matcher)
+    let mut to_apply: Vec<(String, String, String)> = Vec::new();
+    for (event, subcmd, matcher) in CLAUDE_EVENTS {
         let cmd = format!("{} claude-hook {}", exe_path, subcmd);
         let entries = config[event].as_array().cloned().unwrap_or_default();
         let has_winmux = entries.iter().any(is_winmux_entry);
         if has_winmux && !force {
             continue;
         }
-        to_apply.push(((*event).into(), cmd));
+        to_apply.push(((*event).into(), cmd, (*matcher).into()));
     }
     if dry || to_apply.is_empty() {
         return AgentStatus::Done {
@@ -240,14 +253,14 @@ fn apply_to_legacy(
         None
     };
 
-    for (event, cmd) in &to_apply {
+    for (event, cmd, matcher) in &to_apply {
         let mut entries = config[event.as_str()]
             .as_array()
             .cloned()
             .unwrap_or_default();
         entries.retain(|e| !is_winmux_entry(e));
         entries.push(json!({
-            "matcher": "*",
+            "matcher": matcher,
             "hooks": [{ "type": "command", "command": cmd }]
         }));
         config[event.as_str()] = json!(entries);
@@ -259,7 +272,7 @@ fn apply_to_legacy(
     let _ = fs::rename(&tmp, path);
 
     AgentStatus::Done {
-        registered: to_apply.into_iter().map(|(e, _)| e).collect(),
+        registered: to_apply.into_iter().map(|(e, _, _)| e).collect(),
         backup,
         path: path.to_path_buf(),
         unchanged: false,

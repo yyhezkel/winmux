@@ -211,8 +211,10 @@ enum Cmd {
         timeout_ms: u64,
     },
 
-    /// Phase 8.C: evaluate JS inside the iframe. Same-origin only — cross-origin
-    /// returns an error. Use Phase 8.D (WebView2) for arbitrary-page eval.
+    /// Phase 8.F.1 (replaces the original 8.C eval): evaluate JS inside the
+    /// iframe via the postMessage bridge and return the result. Works on
+    /// cross-origin pages — the bridge runs in every frame at document
+    /// creation time.
     BrowserEval {
         #[arg(long)]
         pane: String,
@@ -240,12 +242,32 @@ enum Cmd {
         op: DevOp,
     },
 
-    /// Phase 8.F.1: drive an iframe in a browser pane (click / type / eval).
-    /// Works for ANY page including cross-origin localhost dev servers — the
-    /// bridge script is injected into every frame at document-creation time.
-    Browser {
-        #[command(subcommand)]
-        op: BrowserOp,
+    /// Phase 8.F.1: click a CSS-selector match in a browser pane's iframe.
+    /// Works on cross-origin pages (the bridge script runs in every frame).
+    BrowserClick {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        selector: String,
+        /// "left" (default) or "right"
+        #[arg(long, default_value = "left")]
+        button: String,
+        #[arg(long, default_value_t = 5_000)]
+        timeout_ms: u64,
+    },
+
+    /// Phase 8.F.1: type text into an input/textarea matched by CSS selector.
+    BrowserType {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        selector: String,
+        #[arg(long)]
+        text: String,
+        #[arg(long)]
+        clear_first: bool,
+        #[arg(long, default_value_t = 5_000)]
+        timeout_ms: u64,
     },
 
     /// Stub for Claude Code agent hooks: reads JSON from stdin, fires a notify.
@@ -271,45 +293,6 @@ enum Cmd {
         /// Replace any existing winmux hook entries even if already registered.
         #[arg(long)]
         force: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum BrowserOp {
-    /// Click an element by CSS selector inside the iframe.
-    Click {
-        #[arg(long)]
-        pane: String,
-        #[arg(long)]
-        selector: String,
-        /// "left" (default) or "right"
-        #[arg(long, default_value = "left")]
-        button: String,
-        #[arg(long, default_value_t = 5_000)]
-        timeout_ms: u64,
-    },
-    /// Type text into an input/textarea identified by CSS selector.
-    Type {
-        #[arg(long)]
-        pane: String,
-        #[arg(long)]
-        selector: String,
-        #[arg(long)]
-        text: String,
-        /// Clear the field before typing.
-        #[arg(long)]
-        clear_first: bool,
-        #[arg(long, default_value_t = 5_000)]
-        timeout_ms: u64,
-    },
-    /// Evaluate a JS expression inside the iframe and return the result.
-    Eval {
-        #[arg(long)]
-        pane: String,
-        #[arg(long)]
-        expr: String,
-        #[arg(long, default_value_t = 5_000)]
-        timeout_ms: u64,
     },
 }
 
@@ -970,8 +953,13 @@ async fn main() -> ExitCode {
             expr,
             timeout_ms,
         } => {
+            // Phase 8.F.1: route to the new iframe bridge instead of the
+            // old `pane.browser.eval` (which used the html2canvas-era
+            // frontend listener and just returned a "cross-origin needs
+            // 8.D" error). Strict upgrade: the bridge actually returns the
+            // value, on cross-origin pages too.
             rpc_call(
-                "pane.browser.eval",
+                "pane.browser.iframe.eval",
                 json!({
                     "pane_id": pane,
                     "expression": expr,
@@ -995,59 +983,42 @@ async fn main() -> ExitCode {
             )
             .await
         }
-        Cmd::Browser { op } => match op {
-            BrowserOp::Click {
-                pane,
-                selector,
-                button,
-                timeout_ms,
-            } => {
-                rpc_call(
-                    "pane.browser.iframe.click",
-                    json!({
-                        "pane_id": pane,
-                        "selector": selector,
-                        "button": button,
-                        "timeout_ms": timeout_ms,
-                    }),
-                )
-                .await
-            }
-            BrowserOp::Type {
-                pane,
-                selector,
-                text,
-                clear_first,
-                timeout_ms,
-            } => {
-                rpc_call(
-                    "pane.browser.iframe.type",
-                    json!({
-                        "pane_id": pane,
-                        "selector": selector,
-                        "text": text,
-                        "clear_first": clear_first,
-                        "timeout_ms": timeout_ms,
-                    }),
-                )
-                .await
-            }
-            BrowserOp::Eval {
-                pane,
-                expr,
-                timeout_ms,
-            } => {
-                rpc_call(
-                    "pane.browser.iframe.eval",
-                    json!({
-                        "pane_id": pane,
-                        "expression": expr,
-                        "timeout_ms": timeout_ms,
-                    }),
-                )
-                .await
-            }
-        },
+        Cmd::BrowserClick {
+            pane,
+            selector,
+            button,
+            timeout_ms,
+        } => {
+            rpc_call(
+                "pane.browser.iframe.click",
+                json!({
+                    "pane_id": pane,
+                    "selector": selector,
+                    "button": button,
+                    "timeout_ms": timeout_ms,
+                }),
+            )
+            .await
+        }
+        Cmd::BrowserType {
+            pane,
+            selector,
+            text,
+            clear_first,
+            timeout_ms,
+        } => {
+            rpc_call(
+                "pane.browser.iframe.type",
+                json!({
+                    "pane_id": pane,
+                    "selector": selector,
+                    "text": text,
+                    "clear_first": clear_first,
+                    "timeout_ms": timeout_ms,
+                }),
+            )
+            .await
+        }
         Cmd::Dev { op } => match op {
             DevOp::GetState { pretty: _, text } => {
                 match rpc_call("dev.get-state", json!({})).await {

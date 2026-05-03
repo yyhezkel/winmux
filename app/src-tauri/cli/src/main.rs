@@ -1448,10 +1448,10 @@ async fn real_main() -> ExitCode {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(120)
                 .clamp(1, 600);
-            eprintln!(
-                "claude-hook[{}] timeout={}s",
-                subcommand, timeout_secs
-            );
+            // Phase setup-hooks-fix v2: keep stderr clean. Claude Code's UI
+            // surfaces stderr and our diagnostic line was cluttering the chat.
+            // The same data is already captured server-side via the feed.push
+            // RPC and shows up in `winmux dev debug-log-tail`.
 
             let result = rpc_call(
                 "feed.push",
@@ -1474,24 +1474,72 @@ async fn real_main() -> ExitCode {
                         .get("decision")
                         .and_then(|x| x.as_str())
                         .unwrap_or("unknown");
-                    eprintln!("claude-hook[{}] decision={}", subcommand, decision);
-                    if !cli.quiet {
-                        let s = if cli.raw {
-                            serde_json::to_string(&v).unwrap_or_default()
-                        } else {
-                            serde_json::to_string_pretty(&v).unwrap_or_default()
-                        };
-                        println!("{}", s);
+                    // Phase setup-hooks-fix v2: emit Claude Code v2.1+ hook
+                    // output format. Per https://docs.claude.com/en/docs/claude-code/hooks
+                    //   { "hookSpecificOutput": { "hookEventName": ..., "permissionDecision": "allow"|"deny"|"ask", "permissionDecisionReason"? } }
+                    // exit 0 + the JSON ABOVE is the in-band signaling — exit
+                    // codes 1/2/3 are NOT how decisions are expressed. The
+                    // legacy `tool-permission` subcommand keeps the old shape
+                    // so any pre-existing custom flow doesn't break.
+                    match subcommand.as_str() {
+                        "pre-tool-use" => {
+                            let (perm, reason) = match decision {
+                                "allow" | "passive" => ("allow", None),
+                                "deny" => ("deny", Some("User denied via winmux".to_string())),
+                                "timeout" => (
+                                    "deny",
+                                    Some(
+                                        "winmux permission request timed out — denying conservatively"
+                                            .to_string(),
+                                    ),
+                                ),
+                                other => (
+                                    "ask",
+                                    Some(format!("winmux returned unknown decision: {other}")),
+                                ),
+                            };
+                            let mut hso = json!({
+                                "hookEventName": "PreToolUse",
+                                "permissionDecision": perm,
+                            });
+                            if let Some(r) = reason {
+                                hso["permissionDecisionReason"] = json!(r);
+                            }
+                            let out = json!({ "hookSpecificOutput": hso });
+                            println!("{}", serde_json::to_string(&out).unwrap_or_default());
+                            return ExitCode::SUCCESS;
+                        }
+                        "notification" | "session-start" | "session-end" | "stop" => {
+                            // Passive lifecycle hooks: silent ack. exit 0, no
+                            // stdout — Claude Code does not need a structured
+                            // response for these.
+                            return ExitCode::SUCCESS;
+                        }
+                        _ => {
+                            // Legacy `tool-permission` or unknown subcommands:
+                            // print the raw RPC payload and use the historical
+                            // exit-code-based signaling so anything that scrapes
+                            // the JSON or branches on $? keeps working.
+                            if !cli.quiet {
+                                let s = if cli.raw {
+                                    serde_json::to_string(&v).unwrap_or_default()
+                                } else {
+                                    serde_json::to_string_pretty(&v).unwrap_or_default()
+                                };
+                                println!("{}", s);
+                            }
+                            return match decision {
+                                "allow" | "passive" => ExitCode::SUCCESS,
+                                "deny" => ExitCode::from(1),
+                                "timeout" => ExitCode::from(2),
+                                _ => ExitCode::from(3),
+                            };
+                        }
                     }
-                    return match decision {
-                        "allow" | "passive" => ExitCode::SUCCESS,
-                        "deny" => ExitCode::from(1),
-                        "timeout" => ExitCode::from(2),
-                        _ => ExitCode::from(3),
-                    };
                 }
                 Err(e) => {
-                    eprintln!("claude-hook error: {}", e);
+                    // Real wire error — keep on stderr so the user sees it.
+                    eprintln!("winmux claude-hook: {}", e);
                     return ExitCode::from(3);
                 }
             }

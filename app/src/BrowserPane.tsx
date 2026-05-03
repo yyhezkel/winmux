@@ -71,11 +71,7 @@ export function BrowserPane(p: Props) {
     })
       .then((rewritten) => {
         setResolvedUrl(rewritten);
-        // Push the rewritten URL to the live webview if it already exists.
-        invoke("pane_browser_webview_navigate", {
-          paneId: p.pane.pane_id,
-          url: rewritten,
-        }).catch(() => {});
+        ensureWebviewAt(rewritten);
       })
       .catch((err) => {
         setResolvedUrl(u);
@@ -96,6 +92,23 @@ export function BrowserPane(p: Props) {
   // Force a fresh resolve + push to the webview (bypassing the
   // lastResolvedSource cache). Used by the ↺ button and the
   // pane:browser:resolve-stale event after SSH comes up.
+  // Ensure-or-navigate the native webview at the placeholder. Used after a
+  // successful URL resolve. If no webview exists yet (resolve failed earlier
+  // and we deferred creation), creates one. If it exists, repositions and
+  // navigates to the new URL.
+  const ensureWebviewAt = (url: string) => {
+    const rect = computeRect();
+    if (!rect) return;
+    invoke("pane_browser_webview_ensure", {
+      paneId: p.pane.pane_id,
+      url,
+      x: rect.x,
+      y: rect.y,
+      w: rect.w,
+      h: rect.h,
+    }).catch((err) => console.error("webview ensure failed", err));
+  };
+
   const forceResolveAndReload = async () => {
     const u = browser().url;
     if (!u) return;
@@ -109,12 +122,11 @@ export function BrowserPane(p: Props) {
       lastResolvedSource = u;
       lastResolvedForward = forwardOn();
       setResolvedUrl(rewritten);
-      await invoke("pane_browser_webview_navigate", {
-        paneId: p.pane.pane_id,
-        url: rewritten,
-      }).catch(() => {});
+      ensureWebviewAt(rewritten);
     } catch (err) {
       setResolveErr(String(err));
+      // Don't create the webview — leave the waiting overlay visible until
+      // pane:browser:resolve-stale arrives (SSH up) and re-tries.
     }
   };
 
@@ -182,44 +194,16 @@ export function BrowserPane(p: Props) {
     });
   });
 
-  // Phase 8.D.1: ensure the native webview exists, position it under the
-  // placeholder, keep it positioned through resize/scroll, hide it on
-  // unmount (workspace switch). Backend destroys on workspace_close_pane.
+  // Phase 8.D.1: position-track the native webview through resize/scroll;
+  // hide on unmount (workspace switch). Backend destroys on workspace_close_pane.
+  // The webview itself is created LAZILY by forceResolveAndReload — only after
+  // a successful resolve. While resolve fails (e.g. SSH session not up yet),
+  // no webview exists, so the DOM "Waiting for SSH session…" overlay is visible
+  // (WebView2 always paints on top of our DOM, so any DOM overlay would be
+  // hidden behind a created webview).
   onMount(() => {
-    // Wait one frame so layout has settled and getBoundingClientRect is real.
-    requestAnimationFrame(async () => {
-      const rect = computeRect();
-      if (!rect) return;
-      // resolve the URL first so the webview opens on the rewritten target
-      let target = browser().url;
-      if (target) {
-        try {
-          const rewritten = await invoke<string>("pane_browser_resolve_url", {
-            workspaceId: p.workspaceId,
-            paneId: p.pane.pane_id,
-            url: target,
-          });
-          lastResolvedSource = target;
-          lastResolvedForward = forwardOn();
-          target = rewritten;
-          setResolvedUrl(rewritten);
-        } catch (err) {
-          setResolveErr(String(err));
-          // proceed with the raw URL — the webview will get whatever it gets
-        }
-      }
-      try {
-        await invoke("pane_browser_webview_ensure", {
-          paneId: p.pane.pane_id,
-          url: target || "about:blank",
-          x: rect.x,
-          y: rect.y,
-          w: rect.w,
-          h: rect.h,
-        });
-      } catch (err) {
-        console.error("webview ensure failed", err);
-      }
+    requestAnimationFrame(() => {
+      void forceResolveAndReload();
     });
 
     let ro: ResizeObserver | undefined;

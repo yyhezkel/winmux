@@ -25,10 +25,13 @@ fn label_for(pane_id: &str) -> String {
     format!("winmux-browser-{pane_id}")
 }
 
-/// Idempotent: if a webview already exists for this pane, repositions and
-/// shows it (since it may have been hidden on workspace switch). Otherwise
-/// creates a fresh child webview at the requested position. Either way the
-/// webview ends up visible at (x, y) sized (w, h).
+/// Idempotent: ensures a child webview exists for the pane, sized + positioned
+/// where the placeholder asked, visible, and pointed at `url`. If a webview
+/// already exists, repositions + shows + navigates. Otherwise creates a fresh
+/// one. The caller (BrowserPane) ONLY calls this once a successful URL
+/// resolve has produced a valid target — when SSH isn't ready yet and resolve
+/// fails, no webview is created at all so the user sees the waiting overlay
+/// instead of a "can't connect" page.
 pub(crate) fn ensure(
     app: &AppHandle,
     map: &WebviewPaneMap,
@@ -39,6 +42,7 @@ pub(crate) fn ensure(
     w: f64,
     h: f64,
 ) -> Result<String, String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("invalid url {url}: {e}"))?;
     {
         let m = map.lock().unwrap();
         if let Some(v) = m.get(pane_id) {
@@ -47,10 +51,14 @@ pub(crate) fn ensure(
             v.set_size(LogicalSize::new(w.max(1.0), h.max(1.0)))
                 .map_err(|e| format!("set_size: {e}"))?;
             v.show().map_err(|e| format!("show: {e}"))?;
+            // Navigate even if URL is unchanged — caller wants whatever URL
+            // they passed to be the live one. Webview2 is smart enough to
+            // skip a no-op navigation in most cases.
+            v.navigate(parsed)
+                .map_err(|e| format!("navigate: {e}"))?;
             return Ok(label_for(pane_id));
         }
     }
-    let parsed = url::Url::parse(url).map_err(|e| format!("invalid url {url}: {e}"))?;
     let window = app
         .get_window(MAIN_WINDOW)
         .ok_or_else(|| format!("no '{MAIN_WINDOW}' window"))?;

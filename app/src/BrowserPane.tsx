@@ -1,6 +1,7 @@
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import html2canvas from "html2canvas";
 import type { LayoutNode, SplitDirection } from "./types";
 
 interface Props {
@@ -18,13 +19,12 @@ interface Props {
   onSetAnnotation: (paneId: string, annotation: string) => void;
 }
 
-// Phase 8.D.1: BrowserPane no longer renders an <iframe>. The actual page is
-// drawn by a native Tauri 2 child Webview (WebView2 on Windows) that overlays
-// the placeholder div. We only OWN positioning/visibility/navigation here;
-// the OS draws the pixels. Trade-off: we can't put anything ON TOP of the
-// webview (it always paints last), but X-Frame-Options is no longer a thing
-// and `eval` works on cross-origin pages.
 export function BrowserPane(p: Props) {
+  // Phase 8 fix v3.1: merge with defaults so fields skipped during JSON
+  // serialization (e.g. `history` is omitted by serde when the Vec is empty,
+  // `forward_localhost` is omitted when it's the default true) come back as
+  // safe values rather than `undefined` — `browser().history.length` was
+  // crashing when navigating to a fresh browser pane.
   const browser = () => {
     const b = p.pane.browser;
     return {
@@ -36,14 +36,19 @@ export function BrowserPane(p: Props) {
   };
   const forwardOn = () => browser().forward_localhost ?? true;
   const [urlDraft, setUrlDraft] = createSignal(browser().url);
-  // Phase 8.B: rewritten URL the WEBVIEW actually navigates to. Differs from
-  // browser().url when localhost forwarding rewrites it to 127.0.0.1:<local>.
+  // Phase 8.B: the URL the iframe actually loads. Differs from browser().url
+  // when localhost forwarding rewrites it to 127.0.0.1:<local_forward_port>.
   const [resolvedUrl, setResolvedUrl] = createSignal(browser().url);
   const [resolveErr, setResolveErr] = createSignal<string | null>(null);
-  let mountRef: HTMLDivElement | undefined;
+  let iframeRef: HTMLIFrameElement | undefined;
+  let bodyRef: HTMLDivElement | undefined;
 
-  // Sync the address bar with the persisted URL whenever it changes (CLI
-  // navigate, back, home).
+  // Whenever the persisted URL changes (user nav, back, home, CLI), refresh
+  // both the address-bar draft and the iframe's resolved src. Track the LAST
+  // (url, forward) pair we asked the backend to resolve so the effect doesn't
+  // re-fire just because setResolvedUrl flipped resolvedUrl ≠ browser().url
+  // (which is the whole point of forwarding — the two are intentionally
+  // different after rewrite).
   let lastUrl = browser().url;
   let lastResolvedSource = "";
   let lastResolvedForward = forwardOn();
@@ -55,7 +60,7 @@ export function BrowserPane(p: Props) {
       setUrlDraft(u);
     }
     if (u === lastResolvedSource && f === lastResolvedForward) {
-      return;
+      return; // no source change — don't re-resolve
     }
     lastResolvedSource = u;
     lastResolvedForward = f;
@@ -69,11 +74,10 @@ export function BrowserPane(p: Props) {
       paneId: p.pane.pane_id,
       url: u,
     })
-      .then((rewritten) => {
-        setResolvedUrl(rewritten);
-        ensureWebviewAt(rewritten);
-      })
+      .then((rewritten) => setResolvedUrl(rewritten))
       .catch((err) => {
+        // If forwarding fails (e.g. no SSH session), fall back to the raw URL
+        // and surface the error in the chrome.
         setResolvedUrl(u);
         setResolveErr(String(err));
       });
@@ -82,6 +86,8 @@ export function BrowserPane(p: Props) {
   const submitUrl = () => {
     let v = urlDraft().trim();
     if (!v) return;
+    // Auto-prepend http:// for localhost (dev servers usually are http) and
+    // https:// for everything else missing a scheme.
     if (!/^[a-z][a-z0-9+\-.]*:/i.test(v)) {
       const isLocal = /^(localhost|127\.0\.0\.1)(:|$|\/)/i.test(v);
       v = (isLocal ? "http://" : "https://") + v;
@@ -89,26 +95,10 @@ export function BrowserPane(p: Props) {
     p.onNavigate(p.pane.pane_id, v);
   };
 
-  // Force a fresh resolve + push to the webview (bypassing the
-  // lastResolvedSource cache). Used by the ↺ button and the
-  // pane:browser:resolve-stale event after SSH comes up.
-  // Ensure-or-navigate the native webview at the placeholder. Used after a
-  // successful URL resolve. If no webview exists yet (resolve failed earlier
-  // and we deferred creation), creates one. If it exists, repositions and
-  // navigates to the new URL.
-  const ensureWebviewAt = (url: string) => {
-    const rect = computeRect();
-    if (!rect) return;
-    invoke("pane_browser_webview_ensure", {
-      paneId: p.pane.pane_id,
-      url,
-      x: rect.x,
-      y: rect.y,
-      w: rect.w,
-      h: rect.h,
-    }).catch((err) => console.error("webview ensure failed", err));
-  };
-
+  // Phase 8.B race fix: a manual reload should ALWAYS bypass the
+  // lastResolvedSource cache. If the SSH session came up after the initial
+  // resolve attempt failed, the cached resolvedUrl would still be the raw
+  // localhost URL (or empty); re-resolving now picks up the live forward.
   const forceResolveAndReload = async () => {
     const u = browser().url;
     if (!u) return;
@@ -122,16 +112,28 @@ export function BrowserPane(p: Props) {
       lastResolvedSource = u;
       lastResolvedForward = forwardOn();
       setResolvedUrl(rewritten);
-      ensureWebviewAt(rewritten);
+      if (iframeRef) {
+        // Re-assign even if the URL value is unchanged so the iframe reloads.
+        iframeRef.src = rewritten || "about:blank";
+      }
     } catch (err) {
       setResolveErr(String(err));
-      // Don't create the webview — leave the waiting overlay visible until
-      // pane:browser:resolve-stale arrives (SSH up) and re-tries.
+      if (iframeRef) iframeRef.src = u;
     }
   };
 
   const reload = () => {
     void forceResolveAndReload();
+  };
+
+  // True if `url` shares an origin with the parent webview (then html2canvas
+  // can traverse the iframe and `iframe.contentWindow.eval` is allowed).
+  const sameOrigin = (url: string): boolean => {
+    try {
+      return new URL(url, window.location.href).origin === window.location.origin;
+    } catch {
+      return false;
+    }
   };
 
   const isTunneled = () => {
@@ -140,40 +142,32 @@ export function BrowserPane(p: Props) {
     return resolvedUrl() !== u;
   };
 
-  // Compute the placeholder's screen-relative geometry in logical pixels.
-  // Tauri's add_child / set_position work in logical coordinates relative to
-  // the window's content area, which matches getBoundingClientRect (the
-  // browser pixel ratio is applied implicitly inside Webview2).
-  const computeRect = (): { x: number; y: number; w: number; h: number } | null => {
-    if (!mountRef) return null;
-    const r = mountRef.getBoundingClientRect();
-    return {
-      x: Math.round(r.left),
-      y: Math.round(r.top),
-      w: Math.max(1, Math.round(r.width)),
-      h: Math.max(1, Math.round(r.height)),
-    };
+  // Phase 8.C: tell the backend whenever the iframe finishes loading. This
+  // unblocks pending pane.browser.wait RPC calls.
+  // IMPORTANT: report the user-facing URL (browser().url, e.g. http://localhost:8000)
+  // and NOT the resolved/rewritten one (http://127.0.0.1:<forward>). The wait RPC
+  // compares last_loaded_url to bs.url (user-facing), so reporting the rewritten
+  // URL would always fail to match and the wait would never short-circuit.
+  const handleIframeLoad = () => {
+    invoke("pane_browser_loaded", {
+      paneId: p.pane.pane_id,
+      url: browser().url || "",
+    }).catch(() => {});
   };
 
-  // Debounce position updates so a fast resize/drag doesn't flood IPC.
-  let positionTimer: number | null = null;
-  const schedulePosition = () => {
-    if (positionTimer) window.clearTimeout(positionTimer);
-    positionTimer = window.setTimeout(() => {
-      positionTimer = null;
-      const rect = computeRect();
-      if (!rect) return;
-      invoke("pane_browser_webview_position", {
-        paneId: p.pane.pane_id,
-        x: rect.x,
-        y: rect.y,
-        w: rect.w,
-        h: rect.h,
-      }).catch(() => {});
-    }, 30);
+  // Phase 8.C: serve agent-side requests (eval, screenshot) for THIS pane.
+  type BrowserRequest = {
+    request_id: string;
+    kind: "eval" | "screenshot";
+    pane_id: string;
+    expression?: string;
   };
 
-  // Phase 8.B race fix: when SSH session comes up, re-resolve and re-navigate.
+  // Phase 8.B race fix: when the workspace's SSH session comes up, the
+  // backend emits `pane:browser:resolve-stale`. If we're a browser pane in
+  // that workspace, bypass the resolved-URL cache and re-fetch — typically
+  // we were sitting on a "no active SSH session" error from a too-early
+  // resolve attempt during app startup.
   onMount(() => {
     let cancelledStale = false;
     let unlistenStale: UnlistenFn | undefined;
@@ -194,51 +188,6 @@ export function BrowserPane(p: Props) {
     });
   });
 
-  // Phase 8.D.1: position-track the native webview through resize/scroll;
-  // hide on unmount (workspace switch). Backend destroys on workspace_close_pane.
-  // The webview itself is created LAZILY by forceResolveAndReload — only after
-  // a successful resolve. While resolve fails (e.g. SSH session not up yet),
-  // no webview exists, so the DOM "Waiting for SSH session…" overlay is visible
-  // (WebView2 always paints on top of our DOM, so any DOM overlay would be
-  // hidden behind a created webview).
-  onMount(() => {
-    requestAnimationFrame(() => {
-      void forceResolveAndReload();
-    });
-
-    let ro: ResizeObserver | undefined;
-    if (mountRef) {
-      ro = new ResizeObserver(() => schedulePosition());
-      ro.observe(mountRef);
-    }
-    // Window resize + scroll can move the placeholder too.
-    const onWindow = () => schedulePosition();
-    window.addEventListener("resize", onWindow);
-    window.addEventListener("scroll", onWindow, true);
-    onCleanup(() => {
-      ro?.disconnect();
-      window.removeEventListener("resize", onWindow);
-      window.removeEventListener("scroll", onWindow, true);
-      if (positionTimer) window.clearTimeout(positionTimer);
-      // Hide (don't destroy) on unmount — workspace switch returns later
-      // and we want to preserve page state. Backend destroys for real on
-      // workspace_close_pane / workspace_delete.
-      invoke("pane_browser_webview_hide", {
-        paneId: p.pane.pane_id,
-      }).catch(() => {});
-    });
-  });
-
-  // Phase 8.C: agent-driven eval / screenshot. The eval path now runs in the
-  // native webview where cross-origin restrictions don't apply (the webview
-  // IS the origin). Result return is fire-and-forget for now (Webview::eval
-  // doesn't return a value in Tauri 2.10 — full IPC bridge lands in 8.D.3).
-  type BrowserRequest = {
-    request_id: string;
-    kind: "eval" | "screenshot";
-    pane_id: string;
-    expression?: string;
-  };
   onMount(() => {
     let cancelled = false;
     let unlisten: UnlistenFn | undefined;
@@ -248,22 +197,59 @@ export function BrowserPane(p: Props) {
       if (r.pane_id !== p.pane.pane_id) return;
       try {
         if (r.kind === "eval") {
-          await invoke("pane_browser_webview_eval", {
-            paneId: p.pane.pane_id,
-            script: r.expression || "",
-          });
+          const win = iframeRef?.contentWindow;
+          if (!win) throw new Error("iframe not ready");
+          let result: unknown;
+          try {
+            // Same-origin access throws SecurityError on cross-origin.
+            // eslint-disable-next-line @typescript-eslint/no-implied-eval
+            result = (win as unknown as { eval: (s: string) => unknown }).eval(
+              r.expression || ""
+            );
+          } catch (err) {
+            const msg = String(err);
+            if (
+              msg.includes("SecurityError") ||
+              msg.includes("Blocked") ||
+              msg.includes("cross-origin") ||
+              msg.toLowerCase().includes("permission")
+            ) {
+              throw new Error(
+                "cross-origin: WebView2 panes (Phase 8.D) needed for JS eval on arbitrary pages"
+              );
+            }
+            throw err;
+          }
+          let serialized: unknown;
+          try {
+            serialized = JSON.parse(JSON.stringify(result));
+          } catch {
+            serialized = String(result);
+          }
           await invoke("pane_browser_response", {
             requestId: r.request_id,
-            ok: {
-              note: "eval submitted (fire-and-forget; CDP return-value bridge lands in Phase 8.D.3)",
-            },
+            ok: { value: serialized },
             err: null,
           });
         } else if (r.kind === "screenshot") {
+          if (!bodyRef) throw new Error("pane body not mounted");
+          // html2canvas cannot enter cross-origin iframes; ignore them so the
+          // capture succeeds with the iframe area shown as the body background.
+          // OS-level capture (real iframe pixels) lands in 8.D with WebView2.
+          const canvas = await html2canvas(bodyRef, {
+            useCORS: true,
+            backgroundColor: "#0b0d10",
+            logging: false,
+            ignoreElements: (el: Element) =>
+              el.tagName === "IFRAME" &&
+              !!(el as HTMLIFrameElement).src &&
+              !sameOrigin((el as HTMLIFrameElement).src),
+          });
+          const dataUrl = canvas.toDataURL("image/png");
           await invoke("pane_browser_response", {
             requestId: r.request_id,
-            ok: null,
-            err: "screenshot via native webview lands in Phase 8.D.3 (CDP page.captureScreenshot)",
+            ok: dataUrl,
+            err: null,
           });
         }
       } catch (err) {
@@ -411,9 +397,10 @@ export function BrowserPane(p: Props) {
           ×
         </button>
       </div>
-      {/* The webview overlays this placeholder. We keep it as the layout slot
-          so Solid's flex-grow / split sizing computes the right geometry. */}
-      <div ref={(el) => (mountRef = el)} class="pane-body browser-webview-mount">
+      <div ref={(el) => (bodyRef = el)} class="pane-body browser-body">
+        {/* Phase 8.B race fix: friendly waiting message when the SSH session
+            isn't ready yet — beats the iframe's generic "connection refused".
+            Cleared as soon as a successful resolve sets resolvedUrl. */}
         <Show when={resolveErr()?.includes("no active SSH session")}>
           <div class="browser-waiting">
             <p>Waiting for SSH session to come up…</p>
@@ -422,6 +409,30 @@ export function BrowserPane(p: Props) {
               then press ↺ to retry.
             </p>
           </div>
+        </Show>
+        <Show
+          when={resolvedUrl()}
+          fallback={
+            <Show when={!resolveErr()?.includes("no active SSH session")}>
+              <div class="browser-placeholder">
+                <p>Enter a URL above to load a page.</p>
+                <p class="browser-hint">
+                  Note: many sites (Google, banks, etc.) block iframe embedding via
+                  X-Frame-Options. WebView2 native panes will lift this in a later
+                  phase.
+                </p>
+              </div>
+            </Show>
+          }
+        >
+          <iframe
+            ref={(el) => (iframeRef = el)}
+            class="browser-iframe"
+            src={resolvedUrl()}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            referrerpolicy="no-referrer-when-downgrade"
+            onLoad={handleIframeLoad}
+          />
         </Show>
       </div>
     </div>

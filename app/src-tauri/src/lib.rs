@@ -3,6 +3,7 @@ mod notes;
 mod remote_bootstrap;
 mod rpc_server;
 mod tunnel;
+mod webview_pane;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -153,6 +154,8 @@ pub(crate) struct AppState {
     pub(crate) browser_load_waiters: BrowserLoadWaiters,
     // Phase 8.E: ring buffer of frontend console.error/warn captures.
     pub(crate) console_buffer: dev::ConsoleBuffer,
+    // Phase 8.D.1: native WebView2 child-views per browser pane.
+    pub(crate) webview_panes: webview_pane::WebviewPaneMap,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -2280,6 +2283,8 @@ fn workspace_delete(
                 kill_session_inner(&mut s);
             }
         }
+        // Phase 8.D.1: also tear down the native webview if it was a browser pane.
+        let _ = webview_pane::destroy(&state.webview_panes, pane_id);
     }
     // Phase 8.B: tear down any port forwards for the workspace.
     close_workspace_forwards(&state.forwards, &workspace_id);
@@ -2474,6 +2479,88 @@ fn pane_browser_response(
     Ok(())
 }
 
+// ─── Phase 8.D.1: native WebView2 child-pane lifecycle ─────────────────────
+
+/// Idempotent: ensures a child webview exists for the pane and is visible at
+/// the given (x, y, w, h). Frontend calls this on BrowserPane mount and on
+/// workspace switch back.
+#[tauri::command]
+fn pane_browser_webview_ensure(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    pane_id: String,
+    url: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<String, String> {
+    dlog(&format!(
+        "webview_pane.ensure: pane={} url={} pos=({},{}) size=({},{})",
+        pane_id, url, x, y, w, h
+    ));
+    webview_pane::ensure(&app, &state.webview_panes, &pane_id, &url, x, y, w, h)
+}
+
+#[tauri::command]
+fn pane_browser_webview_position(
+    state: State<'_, AppState>,
+    pane_id: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
+    webview_pane::position(&state.webview_panes, &pane_id, x, y, w, h)
+}
+
+#[tauri::command]
+fn pane_browser_webview_navigate(
+    state: State<'_, AppState>,
+    pane_id: String,
+    url: String,
+) -> Result<(), String> {
+    dlog(&format!(
+        "webview_pane.navigate: pane={} url={}",
+        pane_id, url
+    ));
+    webview_pane::navigate(&state.webview_panes, &pane_id, &url)
+}
+
+#[tauri::command]
+fn pane_browser_webview_hide(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<(), String> {
+    webview_pane::hide(&state.webview_panes, &pane_id)
+}
+
+#[tauri::command]
+fn pane_browser_webview_show(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<(), String> {
+    webview_pane::show(&state.webview_panes, &pane_id)
+}
+
+#[tauri::command]
+fn pane_browser_webview_destroy(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<(), String> {
+    dlog(&format!("webview_pane.destroy: pane={}", pane_id));
+    webview_pane::destroy(&state.webview_panes, &pane_id)
+}
+
+#[tauri::command]
+fn pane_browser_webview_eval(
+    state: State<'_, AppState>,
+    pane_id: String,
+    script: String,
+) -> Result<(), String> {
+    webview_pane::eval(&state.webview_panes, &pane_id, &script)
+}
+
 /// Phase 8.E: frontend console.error/warn capture. Pushes one entry into the
 /// ring buffer; the CLI surfaces them via `winmux dev console-tail`.
 #[tauri::command]
@@ -2577,6 +2664,8 @@ fn workspace_close_pane(
                 kill_session_inner(&mut s);
             }
         }
+        // Phase 8.D.1: also tear down the native webview if it was a browser pane.
+        let _ = webview_pane::destroy(&state.webview_panes, &pid);
     }
     persist(&state)?;
     Ok(state.workspaces.lock().unwrap().clone())
@@ -2999,6 +3088,13 @@ pub fn run() {
             pane_browser_set_forward,
             pane_browser_response,
             pane_browser_loaded,
+            pane_browser_webview_ensure,
+            pane_browser_webview_position,
+            pane_browser_webview_navigate,
+            pane_browser_webview_hide,
+            pane_browser_webview_show,
+            pane_browser_webview_destroy,
+            pane_browser_webview_eval,
             workspace_reset_layout,
             dev_console_log,
             pty_write,

@@ -272,6 +272,15 @@ body {
   cursor: pointer;
 }
 
+/* Phase 8.D.1: BrowserPane body is now a placeholder div under which the
+   native WebView2 child window draws. Styling here only shows during the
+   brief moment before the webview attaches. */
+.browser-webview-mount {
+  background: #0b0d10;
+  position: relative;
+  overflow: hidden;
+}
+
 .browser-waiting {
   padding: 24px;
   color: #d3a843;

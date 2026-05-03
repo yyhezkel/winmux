@@ -1212,6 +1212,51 @@ async fn dispatch(
             .await
         }
 
+        "pane.browser.iframe.find" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5_000);
+            // Pass the whole params blob through as the find query, but
+            // strip our own meta keys so the bridge only sees match filters.
+            let mut q = serde_json::Map::new();
+            for (k, v) in params.as_object().into_iter().flat_map(|m| m.iter()) {
+                match k.as_str() {
+                    "pane_id" | "pane" | "timeout_ms" => continue,
+                    _ => {
+                        q.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            iframe_cmd_inner(state, app, &pane_id, "find", json!(q), timeout_ms).await
+        }
+
+        "pane.browser.iframe.snapshot" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(10_000);
+            let max_depth = params.get("maxDepth").or_else(|| params.get("max_depth"));
+            let text_only = params.get("textOnly").or_else(|| params.get("text_only"));
+            let opts = json!({
+                "maxDepth": max_depth.cloned().unwrap_or(json!(50)),
+                "textOnly": text_only.cloned().unwrap_or(json!(false)),
+            });
+            iframe_cmd_inner(state, app, &pane_id, "snapshot", opts, timeout_ms).await
+        }
+
         "pane.browser.iframe.eval" => {
             let pane_id = params
                 .get("pane_id")

@@ -256,6 +256,67 @@ enum Cmd {
         timeout_ms: u64,
     },
 
+    /// Phase 8.F.2: semantic element search inside the iframe. Filters AND
+    /// together — at least one must be specified. Returns matching elements
+    /// with synthesized stable selectors usable for browser-click / type.
+    BrowserFind {
+        #[arg(long)]
+        pane: String,
+        /// ARIA role: button, link, textbox, checkbox, heading, listitem, ...
+        #[arg(long)]
+        role: Option<String>,
+        /// Visible text content (case-insensitive contains)
+        #[arg(long)]
+        text: Option<String>,
+        /// Accessible label (`aria-label` or `<label for>`)
+        #[arg(long)]
+        label: Option<String>,
+        /// `placeholder` attribute (case-insensitive contains)
+        #[arg(long)]
+        placeholder: Option<String>,
+        /// `alt` attribute on images
+        #[arg(long)]
+        alt: Option<String>,
+        /// `title` attribute
+        #[arg(long)]
+        title: Option<String>,
+        /// `data-testid` attribute (exact match)
+        #[arg(long)]
+        testid: Option<String>,
+        /// Raw CSS selector to narrow the search pool before filters run.
+        #[arg(long)]
+        selector: Option<String>,
+        /// Skip elements with display:none / visibility:hidden / zero area.
+        #[arg(long)]
+        visible_only: bool,
+        /// Return only the first match.
+        #[arg(long)]
+        first: bool,
+        /// Cap on number of matches returned.
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long, default_value_t = 5_000)]
+        timeout_ms: u64,
+    },
+
+    /// Phase 8.F.2: simplified accessibility-flavored DOM tree of the iframe.
+    /// JSON by default; --text renders as a YAML-like outline.
+    BrowserSnapshot {
+        #[arg(long)]
+        pane: String,
+        #[arg(long, default_value_t = 50)]
+        max_depth: usize,
+        /// Strip non-essential attributes (level/url/src/alt/name) — keeps
+        /// only role + text + children.
+        #[arg(long)]
+        text_only: bool,
+        /// Render the tree as an indented YAML-ish outline instead of JSON.
+        #[arg(long)]
+        text: bool,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+    },
+
     /// Phase 8.F.1: type text into an input/textarea matched by CSS selector.
     BrowserType {
         #[arg(long)]
@@ -417,6 +478,40 @@ fn load_fallback_env_file() {
             if std::env::var_os(k).is_none() {
                 std::env::set_var(k, v);
             }
+        }
+    }
+}
+
+// Phase 8.F.2: render an accessibility snapshot as a YAML-ish outline.
+fn render_snapshot_text(node: &Value, depth: usize, out: &mut String) {
+    if node.is_null() {
+        out.push_str("(empty tree)\n");
+        return;
+    }
+    let pad = "  ".repeat(depth);
+    let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("?");
+    let text = node.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    let level = node.get("level").and_then(|v| v.as_u64());
+    let url = node.get("url").and_then(|v| v.as_str());
+    let mut head = format!("{}- {}", pad, role);
+    if let Some(l) = level {
+        head.push_str(&format!("[{}]", l));
+    }
+    if !text.is_empty() {
+        head.push_str(&format!(": \"{}\"", text.replace('\n', " ").replace('\r', "")));
+    } else if let Some(name) = node.get("name").and_then(|v| v.as_str()) {
+        if !name.is_empty() {
+            head.push_str(&format!(": \"{}\"", name));
+        }
+    }
+    if let Some(u) = url {
+        head.push_str(&format!(" → {}", u));
+    }
+    head.push('\n');
+    out.push_str(&head);
+    if let Some(children) = node.get("children").and_then(|v| v.as_array()) {
+        for c in children {
+            render_snapshot_text(c, depth + 1, out);
         }
     }
 }
@@ -982,6 +1077,70 @@ async fn main() -> ExitCode {
                 }),
             )
             .await
+        }
+        Cmd::BrowserFind {
+            pane,
+            role,
+            text,
+            label,
+            placeholder,
+            alt,
+            title,
+            testid,
+            selector,
+            visible_only,
+            first,
+            limit,
+            timeout_ms,
+        } => {
+            // Build the params map directly so unspecified fields stay absent
+            // (the bridge skips empty filters, but snake/camel case matters).
+            let mut p = serde_json::Map::new();
+            p.insert("pane_id".into(), json!(pane));
+            p.insert("timeout_ms".into(), json!(timeout_ms));
+            if let Some(v) = role { p.insert("role".into(), json!(v)); }
+            if let Some(v) = text { p.insert("text".into(), json!(v)); }
+            if let Some(v) = label { p.insert("label".into(), json!(v)); }
+            if let Some(v) = placeholder { p.insert("placeholder".into(), json!(v)); }
+            if let Some(v) = alt { p.insert("alt".into(), json!(v)); }
+            if let Some(v) = title { p.insert("title".into(), json!(v)); }
+            if let Some(v) = testid { p.insert("testid".into(), json!(v)); }
+            if let Some(v) = selector { p.insert("selector".into(), json!(v)); }
+            if *visible_only { p.insert("visibleOnly".into(), json!(true)); }
+            if *first { p.insert("first".into(), json!(true)); }
+            if let Some(v) = limit { p.insert("limit".into(), json!(v)); }
+            rpc_call("pane.browser.iframe.find", Value::Object(p)).await
+        }
+        Cmd::BrowserSnapshot {
+            pane,
+            max_depth,
+            text_only,
+            text,
+            timeout_ms,
+        } => {
+            match rpc_call(
+                "pane.browser.iframe.snapshot",
+                json!({
+                    "pane_id": pane,
+                    "maxDepth": max_depth,
+                    "textOnly": text_only,
+                    "timeout_ms": timeout_ms,
+                }),
+            )
+            .await
+            {
+                Ok(res) => {
+                    if *text {
+                        let tree = res.get("tree").cloned().unwrap_or(Value::Null);
+                        let mut out = String::new();
+                        render_snapshot_text(&tree, 0, &mut out);
+                        print!("{}", out);
+                        std::process::exit(0);
+                    }
+                    Ok(res)
+                }
+                Err(e) => Err(e),
+            }
         }
         Cmd::BrowserClick {
             pane,

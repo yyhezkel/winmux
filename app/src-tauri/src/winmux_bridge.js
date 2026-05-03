@@ -297,7 +297,6 @@
     } catch (e) {
       throw new Error("invalid selector " + rootSelector + ": " + e.message);
     }
-    var out = [];
     var lower = function (s) {
       return s == null ? "" : String(s).toLowerCase();
     };
@@ -308,6 +307,11 @@
     var qTitle = q.title ? lower(q.title) : null;
     var qRole = q.role || null;
     var qTestid = q.testid || null;
+
+    // Pass 1: collect every element that passes ALL non-deepest-match filters.
+    // (Text is checked here too — but a `<body>` whose textContent contains
+    // the query passes here; we'll prune ancestors in pass 2.)
+    var candidates = [];
     for (var i = 0; i < pool.length; i++) {
       var el = pool[i];
       if (qRole && getRole(el) !== qRole) continue;
@@ -333,7 +337,35 @@
         if (tid !== qTestid) continue;
       }
       if (q.visibleOnly && !isVisible(el)) continue;
-      out.push(serializeMatch(el));
+      candidates.push(el);
+    }
+
+    // Pass 2: when text was queried, drop ancestors of other candidates so
+    // we keep only the deepest match. Without this, a `--text "chatbot"`
+    // query reports `<html>` (and every ancestor of the actual `<a>`) since
+    // textContent bubbles all descendant text up. Playwright uses the same
+    // approach. No-op when text wasn't queried.
+    var winners;
+    if (qText) {
+      var candSet = new Set(candidates);
+      winners = candidates.filter(function (el) {
+        var stack = [];
+        for (var j = 0; j < el.children.length; j++) stack.push(el.children[j]);
+        while (stack.length) {
+          var d = stack.pop();
+          if (candSet.has(d)) return false;
+          for (var k = 0; k < d.children.length; k++) stack.push(d.children[k]);
+        }
+        return true;
+      });
+    } else {
+      winners = candidates;
+    }
+
+    // Pass 3: serialize, respect first / limit.
+    var out = [];
+    for (var i2 = 0; i2 < winners.length; i2++) {
+      out.push(serializeMatch(winners[i2]));
       if (q.first) break;
       if (q.limit && out.length >= q.limit) break;
     }

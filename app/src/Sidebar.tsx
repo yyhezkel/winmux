@@ -28,7 +28,47 @@ export function Sidebar(p: Props) {
 
   return (
     <div class="sidebar">
-      <div class="sidebar-header">winmux</div>
+      <div class="sidebar-header">
+        <svg
+          class="sidebar-logo"
+          viewBox="0 0 1024 1024"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden="true"
+        >
+          <defs>
+            <linearGradient id="sb-bg" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#1d2330" />
+              <stop offset="100%" stop-color="#0e1116" />
+            </linearGradient>
+            <linearGradient id="sb-acc" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#7aa2f7" />
+              <stop offset="100%" stop-color="#4ec9b0" />
+            </linearGradient>
+          </defs>
+          <rect width="1024" height="1024" rx="200" fill="url(#sb-bg)" />
+          <rect
+            x="20"
+            y="20"
+            width="984"
+            height="984"
+            rx="184"
+            fill="none"
+            stroke="#21262d"
+            stroke-width="4"
+          />
+          <polyline
+            points="300,330 560,512 300,694"
+            fill="none"
+            stroke="url(#sb-acc)"
+            stroke-width="86"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <rect x="600" y="640" width="190" height="56" rx="28" fill="url(#sb-acc)" />
+          <circle cx="848" cy="176" r="20" fill="#5cd87f" />
+        </svg>
+        <span class="sidebar-brand">winmux</span>
+      </div>
       <div class="sidebar-list">
         <For each={p.workspaces}>
           {(w) => (

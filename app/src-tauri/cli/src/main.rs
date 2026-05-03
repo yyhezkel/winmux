@@ -1443,6 +1443,35 @@ async fn real_main() -> ExitCode {
                 serde_json::from_str(buf.trim()).unwrap_or_else(|_| json!({ "raw": buf.trim() }))
             };
 
+            // Phase setup-hooks-fix v4: env-gate. The hooks are written to
+            // ~/.claude/settings.json which is global — they fire for EVERY
+            // Claude Code invocation on this machine, not just the ones
+            // launched inside a winmux pane. Unrelated terminals (plain
+            // pwsh, VS Code's own terminal, an external WSL session) would
+            // otherwise dial winmux on every tool call. We tag winmux-spawned
+            // shells with WINMUX_PANE_ID — if it's missing, Claude Code is
+            // not running under us and we should immediately defer to its
+            // built-in UI for pre-tool-use, or silently no-op for lifecycle.
+            if std::env::var("WINMUX_PANE_ID").is_err() {
+                match subcommand.as_str() {
+                    "pre-tool-use" => {
+                        let out = json!({
+                            "hookSpecificOutput": {
+                                "hookEventName": "PreToolUse",
+                                "permissionDecision": "ask",
+                                "permissionDecisionReason": "not running in winmux session"
+                            }
+                        });
+                        println!("{}", serde_json::to_string(&out).unwrap_or_default());
+                    }
+                    _ => {
+                        // notification / session-start / session-end / stop /
+                        // legacy tool-permission — silent ack.
+                    }
+                }
+                return ExitCode::SUCCESS;
+            }
+
             // Phase setup-hooks-fix v3.5: honor Claude Code's `permission_mode`.
             // When the user has flipped to `acceptEdits` / `bypassPermissions`
             // (Shift+Tab in the agent, or starting `claude --dangerously-skip-permissions`),

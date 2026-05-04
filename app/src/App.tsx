@@ -406,6 +406,11 @@ function App() {
     keyPassphrase?: string;
     acceptUnknownHost?: boolean;
     persistent?: boolean;
+    // Phase 12.B Smart Connect.
+    mode?: "default" | "tmux" | "plain" | "cmd" | "claude";
+    cwdOverride?: string;
+    cmd?: string;
+    claudeArgs?: string;
   };
 
   const connectPane = async (paneId: string, opts: ConnectOpts = {}) => {
@@ -421,6 +426,10 @@ function App() {
         keyPassphrase: opts.keyPassphrase ?? null,
         acceptUnknownHost: opts.acceptUnknownHost ?? false,
         persistent: opts.persistent ?? false,
+        mode: opts.mode ?? null,
+        cwdOverride: opts.cwdOverride ?? null,
+        cmd: opts.cmd ?? null,
+        claudeArgs: opts.claudeArgs ?? null,
         cols: ti.term.cols || 80,
         rows: ti.term.rows || 24,
       });

@@ -2962,6 +2962,15 @@ async fn pane_connect(
     // so reconnects resume the same shell. Ignored for local panes for now —
     // can be added later via WSL/conpty + tmux on linux.
     persistent: Option<bool>,
+    // Phase 12.B Smart Connect: when set, after the shell is up we inject a
+    // mode-specific command. `mode` is one of: "default" (current behavior),
+    // "tmux" (alias for persistent=true), "plain" (no tmux even if workspace
+    // says persistent), "cmd" (run cmd in cwd), "claude" (launch claude in
+    // cwd with claude_args).
+    mode: Option<String>,
+    cwd_override: Option<String>,
+    cmd: Option<String>,
+    claude_args: Option<String>,
 ) -> Result<String, String> {
     // Look up connection from workspaces state. Phase 7.C: also lift `env` and
     // `setup_command` from the workspace so we can inject them after the shell is up.
@@ -3014,6 +3023,14 @@ async fn pane_connect(
             port,
             key_path,
         } => {
+            // Phase 12.B: derive effective persistence from mode if given.
+            // mode="tmux" → persistent regardless of caller; mode="plain"
+            // → forced plain; otherwise honor `persistent` flag.
+            let effective_persistent = match mode.as_deref() {
+                Some("tmux") => true,
+                Some("plain") => false,
+                _ => persistent.unwrap_or(false),
+            };
             spawn_ssh(
                 &state,
                 pane_id.clone(),
@@ -3028,7 +3045,7 @@ async fn pane_connect(
                 accept_unknown_host.unwrap_or(false),
                 cols,
                 rows,
-                persistent.unwrap_or(false),
+                effective_persistent,
             )
             .await?
         }
@@ -3048,7 +3065,285 @@ async fn pane_connect(
         ws_setup,
     );
 
+    // Phase 12.B Smart Connect: when mode is "cmd" or "claude", inject the
+    // command after a 1.1s delay (after env exports + setup_command + tmux
+    // wrap have all settled). cwd_override changes directory first. We use
+    // `exec` so the launched process replaces the shell — the user gets
+    // back to a clean prompt only when the command exits.
+    let smart_mode = mode.clone();
+    if matches!(smart_mode.as_deref(), Some("cmd") | Some("claude")) {
+        let sessions_clone = state.sessions.clone();
+        let session_id_clone = session_id.clone();
+        let mode_str = smart_mode.unwrap_or_default();
+        let cwd_str = cwd_override.clone();
+        let cmd_str = cmd.clone();
+        let claude_args_str = claude_args.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+            let mut script = String::new();
+            if let Some(cwd) = cwd_str.filter(|s| !s.is_empty()) {
+                script.push_str(&format!("cd {} && ", shell_quote(&cwd)));
+            }
+            match mode_str.as_str() {
+                "cmd" => {
+                    if let Some(c) = cmd_str.filter(|s| !s.trim().is_empty()) {
+                        script.push_str(&format!("exec {}\r\n", c));
+                    }
+                }
+                "claude" => {
+                    let args = claude_args_str.unwrap_or_default();
+                    let trimmed = args.trim();
+                    if trimmed.is_empty() {
+                        script.push_str("exec claude\r\n");
+                    } else {
+                        script.push_str(&format!("exec claude {}\r\n", trimmed));
+                    }
+                }
+                _ => {}
+            }
+            if !script.is_empty() {
+                let mut sessions = sessions_clone.lock().unwrap();
+                if let Some(s) = sessions.get_mut(&session_id_clone) {
+                    match s {
+                        Session::Local(l) => {
+                            use std::io::Write as _;
+                            let _ = l.writer.write_all(script.as_bytes());
+                            let _ = l.writer.flush();
+                        }
+                        Session::Ssh(ssh) => {
+                            let _ = ssh.tx.send(SshCmd::Data(script.into_bytes()));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     Ok(session_id)
+}
+
+/// Phase 12.B: Claude Code session metadata returned by
+/// pane_list_claude_sessions for the session-picker modal.
+#[derive(Clone, Serialize)]
+pub(crate) struct ClaudeSessionInfo {
+    pub session_id: String,
+    pub project_path: String,
+    pub jsonl_path: String,
+    pub mtime_unix: i64,
+    /// First user message preview (best-effort; first ~80 chars).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_user: Option<String>,
+    /// Last assistant message preview (best-effort).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_assistant: Option<String>,
+}
+
+/// Phase 12.B: list recent Claude Code sessions on the workspace's host.
+/// For SSH workspaces with a live session, reuses the existing SSH handle
+/// to open a fresh exec channel (no extra auth round-trip). For local
+/// workspaces, reads `~/.claude/projects/*/sessions/*.jsonl` directly.
+/// Best-effort: if the path doesn't exist or jq isn't installed we still
+/// return what we can (path + mtime, no previews).
+#[tauri::command]
+async fn pane_list_claude_sessions(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    limit: Option<usize>,
+) -> Result<Vec<ClaudeSessionInfo>, String> {
+    let limit = limit.unwrap_or(30).min(200);
+    // Locate any live SSH handle for this workspace. The shell command runs
+    // on the remote where Claude Code is actually installed.
+    let handle_opt = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions
+            .iter()
+            .find_map(|(_sid, sess)| match sess {
+                Session::Ssh(s) if s.workspace_id == workspace_id => Some(s.handle.clone()),
+                _ => None,
+            })
+    };
+
+    let script = format!(
+        "find \"$HOME/.claude/projects\" -maxdepth 4 -name '*.jsonl' \
+         -printf '%T@\\t%p\\n' 2>/dev/null | sort -rn | head -{} | \
+         while IFS=$'\\t' read -r mt path; do \
+           first_user=$(head -100 \"$path\" 2>/dev/null | \
+             grep -m1 -E '\"role\"\\s*:\\s*\"user\"' | head -c 600); \
+           last_asst=$(tail -200 \"$path\" 2>/dev/null | \
+             grep -E '\"role\"\\s*:\\s*\"assistant\"' | tail -1 | head -c 600); \
+           printf '%s\\t%s\\t%s\\t%s\\n' \"$mt\" \"$path\" \"$first_user\" \"$last_asst\"; \
+         done",
+        limit
+    );
+
+    let raw = if let Some(handle) = handle_opt {
+        // Run via SSH exec.
+        let mut ch = handle
+            .channel_open_session()
+            .await
+            .map_err(|e| format!("channel_open: {e}"))?;
+        ch.exec(true, script.as_bytes())
+            .await
+            .map_err(|e| format!("exec: {e}"))?;
+        let mut out = Vec::new();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(8), async {
+            while let Some(msg) = ch.wait().await {
+                match msg {
+                    russh::ChannelMsg::Data { ref data } => out.extend_from_slice(data),
+                    russh::ChannelMsg::ExtendedData { .. } => {}
+                    russh::ChannelMsg::Eof | russh::ChannelMsg::Close | russh::ChannelMsg::ExitStatus { .. } => break,
+                    _ => {}
+                }
+            }
+        })
+        .await;
+        let _ = ch.close().await;
+        String::from_utf8_lossy(&out).to_string()
+    } else {
+        // No SSH session live → run locally on Windows. Translate to a small
+        // walk of %USERPROFILE%\.claude\projects\*\*.jsonl. We don't try to
+        // mirror the full bash pipeline — just enumerate, sort by mtime,
+        // return path + mtime; previews are skipped.
+        return list_claude_sessions_local(limit);
+    };
+
+    let mut out = Vec::new();
+    for line in raw.lines() {
+        let parts: Vec<&str> = line.splitn(4, '\t').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let mtime = parts[0]
+            .split('.')
+            .next()
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(0);
+        let path = parts[1].to_string();
+        let last_user = parts.get(2).map(|s| extract_text_field(s));
+        let last_asst = parts.get(3).map(|s| extract_text_field(s));
+        let session_id = std::path::Path::new(&path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string();
+        let project_path = std::path::Path::new(&path)
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            // Claude Code encodes paths with `-` for `/`. We surface the raw
+            // dirname; a future polish can decode it back to a real path.
+            .unwrap_or("?")
+            .to_string();
+        out.push(ClaudeSessionInfo {
+            session_id,
+            project_path,
+            jsonl_path: path,
+            mtime_unix: mtime,
+            last_user: last_user.filter(|s| !s.is_empty()),
+            last_assistant: last_asst.filter(|s| !s.is_empty()),
+        });
+    }
+    Ok(out)
+}
+
+fn list_claude_sessions_local(limit: usize) -> Result<Vec<ClaudeSessionInfo>, String> {
+    let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
+    let root = home.join(".claude").join("projects");
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut entries: Vec<(std::path::PathBuf, i64)> = Vec::new();
+    if let Ok(it) = std::fs::read_dir(&root) {
+        for proj in it.flatten() {
+            if let Ok(it2) = std::fs::read_dir(proj.path()) {
+                for f in it2.flatten() {
+                    let p = f.path();
+                    if p.extension().and_then(|s| s.to_str()) == Some("jsonl") {
+                        let mtime = f
+                            .metadata()
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| {
+                                t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs() as i64)
+                            })
+                            .unwrap_or(0);
+                        entries.push((p, mtime));
+                    }
+                }
+            }
+        }
+    }
+    entries.sort_by(|a, b| b.1.cmp(&a.1));
+    entries.truncate(limit);
+    let mut out = Vec::new();
+    for (p, mtime) in entries {
+        let session_id = p
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string();
+        let project_path = p
+            .parent()
+            .and_then(|q| q.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string();
+        out.push(ClaudeSessionInfo {
+            session_id,
+            project_path,
+            jsonl_path: p.to_string_lossy().to_string(),
+            mtime_unix: mtime,
+            last_user: None,
+            last_assistant: None,
+        });
+    }
+    Ok(out)
+}
+
+/// Best-effort extractor: pulls the first occurrence of `"text":"…"` (or
+/// `"content":"…"` as a fallback) out of a fragment of a JSONL line, with
+/// the JSON-escape sequences decoded. Sufficient for the preview column;
+/// not a full JSON parser. Returns the trimmed first ~80 chars.
+fn extract_text_field(fragment: &str) -> String {
+    fn extract_one(s: &str, key: &str) -> Option<String> {
+        let needle = format!("\"{}\":\"", key);
+        let idx = s.find(&needle)?;
+        let mut chars = s[idx + needle.len()..].chars().peekable();
+        let mut out = String::new();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                match chars.next() {
+                    Some('"') => out.push('"'),
+                    Some('n') => out.push(' '),
+                    Some('t') => out.push(' '),
+                    Some('r') => {}
+                    Some('\\') => out.push('\\'),
+                    Some('/') => out.push('/'),
+                    Some(other) => out.push(other),
+                    None => break,
+                }
+            } else if c == '"' {
+                break;
+            } else {
+                out.push(c);
+            }
+            if out.len() > 600 {
+                break;
+            }
+        }
+        Some(out)
+    }
+    let extracted = extract_one(fragment, "text")
+        .or_else(|| extract_one(fragment, "content"))
+        .unwrap_or_default();
+    let trimmed = extracted.trim();
+    if trimmed.chars().count() <= 80 {
+        trimmed.to_string()
+    } else {
+        let mut out: String = trimmed.chars().take(80).collect();
+        out.push('…');
+        out
+    }
 }
 
 /// Phase 11.A: introspection — is this pane currently bound to a tmux
@@ -3440,6 +3735,7 @@ pub fn run() {
             pane_kill_session,
             pane_persistence_get,
             pane_persistence_list,
+            pane_list_claude_sessions,
             pane_set_title,
             pane_set_annotation,
             pane_browser_navigate,

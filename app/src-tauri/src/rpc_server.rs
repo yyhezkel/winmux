@@ -1246,6 +1246,111 @@ async fn dispatch(
             }
             Ok(json!({ "ok": true, "pane_id": pane_id, "killed": true }))
         }
+        // ─── Phase 12.B: smart connect + claude session browser ─────────
+        "claude.sessions.list" => {
+            let workspace_id = params
+                .get("workspace_id")
+                .or_else(|| params.get("workspace"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing workspace_id")?
+                .to_string();
+            let limit = params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize);
+            // Re-dispatch through the Tauri command's underlying logic.
+            // We can't call the #[tauri::command] fn directly from here
+            // (its signature requires State<'_, AppState>), but the work
+            // is identical: look up an SSH handle, run the same script.
+            // Easiest: replicate via crate::pane_list_claude_sessions_impl
+            // — but to keep changes small, we duplicate the workspace SSH
+            // lookup here. NOTE: pane_list_claude_sessions(_impl)? helper
+            // could be factored later.
+            let handle_opt = {
+                let sessions = state.sessions.lock().unwrap();
+                sessions
+                    .iter()
+                    .find_map(|(_sid, sess)| match sess {
+                        crate::Session::Ssh(s) if s.workspace_id == workspace_id => {
+                            Some(s.handle.clone())
+                        }
+                        _ => None,
+                    })
+            };
+            let lim = limit.unwrap_or(30).min(200);
+            let script = format!(
+                "find \"$HOME/.claude/projects\" -maxdepth 4 -name '*.jsonl' \
+                 -printf '%T@\\t%p\\n' 2>/dev/null | sort -rn | head -{} | \
+                 while IFS=$'\\t' read -r mt path; do \
+                   first_user=$(head -100 \"$path\" 2>/dev/null | grep -m1 -E '\"role\"\\s*:\\s*\"user\"' | head -c 600); \
+                   last_asst=$(tail -200 \"$path\" 2>/dev/null | grep -E '\"role\"\\s*:\\s*\"assistant\"' | tail -1 | head -c 600); \
+                   printf '%s\\t%s\\t%s\\t%s\\n' \"$mt\" \"$path\" \"$first_user\" \"$last_asst\"; \
+                 done",
+                lim
+            );
+            if let Some(handle) = handle_opt {
+                let mut ch = handle
+                    .channel_open_session()
+                    .await
+                    .map_err(|e| format!("channel_open: {e}"))?;
+                ch.exec(true, script.as_bytes())
+                    .await
+                    .map_err(|e| format!("exec: {e}"))?;
+                let mut out_bytes = Vec::new();
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(8), async {
+                    while let Some(msg) = ch.wait().await {
+                        match msg {
+                            russh::ChannelMsg::Data { ref data } => out_bytes.extend_from_slice(data),
+                            russh::ChannelMsg::Eof
+                            | russh::ChannelMsg::Close
+                            | russh::ChannelMsg::ExitStatus { .. } => break,
+                            _ => {}
+                        }
+                    }
+                })
+                .await;
+                let _ = ch.close().await;
+                let raw = String::from_utf8_lossy(&out_bytes).to_string();
+                let mut out = serde_json::Map::new();
+                let mut arr: Vec<Value> = Vec::new();
+                for line in raw.lines() {
+                    let parts: Vec<&str> = line.splitn(4, '\t').collect();
+                    if parts.len() < 2 {
+                        continue;
+                    }
+                    let mtime = parts[0]
+                        .split('.')
+                        .next()
+                        .and_then(|s| s.parse::<i64>().ok())
+                        .unwrap_or(0);
+                    let path = parts[1].to_string();
+                    let session_id = std::path::Path::new(&path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("?")
+                        .to_string();
+                    let project = std::path::Path::new(&path)
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("?")
+                        .to_string();
+                    arr.push(json!({
+                        "session_id": session_id,
+                        "project_path": project,
+                        "jsonl_path": path,
+                        "mtime_unix": mtime,
+                    }));
+                }
+                out.insert("sessions".into(), Value::Array(arr));
+                Ok(Value::Object(out))
+            } else {
+                // Local fallback handled by the Tauri command — RPC only
+                // makes sense for SSH workspaces (the CLI runs on the
+                // remote side anyway). Return empty.
+                Ok(json!({ "sessions": [] }))
+            }
+        }
         "pane.persistence.list" => {
             let pane_sessions = state.pane_sessions.lock().unwrap().clone();
             let sessions = state.sessions.lock().unwrap();

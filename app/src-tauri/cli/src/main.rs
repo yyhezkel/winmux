@@ -415,6 +415,16 @@ enum Cmd {
     /// Phase 11.A: list every pane currently bound to a tmux persistent
     /// session, as `{ pane_id: tmux_session_name, ... }`.
     PanePersistenceList,
+
+    /// Phase 12.B: list recent Claude Code sessions on the workspace's host.
+    /// For SSH workspaces the live SSH handle is reused; for local workspaces
+    /// the local ~/.claude/projects tree is walked. Returns JSON.
+    ClaudeSessionsList {
+        #[arg(long)]
+        workspace: String,
+        #[arg(long, default_value_t = 30)]
+        limit: usize,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1770,6 +1780,13 @@ async fn real_main() -> ExitCode {
             rpc_call("pane.kill-session", json!({ "pane_id": pane })).await
         }
         Cmd::PanePersistenceList => rpc_call("pane.persistence.list", json!({})).await,
+        Cmd::ClaudeSessionsList { workspace, limit } => {
+            rpc_call(
+                "claude.sessions.list",
+                json!({ "workspace_id": workspace, "limit": limit }),
+            )
+            .await
+        }
         Cmd::Settings { op } => match op {
             SettingsOp::Show { json } => {
                 let v = rpc_call("settings.load", json!({})).await;

@@ -1,8 +1,18 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 import type { LayoutNode } from "./types";
 import { describeConnection } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
 import { t } from "./i18n";
+
+interface ClaudeSessionInfo {
+  session_id: string;
+  project_path: string;
+  jsonl_path: string;
+  mtime_unix: number;
+  last_user?: string | null;
+  last_assistant?: string | null;
+}
 
 export type ConnectOpts = {
   password?: string;
@@ -11,6 +21,11 @@ export type ConnectOpts = {
   // Phase 11.A: when true the SSH shell is wrapped in `tmux new-session -A`
   // so a reconnect attaches to the same session.
   persistent?: boolean;
+  // Phase 12.B Smart Connect.
+  mode?: "default" | "tmux" | "plain" | "cmd" | "claude";
+  cwdOverride?: string;
+  cmd?: string;
+  claudeArgs?: string;
 };
 
 export type PassphrasePending = { paneId: string; keyPath: string; bad?: boolean };
@@ -21,6 +36,79 @@ export type HostTrustPending = {
   fingerprint: string;
   mismatchOld?: string;
 };
+
+interface ClaudePickerProps {
+  workspaceId: string;
+  onClose: () => void;
+  onPick: (sessionId: string) => void;
+}
+
+function ClaudeSessionPicker(p: ClaudePickerProps) {
+  const [items, setItems] = createSignal<ClaudeSessionInfo[]>([]);
+  const [loading, setLoading] = createSignal(true);
+  const [err, setErr] = createSignal<string | null>(null);
+  onMount(async () => {
+    try {
+      const list = await invoke<ClaudeSessionInfo[]>("pane_list_claude_sessions", {
+        workspaceId: p.workspaceId,
+        limit: 30,
+      });
+      setItems(list);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setLoading(false);
+    }
+  });
+  const fmtAge = (mt: number) => {
+    if (!mt) return "—";
+    const sec = Math.max(1, Math.floor(Date.now() / 1000 - mt));
+    if (sec < 60) return `${sec}s`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+    return `${Math.floor(sec / 86400)}d`;
+  };
+  return (
+    <div class="modal-backdrop" onClick={p.onClose}>
+      <div class="modal claude-picker" onClick={(e) => e.stopPropagation()}>
+        <div class="settings-head">
+          <h3>Resume Claude Code session</h3>
+          <button class="feed-x" title={t("common.close")} onClick={p.onClose}>×</button>
+        </div>
+        <div class="claude-picker-body">
+          <Show when={loading()}><p class="status-line">Loading…</p></Show>
+          <Show when={err()}><p class="status-line err">{err()}</p></Show>
+          <Show when={!loading() && !err() && items().length === 0}>
+            <p class="status-line">No Claude Code sessions found on this host.</p>
+          </Show>
+          <Show when={items().length > 0}>
+            <ul class="claude-list">
+              {items().map((it) => (
+                <li
+                  class="claude-row"
+                  onClick={() => p.onPick(it.session_id)}
+                  title={it.jsonl_path}
+                >
+                  <div class="claude-row-head">
+                    <code class="claude-id">{it.session_id.slice(0, 8)}</code>
+                    <span class="claude-proj">{it.project_path}</span>
+                    <span class="claude-age">{fmtAge(it.mtime_unix)}</span>
+                  </div>
+                  <Show when={it.last_user}>
+                    <div class="claude-prev"><b>U:</b> {it.last_user}</div>
+                  </Show>
+                  <Show when={it.last_assistant}>
+                    <div class="claude-prev"><b>A:</b> {it.last_assistant}</div>
+                  </Show>
+                </li>
+              ))}
+            </ul>
+          </Show>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface Props {
   workspaceId: string;
@@ -61,6 +149,21 @@ export function PaneView(p: Props) {
   const [showDiscMenu, setShowDiscMenu] = createSignal(false);
   const isSsh = () => p.pane.connection?.type === "ssh";
   const isTmux = () => !!p.tmuxSession;
+  // Phase 12.B Smart Connect dropdown + extra modals.
+  const [showConnectMenu, setShowConnectMenu] = createSignal(false);
+  const [smartModal, setSmartModal] = createSignal<null | "cwd" | "cmd" | "claude_args">(null);
+  const [smartInput, setSmartInput] = createSignal("");
+  const [showClaudePicker, setShowClaudePicker] = createSignal(false);
+  const closeConnectMenu = () => setShowConnectMenu(false);
+  const submitSmartModal = () => {
+    const m = smartModal();
+    const v = smartInput();
+    setSmartModal(null);
+    setSmartInput("");
+    if (m === "cwd") p.onConnect(p.pane.pane_id, { cwdOverride: v });
+    if (m === "cmd") p.onConnect(p.pane.pane_id, { mode: "cmd", cmd: v });
+    if (m === "claude_args") p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: v });
+  };
   const openMeta = () => {
     setTitleDraft(p.pane.title ?? "");
     setAnnotDraft(p.pane.annotation ?? "");
@@ -350,18 +453,65 @@ export function PaneView(p: Props) {
               }
             >
               <div class="connect-buttons">
-                <button class="primary big" onClick={() => p.onConnect(p.pane.pane_id, {})}>
-                  {t("common.connect")}
-                </button>
-                <Show when={isSsh()}>
-                  <button
-                    class="big connect-tmux"
-                    title={t("pane.connect.persistent_hint")}
-                    onClick={() => p.onConnect(p.pane.pane_id, { persistent: true })}
-                  >
-                    {t("common.connect_tmux")}
+                {/* Phase 12.B Smart Connect — split button. Main click =
+                    plain Connect. Caret opens the menu with tmux / plain /
+                    cwd / cmd / claude options. */}
+                <div class="connect-split">
+                  <button class="primary big" onClick={() => p.onConnect(p.pane.pane_id, {})}>
+                    {t("common.connect")}
                   </button>
-                </Show>
+                  <button
+                    class="primary big connect-caret"
+                    title="More connect options"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowConnectMenu(!showConnectMenu());
+                    }}
+                  >
+                    ▾
+                  </button>
+                  <Show when={showConnectMenu()}>
+                    <div
+                      class="connect-menu"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Show when={isSsh()}>
+                        <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "tmux" }); }}>
+                          {t("common.connect_tmux")}
+                        </button>
+                      </Show>
+                      <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "plain" }); }}>
+                        Plain shell
+                      </button>
+                      <hr />
+                      <button onClick={() => { closeConnectMenu(); setSmartInput(""); setSmartModal("cwd"); }}>
+                        Open in directory…
+                      </button>
+                      <button onClick={() => { closeConnectMenu(); setSmartInput(""); setSmartModal("cmd"); }}>
+                        Run command…
+                      </button>
+                      <hr />
+                      <Show when={isSsh()}>
+                        <div class="connect-menu-section">Run Claude Code:</div>
+                        <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude" }); }}>
+                          claude
+                        </button>
+                        <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--continue" }); }}>
+                          claude --continue
+                        </button>
+                        <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--resume" }); }}>
+                          claude --resume
+                        </button>
+                        <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--dangerously-skip-permissions" }); }}>
+                          claude --dangerously-skip-permissions
+                        </button>
+                        <button onClick={() => { closeConnectMenu(); setShowClaudePicker(true); }}>
+                          Resume from list…
+                        </button>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
               </div>
             </Show>
 
@@ -374,6 +524,55 @@ export function PaneView(p: Props) {
         </Show>
         <div ref={slotRef!} class="pane-terminal-slot" />
       </div>
+
+      {/* Phase 12.B: smart-connect prompt for cwd / cmd / claude args */}
+      <Show when={smartModal()}>
+        <div class="modal-backdrop" onClick={() => setSmartModal(null)}>
+          <div class="modal smart-prompt" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+            <h3>
+              {smartModal() === "cwd" && "Open in directory"}
+              {smartModal() === "cmd" && "Run command"}
+              {smartModal() === "claude_args" && "Claude args"}
+            </h3>
+            <input
+              class="pane-meta-title"
+              autofocus
+              placeholder={
+                smartModal() === "cwd"
+                  ? "/home/yossi/projects/foo"
+                  : smartModal() === "cmd"
+                    ? "npm run dev"
+                    : "--resume"
+              }
+              value={smartInput()}
+              onInput={(e) => setSmartInput(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitSmartModal();
+                else if (e.key === "Escape") setSmartModal(null);
+              }}
+            />
+            <div class="modal-buttons">
+              <button onClick={() => setSmartModal(null)}>{t("common.cancel")}</button>
+              <button class="primary" onClick={submitSmartModal}>{t("common.connect")}</button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      {/* Phase 12.B: Claude session browser */}
+      <Show when={showClaudePicker()}>
+        <ClaudeSessionPicker
+          workspaceId={p.workspaceId}
+          onClose={() => setShowClaudePicker(false)}
+          onPick={(sessionId) => {
+            setShowClaudePicker(false);
+            p.onConnect(p.pane.pane_id, {
+              mode: "claude",
+              claudeArgs: `--resume ${sessionId}`,
+            });
+          }}
+        />
+      </Show>
     </div>
   );
 }

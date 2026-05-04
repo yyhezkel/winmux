@@ -1628,3 +1628,85 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   border-radius: 3px;
 }
 .update-banner-x:hover { background: var(--w-surface-hi); color: var(--w-text); }
+
+/* ─── Phase 11.A: tmux persistence ─── */
+
+.pane-tmux-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 4px;
+  background: rgba(78, 201, 176, 0.18);
+  color: var(--w-success);
+  border-radius: 3px;
+  font-family: var(--w-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  user-select: none;
+}
+
+.pane-disc-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.pane-disc-caret {
+  padding: 0 3px !important;
+  font-size: 9px !important;
+  margin-left: -2px;
+}
+.pane-disc-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  background: var(--w-surface-hi);
+  border: 1px solid var(--w-border-hi);
+  border-radius: var(--w-r-md);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  min-width: 130px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  animation: pop-in 90ms ease-out;
+}
+.pane-disc-menu button {
+  background: transparent;
+  border: none;
+  color: var(--w-text);
+  text-align: left;
+  padding: 6px 9px;
+  font-size: var(--w-fs-md);
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: inherit;
+}
+.pane-disc-menu button:hover { background: rgba(122, 162, 247, 0.16); }
+.pane-disc-menu button.danger { color: var(--w-error); }
+.pane-disc-menu button.danger:hover { background: rgba(247, 118, 142, 0.16); }
+
+.connect-buttons {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.connect-tmux {
+  background: var(--w-surface-hi);
+  color: var(--w-success);
+  border: 1px solid rgba(78, 201, 176, 0.45);
+  border-radius: var(--w-r-sm);
+  padding: 10px 22px;
+  font-size: var(--w-fs-xl);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 100ms ease, border-color 100ms ease, transform 80ms ease;
+}
+.connect-tmux:hover {
+  background: rgba(78, 201, 176, 0.16);
+  border-color: var(--w-success);
+}
+.connect-tmux:active { transform: scale(0.98); }

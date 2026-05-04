@@ -26,6 +26,9 @@ interface Props {
   onSplit: (paneId: string, direction: SplitDirection) => void;
   onClose: (paneId: string) => void;
   onDisconnect: (paneId: string) => void;
+  // Phase 11.A: tmux session map keyed by pane_id; presence = persistent.
+  panePersistence: Record<string, string>;
+  onKillSession: (paneId: string) => void;
   onSetTitle: (paneId: string, title: string) => void;
   onSetAnnotation: (paneId: string, annotation: string) => void;
   onRatioDrag: (splitId: string, ratio: number) => void;
@@ -79,6 +82,8 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           onSplit={props.all.onSplit}
           onClose={props.all.onClose}
           onDisconnect={props.all.onDisconnect}
+          tmuxSession={props.all.panePersistence[props.pane.pane_id] ?? null}
+          onKillSession={props.all.onKillSession}
           onSetTitle={props.all.onSetTitle}
           onSetAnnotation={props.all.onSetAnnotation}
         />

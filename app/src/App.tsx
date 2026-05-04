@@ -69,6 +69,16 @@ function App() {
   const [settings, setSettings] = createSignal<Settings | null>(null);
   const [showSettings, setShowSettings] = createSignal(false);
   const [updateBanner, setUpdateBanner] = createSignal<UpdateInfo | null>(null);
+  // Phase 11.A: per-pane tmux persistence map { pane_id → session_name }.
+  const [panePersistence, setPanePersistence] = createSignal<Record<string, string>>({});
+  const refreshPersistence = async () => {
+    try {
+      const m = await invoke<Record<string, string>>("pane_persistence_list");
+      setPanePersistence(m ?? {});
+    } catch (e) {
+      console.warn("pane_persistence_list failed", e);
+    }
+  };
   const refreshNotes = async () => {
     try {
       const f = await invoke<NotesFile>("notes_load");
@@ -394,6 +404,7 @@ function App() {
     password?: string;
     keyPassphrase?: string;
     acceptUnknownHost?: boolean;
+    persistent?: boolean;
   };
 
   const connectPane = async (paneId: string, opts: ConnectOpts = {}) => {
@@ -408,6 +419,7 @@ function App() {
         password: opts.password ?? null,
         keyPassphrase: opts.keyPassphrase ?? null,
         acceptUnknownHost: opts.acceptUnknownHost ?? false,
+        persistent: opts.persistent ?? false,
         cols: ti.term.cols || 80,
         rows: ti.term.rows || 24,
       });
@@ -419,6 +431,10 @@ function App() {
       setPendingPassphraseFor(null);
       setPendingHostTrust(null);
       bump();
+      // Phase 11.A: persistence map refresh (the SshSession was just inserted
+      // with its tmux_session field set or unset). Tiny delay so the handler
+      // has finished registering.
+      setTimeout(() => void refreshPersistence(), 100);
     } catch (e) {
       const msg = String(e);
       // KEY_PASSPHRASE_REQUIRED:<key_path>
@@ -490,6 +506,24 @@ function App() {
     }
     terms.get(paneId)?.detach();
     bump();
+    void refreshPersistence();
+  };
+
+  // Phase 11.A: hard-kill the remote tmux session (if any) and disconnect.
+  const killSession = async (paneId: string) => {
+    try {
+      await invoke("pane_kill_session", { paneId });
+    } catch (e) {
+      console.warn("kill_session failed", e);
+    }
+    const sid = paneToSession.get(paneId);
+    if (sid) {
+      sessionToPane.delete(sid);
+      paneToSession.delete(paneId);
+    }
+    terms.get(paneId)?.detach();
+    bump();
+    void refreshPersistence();
   };
 
   const findPaneInActiveWs = (paneId: string) => {
@@ -585,6 +619,7 @@ function App() {
         );
         ti?.detach();
         bump();
+        void refreshPersistence();
       })
     );
     // Initial feed load.
@@ -800,6 +835,7 @@ function App() {
                 pendingHostTrust={pendingHostTrust()}
                 paneStatus={paneStatus()}
                 paneStatusText={paneStatusText()}
+                panePersistence={panePersistence()}
                 ensureTerm={ensureTerm}
                 onFocus={(pid) => {
                   setActivePaneId(pid);
@@ -809,6 +845,7 @@ function App() {
                 onSplit={splitPane}
                 onClose={closePane}
                 onDisconnect={disconnectPane}
+                onKillSession={killSession}
                 onSetTitle={(pid, title) => {
                   const ws = activeWs();
                   if (!ws) return;

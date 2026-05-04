@@ -394,6 +394,27 @@ enum Cmd {
         #[command(subcommand)]
         op: SettingsOp,
     },
+
+    /// Phase 11.A: disconnect a pane. For tmux-persistent panes, --kill also
+    /// terminates the remote tmux session (otherwise it just detaches).
+    PaneDisconnect {
+        #[arg(long)]
+        pane: String,
+        /// Also `tmux kill-session` on the remote (no resume possible).
+        #[arg(long)]
+        kill: bool,
+    },
+
+    /// Phase 11.A: hard-kill the tmux session bound to a pane (no resume).
+    /// Convenience alias for `pane-disconnect --pane <id> --kill`.
+    PaneKillSession {
+        #[arg(long)]
+        pane: String,
+    },
+
+    /// Phase 11.A: list every pane currently bound to a tmux persistent
+    /// session, as `{ pane_id: tmux_session_name, ... }`.
+    PanePersistenceList,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1738,6 +1759,17 @@ async fn real_main() -> ExitCode {
             hooks::run_all(&adapters, *dry_run, *force);
             return ExitCode::SUCCESS;
         }
+        Cmd::PaneDisconnect { pane, kill } => {
+            if *kill {
+                rpc_call("pane.kill-session", json!({ "pane_id": pane })).await
+            } else {
+                rpc_call("pane.disconnect", json!({ "pane_id": pane })).await
+            }
+        }
+        Cmd::PaneKillSession { pane } => {
+            rpc_call("pane.kill-session", json!({ "pane_id": pane })).await
+        }
+        Cmd::PanePersistenceList => rpc_call("pane.persistence.list", json!({})).await,
         Cmd::Settings { op } => match op {
             SettingsOp::Show { json } => {
                 let v = rpc_call("settings.load", json!({})).await;

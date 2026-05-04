@@ -48,6 +48,10 @@ pub(crate) struct SshSession {
     // Phase 8.B: workspace this session belongs to, so port-forward bookkeeping
     // can clean up when the workspace is deleted or all SSH sessions exit.
     pub(crate) workspace_id: String,
+    // Phase 11.A: when this session was started with `persistent=true` we wrap
+    // the shell in a tmux attach-or-create. Storing the name lets us send
+    // `tmux kill-session -t NAME` via a separate exec channel on demand.
+    pub(crate) tmux_session: Option<String>,
 }
 
 #[derive(Debug)]
@@ -1011,6 +1015,34 @@ fn line_ending_for(_kind: ShellKind) -> &'static str {
 
 /// Phase 7.C: after the shell has had a moment to print its banner and prompt,
 /// inject the workspace's `env` exports + `setup_command` as if the user typed them.
+/// Phase 11.A: tmux session names disallow `.` and `:` and (for sane shell
+/// quoting) we also strip whitespace. Pane ids look like `p_<hex>_<n>`
+/// already so this is a no-op in practice; the sanitizer is defensive
+/// against future id format changes.
+pub(crate) fn sanitize_tmux_session_name(pane_id: &str) -> String {
+    let cleaned: String = pane_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .collect();
+    format!("winmux-{}", cleaned)
+}
+
+/// Minimal POSIX single-quote escape. Wraps the value in single quotes and
+/// rewrites any internal single-quote as `'\''`. Safe for /bin/sh-style.
+pub(crate) fn shell_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        if c == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    out
+}
+
 fn schedule_setup_injection(
     sessions: SessionMap,
     session_id: String,
@@ -1618,6 +1650,7 @@ async fn spawn_ssh(
     accept_unknown_host: bool,
     cols: u16,
     rows: u16,
+    persistent: bool,
 ) -> Result<String, String> {
     dlog(&format!(
         "spawn_ssh: entry ws={} pane={} target={}@{}:{}",
@@ -1850,14 +1883,73 @@ async fn spawn_ssh(
         emit_exit(&app_for_task, &id_for_task, exit_reason);
     });
 
+    let tmux_name = if persistent {
+        Some(sanitize_tmux_session_name(&pane_id))
+    } else {
+        None
+    };
     state.sessions.lock().unwrap().insert(
         id.clone(),
         Session::Ssh(SshSession {
             tx,
             handle: handle_for_state,
             workspace_id: workspace_id_for_state.clone(),
+            tmux_session: tmux_name.clone(),
         }),
     );
+
+    // Phase 11.A: when the user picked persistent mode, wrap the freshly
+    // started shell in `tmux new-session -A -s NAME`. The `-A` flag attaches
+    // to an existing session of that name (so a reconnect resumes the same
+    // shell with all in-flight processes intact) and creates a fresh one
+    // otherwise. We `exec` it so the parent shell process is replaced —
+    // killing the SSH channel then doesn't double-prompt for shell exit.
+    //
+    // We also push the env vars the SSH channel just acquired into tmux's
+    // global environment so a re-attach to a long-lived session sees the
+    // *current* WINMUX_SOCKET_ADDR/TUNNEL_TOKEN/PANE_ID rather than the
+    // stale ones from the original creation. The `2>/dev/null` swallows
+    // the harmless "no server running" message when this is the first attach.
+    if let Some(name) = &tmux_name {
+        let sessions_clone = state.sessions.clone();
+        let id_clone = id.clone();
+        let name_clone = name.clone();
+        let socket_addr = if remote_port != 0 {
+            format!("127.0.0.1:{}", remote_port)
+        } else {
+            String::new()
+        };
+        let token_clone = token.as_str().to_string();
+        let pane_for_exec = pane_id.clone();
+        tokio::spawn(async move {
+            // Wait a touch longer than schedule_setup_injection (which fires
+            // at 500ms) so our exec lands AFTER the env exports + setup_command.
+            tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+            let mut script = String::new();
+            if !socket_addr.is_empty() {
+                script.push_str(&format!(
+                    "tmux set-environment -g WINMUX_SOCKET_ADDR {} 2>/dev/null; ",
+                    shell_quote(&socket_addr)
+                ));
+                script.push_str(&format!(
+                    "tmux set-environment -g WINMUX_TUNNEL_TOKEN {} 2>/dev/null; ",
+                    shell_quote(&token_clone)
+                ));
+                script.push_str(&format!(
+                    "tmux set-environment -g WINMUX_PANE_ID {} 2>/dev/null; ",
+                    shell_quote(&pane_for_exec)
+                ));
+            }
+            script.push_str(&format!(
+                "command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s {} || echo '[winmux] tmux not installed on remote — falling back to plain shell'\r\n",
+                shell_quote(&name_clone)
+            ));
+            let mut sessions = sessions_clone.lock().unwrap();
+            if let Some(Session::Ssh(ssh)) = sessions.get_mut(&id_clone) {
+                let _ = ssh.tx.send(SshCmd::Data(script.into_bytes()));
+            }
+        });
+    }
     // Phase 8.B race fix: notify any browser pane in this workspace that a
     // fresh resolve is now possible (SSH handle is live → forwards can open).
     // Browser panes that loaded their iframe with `localhost refused to
@@ -2866,6 +2958,10 @@ async fn pane_connect(
     accept_unknown_host: Option<bool>,
     cols: u16,
     rows: u16,
+    // Phase 11.A: when true the SSH shell is wrapped in `tmux new-session -A`
+    // so reconnects resume the same shell. Ignored for local panes for now —
+    // can be added later via WSL/conpty + tmux on linux.
+    persistent: Option<bool>,
 ) -> Result<String, String> {
     // Look up connection from workspaces state. Phase 7.C: also lift `env` and
     // `setup_command` from the workspace so we can inject them after the shell is up.
@@ -2932,6 +3028,7 @@ async fn pane_connect(
                 accept_unknown_host.unwrap_or(false),
                 cols,
                 rows,
+                persistent.unwrap_or(false),
             )
             .await?
         }
@@ -2952,6 +3049,105 @@ async fn pane_connect(
     );
 
     Ok(session_id)
+}
+
+/// Phase 11.A: introspection — is this pane currently bound to a tmux
+/// persistent session? Used by the frontend to render the `T` badge and
+/// to decide whether the disconnect dropdown should expose "Kill session".
+#[tauri::command]
+fn pane_persistence_get(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Option<String> {
+    let sessions_map = state.pane_sessions.lock().unwrap();
+    let sid = sessions_map.get(&pane_id)?.clone();
+    drop(sessions_map);
+    let sessions = state.sessions.lock().unwrap();
+    if let Some(Session::Ssh(s)) = sessions.get(&sid) {
+        return s.tmux_session.clone();
+    }
+    None
+}
+
+/// Phase 11.A: list every (pane_id → tmux_session_name) currently active.
+/// Frontend uses this on workspaces:changed / pty:exit to refresh badges
+/// without having to query each pane individually.
+#[tauri::command]
+fn pane_persistence_list(
+    state: State<'_, AppState>,
+) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let pane_sessions = state.pane_sessions.lock().unwrap().clone();
+    let sessions = state.sessions.lock().unwrap();
+    for (pane, sid) in pane_sessions {
+        if let Some(Session::Ssh(s)) = sessions.get(&sid) {
+            if let Some(name) = &s.tmux_session {
+                out.insert(pane, name.clone());
+            }
+        }
+    }
+    out
+}
+
+/// Phase 11.A: hard-kill the tmux session bound to this pane. Opens a fresh
+/// exec channel on the existing SSH handle, runs `tmux kill-session -t NAME`,
+/// then closes the original shell channel. Falls through to a plain
+/// disconnect for non-tmux panes so `winmux pane-disconnect --kill` is
+/// always meaningful regardless of which mode the pane was started in.
+#[tauri::command]
+async fn pane_kill_session(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<(), String> {
+    let sid_opt = state.pane_sessions.lock().unwrap().get(&pane_id).cloned();
+    let Some(sid) = sid_opt else {
+        return Ok(());
+    };
+    // Snapshot the SSH handle + tmux name without holding the lock across the
+    // .await — russh's Handle is shared as Arc<> so this is cheap.
+    let (handle_arc, tmux_name) = {
+        let sessions = state.sessions.lock().unwrap();
+        match sessions.get(&sid) {
+            Some(Session::Ssh(s)) => (Some(s.handle.clone()), s.tmux_session.clone()),
+            _ => (None, None),
+        }
+    };
+    if let (Some(handle), Some(name)) = (handle_arc, tmux_name) {
+        let cmd = format!("tmux kill-session -t {} 2>&1 || true", shell_quote(&name));
+        match handle.channel_open_session().await {
+            Ok(mut ch) => {
+                if let Err(e) = ch.exec(true, cmd.as_bytes()).await {
+                    dlog(&format!("pane_kill_session: exec failed: {e}"));
+                }
+                // Drain the channel briefly so the server completes the exec.
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_millis(800),
+                    async {
+                        while let Some(msg) = ch.wait().await {
+                            if matches!(msg, ChannelMsg::ExitStatus { .. } | ChannelMsg::Eof | ChannelMsg::Close) {
+                                break;
+                            }
+                        }
+                    },
+                )
+                .await;
+                let _ = ch.close().await;
+            }
+            Err(e) => {
+                dlog(&format!("pane_kill_session: channel_open failed: {e}"));
+            }
+        }
+    }
+    // Now close the shell + remove session bookkeeping. This re-uses the
+    // existing pane_disconnect logic by removing from pane_sessions and
+    // killing the underlying session.
+    let sid = state.pane_sessions.lock().unwrap().remove(&pane_id);
+    if let Some(sid) = sid {
+        if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+            kill_session_inner(&mut s);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -3241,6 +3437,9 @@ pub fn run() {
             workspace_set_split_ratio,
             pane_connect,
             pane_disconnect,
+            pane_kill_session,
+            pane_persistence_get,
+            pane_persistence_list,
             pane_set_title,
             pane_set_annotation,
             pane_browser_navigate,

@@ -1154,6 +1154,112 @@ async fn dispatch(
         // ─── Phase 9.B: update checker ───────────────────────────────────
         "updates.check" => Ok(updater::rpc_check_now(state, app).await),
 
+        // ─── Phase 11.A: tmux persistence ───────────────────────────────
+        "pane.persistence.get" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            let pane_sessions = state.pane_sessions.lock().unwrap().clone();
+            let sessions = state.sessions.lock().unwrap();
+            let tmux = pane_sessions
+                .get(&pane_id)
+                .and_then(|sid| sessions.get(sid))
+                .and_then(|s| match s {
+                    crate::Session::Ssh(ssh) => ssh.tmux_session.clone(),
+                    _ => None,
+                });
+            Ok(json!({ "pane_id": pane_id, "tmux_session": tmux }))
+        }
+        "pane.disconnect" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            // Mirror what pane_disconnect Tauri command does, minus the
+            // teardown_command path (which only matters for app shutdown).
+            let sid = state.pane_sessions.lock().unwrap().remove(&pane_id);
+            if let Some(sid) = sid {
+                if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+                    crate::kill_session_inner(&mut s);
+                }
+            }
+            Ok(json!({ "ok": true, "pane_id": pane_id, "killed": false }))
+        }
+        "pane.kill-session" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?
+                .to_string();
+            // Same flow as the Tauri command — open a fresh exec channel,
+            // run `tmux kill-session`, then close.
+            let sid_opt = state.pane_sessions.lock().unwrap().get(&pane_id).cloned();
+            if let Some(sid) = sid_opt {
+                let (handle_arc, tmux_name) = {
+                    let sessions = state.sessions.lock().unwrap();
+                    match sessions.get(&sid) {
+                        Some(crate::Session::Ssh(s)) => {
+                            (Some(s.handle.clone()), s.tmux_session.clone())
+                        }
+                        _ => (None, None),
+                    }
+                };
+                if let (Some(handle), Some(name)) = (handle_arc, tmux_name) {
+                    let cmd = format!(
+                        "tmux kill-session -t {} 2>&1 || true",
+                        crate::shell_quote(&name)
+                    );
+                    if let Ok(mut ch) = handle.channel_open_session().await {
+                        let _ = ch.exec(true, cmd.as_bytes()).await;
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_millis(800),
+                            async {
+                                while let Some(msg) = ch.wait().await {
+                                    use russh::ChannelMsg;
+                                    if matches!(
+                                        msg,
+                                        ChannelMsg::ExitStatus { .. }
+                                            | ChannelMsg::Eof
+                                            | ChannelMsg::Close
+                                    ) {
+                                        break;
+                                    }
+                                }
+                            },
+                        )
+                        .await;
+                        let _ = ch.close().await;
+                    }
+                }
+                let sid = state.pane_sessions.lock().unwrap().remove(&pane_id);
+                if let Some(sid) = sid {
+                    if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+                        crate::kill_session_inner(&mut s);
+                    }
+                }
+            }
+            Ok(json!({ "ok": true, "pane_id": pane_id, "killed": true }))
+        }
+        "pane.persistence.list" => {
+            let pane_sessions = state.pane_sessions.lock().unwrap().clone();
+            let sessions = state.sessions.lock().unwrap();
+            let mut out = serde_json::Map::new();
+            for (pane, sid) in pane_sessions {
+                if let Some(crate::Session::Ssh(ssh)) = sessions.get(&sid) {
+                    if let Some(name) = &ssh.tmux_session {
+                        out.insert(pane, Value::String(name.clone()));
+                    }
+                }
+            }
+            Ok(Value::Object(out))
+        }
+
         "feed.decide" => {
             let req_id = params
                 .get("request_id")

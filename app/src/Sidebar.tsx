@@ -1,5 +1,6 @@
 import { For, Show, createSignal } from "solid-js";
 import { collectPanes, findPane, type Workspace } from "./types";
+import { t } from "./i18n";
 
 function workspaceBadge(w: Workspace): { label: string; cls: string; title: string } {
   if (!w.layout) {
@@ -67,7 +68,7 @@ export function Sidebar(p: Props) {
           <rect x="600" y="640" width="190" height="56" rx="28" fill="url(#sb-acc)" />
           <circle cx="848" cy="176" r="20" fill="#5cd87f" />
         </svg>
-        <span class="sidebar-brand">winmux</span>
+        <span class="sidebar-brand">{t("sidebar.title")}</span>
       </div>
       <div class="sidebar-list">
         <For each={p.workspaces}>
@@ -98,21 +99,21 @@ export function Sidebar(p: Props) {
                   }}
                 >
                   <button onClick={() => p.onAction(w.id, "rename")}>
-                    Rename
+                    {t("ws.context.rename")}
                   </button>
                   <button onClick={() => p.onAction(w.id, "edit")}>
-                    Edit…
+                    {t("ws.context.edit")}
                   </button>
                   <Show when={p.connectedIds.has(w.id)}>
                     <button onClick={() => p.onAction(w.id, "disconnect")}>
-                      Disconnect
+                      {t("ws.context.disconnect")}
                     </button>
                   </Show>
                   <button
                     class="danger"
                     onClick={() => p.onAction(w.id, "delete")}
                   >
-                    Delete
+                    {t("ws.context.delete")}
                   </button>
                 </div>
               </Show>
@@ -121,7 +122,7 @@ export function Sidebar(p: Props) {
         </For>
       </div>
       <button class="ws-add" onClick={p.onCreate}>
-        + New workspace
+        {t("sidebar.new_workspace")}
       </button>
     </div>
   );

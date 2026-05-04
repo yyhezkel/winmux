@@ -12,6 +12,7 @@ import {
   listSystemFonts,
   checkForUpdates,
 } from "./settings";
+import { applyI18nSettings, LANGUAGES, t } from "./i18n";
 
 interface Props {
   open: boolean;
@@ -20,7 +21,7 @@ interface Props {
   onChange: (next: Settings) => void;
 }
 
-type Tab = "theme" | "font" | "terminal" | "hooks" | "notifications" | "updates";
+type Tab = "theme" | "font" | "terminal" | "hooks" | "notifications" | "updates" | "language";
 
 export function SettingsModal(p: Props) {
   const [tab, setTab] = createSignal<Tab>("theme");
@@ -38,6 +39,7 @@ export function SettingsModal(p: Props) {
   const queueSave = (next: Settings) => {
     p.onChange(next);
     applyTheme(next);
+    applyI18nSettings(next.i18n);
     if (saveTimer) clearTimeout(saveTimer);
     setSaving(true);
     saveTimer = window.setTimeout(async () => {
@@ -131,26 +133,26 @@ export function SettingsModal(p: Props) {
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div class="settings-head">
-            <h3>Settings</h3>
+            <h3>{t("settings.title")}</h3>
             <span class="settings-saved-flag">{savedAge()}</span>
-            <button class="feed-x" title="Close" onClick={p.onClose}>×</button>
+            <button class="feed-x" title={t("common.close")} onClick={p.onClose}>×</button>
           </div>
 
           <div class="settings-body">
             <nav class="settings-tabs">
-              <For each={["theme", "font", "terminal", "hooks", "notifications", "updates"] as Tab[]}>
-                {(t) => (
+              <For each={["theme", "font", "terminal", "hooks", "notifications", "updates", "language"] as Tab[]}>
+                {(name) => (
                   <button
-                    class={`settings-tab ${tab() === t ? "active" : ""}`}
-                    onClick={() => setTab(t)}
+                    class={`settings-tab ${tab() === name ? "active" : ""}`}
+                    onClick={() => setTab(name)}
                   >
-                    {t}
+                    {t(`settings.tab.${name}`)}
                   </button>
                 )}
               </For>
               <div class="settings-tabs-spacer" />
               <button class="settings-tab danger" onClick={onResetAll}>
-                reset all
+                {t("settings.reset_all")}
               </button>
             </nav>
 
@@ -407,17 +409,58 @@ export function SettingsModal(p: Props) {
                   <Show when={updateInfo()}>
                     <div class="settings-update-result">
                       <p>
-                        Current: <code>{updateInfo()!.current_version}</code>
-                        {" · "}Latest: <code>{updateInfo()!.latest_version ?? "—"}</code>
+                        {t("settings.updates.current")} <code>{updateInfo()!.current_version}</code>
+                        {" · "}{t("settings.updates.latest")} <code>{updateInfo()!.latest_version ?? "—"}</code>
                       </p>
                       <Show when={updateInfo()!.error}>
-                        <p class="settings-update-err">Error: {updateInfo()!.error}</p>
+                        <p class="settings-update-err">{t("settings.updates.error", { msg: updateInfo()!.error ?? "" })}</p>
                       </Show>
                       <Show when={updateInfo()!.available}>
-                        <p class="settings-update-ok">A new version is available.</p>
+                        <p class="settings-update-ok">{t("settings.updates.available")}</p>
                       </Show>
                     </div>
                   </Show>
+                </section>
+              </Show>
+
+              {/* ── Language ──────────────────────────────────────────── */}
+              <Show when={tab() === "language"}>
+                <section>
+                  <h4>{t("settings.language.title")}</h4>
+                  <label>
+                    <span>{t("settings.language.label")}</span>
+                    <select
+                      value={p.settings.i18n.language}
+                      onChange={(e) =>
+                        update("i18n", { ...p.settings.i18n, language: e.currentTarget.value })
+                      }
+                    >
+                      <For each={LANGUAGES}>
+                        {(l) => <option value={l.id}>{l.label}</option>}
+                      </For>
+                    </select>
+                  </label>
+                  <label>
+                    <span>{t("settings.language.direction")}</span>
+                    <div class="settings-radio-row">
+                      <For each={["auto", "ltr", "rtl"] as const}>
+                        {(d) => (
+                          <label class="settings-radio">
+                            <input
+                              type="radio"
+                              name="dir"
+                              value={d}
+                              checked={p.settings.i18n.direction === d}
+                              onChange={() =>
+                                update("i18n", { ...p.settings.i18n, direction: d })
+                              }
+                            />
+                            <span>{t(`settings.language.dir.${d}`)}</span>
+                          </label>
+                        )}
+                      </For>
+                    </div>
+                  </label>
                 </section>
               </Show>
             </div>

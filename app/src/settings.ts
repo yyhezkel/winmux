@@ -70,6 +70,11 @@ export interface UpdatesSettings {
   last_seen_version?: string | null;
 }
 
+export interface I18nSettings {
+  language: "en" | "he" | "ar" | "ru" | string;
+  direction: "auto" | "ltr" | "rtl" | string;
+}
+
 export interface Settings {
   version: number;
   theme: Theme;
@@ -78,6 +83,7 @@ export interface Settings {
   hooks: HooksSettings;
   notifications: NotificationSettings;
   updates: UpdatesSettings;
+  i18n: I18nSettings;
 }
 
 export interface PresetEntry {

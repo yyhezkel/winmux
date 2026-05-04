@@ -14,6 +14,7 @@ import {
   type Settings,
   type UpdateInfo,
 } from "./settings";
+import { applyI18nSettings, t } from "./i18n";
 import {
   collectPanes,
   describeConnection,
@@ -589,6 +590,7 @@ function App() {
       const s = await loadSettings();
       setSettings(s);
       applyTheme(s);
+      applyI18nSettings(s.i18n);
     } catch (e) {
       console.warn("settings_load failed", e);
     }
@@ -684,6 +686,7 @@ function App() {
       await listen<Settings>("settings:changed", (e) => {
         setSettings(e.payload);
         applyTheme(e.payload);
+        applyI18nSettings(e.payload.i18n);
       })
     );
     // Phase 9.B: update available — show a banner; user clicks to open notes.
@@ -799,9 +802,9 @@ function App() {
 
         <Show when={!activeWs()}>
           <div class="empty">
-            <p>No workspace yet.</p>
+            <p>{t("ws.empty.none")}</p>
             <button class="primary" onClick={() => setShowCreate(true)}>
-              + New workspace
+              {t("ws.empty.new")}
             </button>
           </div>
         </Show>
@@ -895,7 +898,7 @@ function App() {
 
       <button
         class="notes-fab"
-        title="Notes (Ctrl+Shift+N)"
+        title={`${t("fab.notes")} (Ctrl+Shift+N)`}
         onClick={() => setShowNotes(true)}
       >
         📝 {notes().filter((n) => n.status === "open").length}
@@ -903,7 +906,7 @@ function App() {
 
       <button
         class="settings-fab"
-        title="Settings"
+        title={t("fab.settings")}
         onClick={() => setShowSettings(true)}
       >
         ⚙
@@ -932,7 +935,7 @@ function App() {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Release notes
+                {t("update_banner.notes")}
               </a>
             </Show>
             <button class="update-banner-x" onClick={() => setUpdateBanner(null)}>×</button>

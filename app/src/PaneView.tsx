@@ -2,6 +2,7 @@ import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { LayoutNode } from "./types";
 import { describeConnection } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
+import { t } from "./i18n";
 
 export type ConnectOpts = {
   password?: string;
@@ -140,7 +141,7 @@ export function PaneView(p: Props) {
         <Show when={isTmux()}>
           <span
             class="pane-tmux-badge"
-            title={`tmux session ${p.tmuxSession} — survives disconnect`}
+            title={t("pane.tooltip.tmux_badge")}
           >
             T
           </span>
@@ -149,14 +150,14 @@ export function PaneView(p: Props) {
           <div class="pane-disc-wrap">
             <button
               class="pane-btn"
-              title={isTmux() ? "Detach (session keeps running)" : "Disconnect"}
+              title={isTmux() ? t("pane.tooltip.detach") : t("pane.tooltip.disconnect")}
               onClick={() => p.onDisconnect(p.pane.pane_id)}
             >
               ⏻
             </button>
             <button
               class="pane-btn pane-disc-caret"
-              title="More disconnect options"
+              title={t("pane.tooltip.kill_session")}
               onClick={(e) => {
                 e.stopPropagation();
                 setShowDiscMenu(!showDiscMenu());
@@ -173,11 +174,11 @@ export function PaneView(p: Props) {
                 }}
               >
                 <button onClick={() => p.onDisconnect(p.pane.pane_id)}>
-                  {isTmux() ? "Detach" : "Disconnect"}
+                  {isTmux() ? t("common.detach") : t("common.disconnect")}
                 </button>
                 <Show when={isTmux()}>
                   <button class="danger" onClick={() => p.onKillSession(p.pane.pane_id)}>
-                    Kill session
+                    {t("common.kill_session")}
                   </button>
                 </Show>
               </div>
@@ -350,15 +351,15 @@ export function PaneView(p: Props) {
             >
               <div class="connect-buttons">
                 <button class="primary big" onClick={() => p.onConnect(p.pane.pane_id, {})}>
-                  Connect
+                  {t("common.connect")}
                 </button>
                 <Show when={isSsh()}>
                   <button
                     class="big connect-tmux"
-                    title="Wrap remote shell in tmux so reconnects resume the same session"
+                    title={t("pane.connect.persistent_hint")}
                     onClick={() => p.onConnect(p.pane.pane_id, { persistent: true })}
                   >
-                    Connect (tmux)
+                    {t("common.connect_tmux")}
                   </button>
                 </Show>
               </div>

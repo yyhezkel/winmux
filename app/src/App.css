@@ -1710,3 +1710,37 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   border-color: var(--w-success);
 }
 .connect-tmux:active { transform: scale(0.98); }
+
+/* ─── Phase 12.A: RTL flips ───
+   App.css is overwhelmingly written with logical positioning (`flex`,
+   `gap`, `auto` margins via `margin-left: auto;`). The few spots that
+   still use physical left/right need to be mirrored under [dir="rtl"]
+   so the FABs, banners, dropdowns, and feed cards land on the correct
+   physical side. CSS logical properties cover most cases for free; the
+   below are the remaining `position: fixed` floats. */
+
+[dir="rtl"] .feed-panel { right: auto; left: 12px; }
+[dir="rtl"] .notes-fab { right: auto; left: 14px; }
+[dir="rtl"] .settings-fab { right: auto; left: 64px; }
+[dir="rtl"] .ws-menu { left: auto; right: 12px; }
+[dir="rtl"] .pane-disc-menu { right: auto; left: 0; }
+[dir="rtl"] .feed-card { animation-name: feed-in-rtl; }
+[dir="rtl"] .ws-conn-info { margin-left: 0; margin-right: auto; }
+[dir="rtl"] .ws-header-btn { margin-left: 0; margin-right: 8px; }
+[dir="rtl"] .feed-verdict,
+[dir="rtl"] .feed-x { margin-left: 0; margin-right: auto; }
+[dir="rtl"] .pane-status-text { margin: 0 8px; }
+[dir="rtl"] .note-actions,
+[dir="rtl"] .notes-add-row .primary { margin-left: 0; margin-right: auto; }
+[dir="rtl"] .ws-item.active {
+  box-shadow: inset -2px 0 0 var(--w-accent);
+}
+[dir="rtl"] .settings-tab.active {
+  box-shadow: inset -2px 0 0 var(--w-accent);
+}
+[dir="rtl"] .sidebar { border-right: 0; border-left: 1px solid var(--w-border); }
+
+@keyframes feed-in-rtl {
+  from { transform: translateX(-8px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}

@@ -194,6 +194,21 @@ pub(crate) struct Updates {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub(crate) struct I18n {
+    pub language: String,
+    pub direction: String,
+}
+
+impl Default for I18n {
+    fn default() -> Self {
+        Self {
+            language: "en".into(),
+            direction: "auto".into(),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub(crate) struct Settings {
     pub version: u32,
     pub theme: Theme,
@@ -202,6 +217,10 @@ pub(crate) struct Settings {
     pub hooks: Hooks,
     pub notifications: Notifications,
     pub updates: Updates,
+    // Phase 12.A — defaults to en/auto. `#[serde(default)]` so older
+    // settings.json files load without the field.
+    #[serde(default)]
+    pub i18n: I18n,
 }
 
 impl Default for Theme {
@@ -291,6 +310,7 @@ impl Default for Settings {
             hooks: Hooks::default(),
             notifications: Notifications::default(),
             updates: Updates::default(),
+            i18n: I18n::default(),
         }
     }
 }

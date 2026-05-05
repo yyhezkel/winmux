@@ -3,6 +3,7 @@
 // this file is the typed mirror used by the frontend.
 
 import { invoke } from "@tauri-apps/api/core";
+import { setTerminalFont } from "./terminalInstance";
 
 export interface AnsiPalette {
   black: string;
@@ -42,6 +43,8 @@ export interface FontSettings {
   ui_size_pt: number;
   terminal_family: string;
   terminal_size_pt: number;
+  /** Stretch goal: load a web font sheet (e.g. Google Fonts) at runtime. */
+  web_font_url?: string | null;
 }
 
 export interface TerminalSettings {
@@ -160,6 +163,40 @@ export function applyTheme(s: Settings): void {
 
   r.setProperty("--w-font-ui", quoteFamily(s.font.ui_family));
   r.setProperty("--w-font-mono", quoteFamily(s.font.terminal_family));
+  // Phase 9.A live size apply. App.css now bases :root font-size on this
+  // var, and the --w-fs-* size vars are in em — so changing this single pt
+  // value rescales every UI element proportionally.
+  r.setProperty("--w-font-size-ui", `${s.font.ui_size_pt}pt`);
+  // Push terminal font + size into every live xterm instance. New panes
+  // opened later inherit the cached values via the constructor.
+  setTerminalFont(quoteFamily(s.font.terminal_family), s.font.terminal_size_pt);
+
+  // Phase font-bug-fix v2 (stretch): if a web font URL is configured,
+  // inject a single <link rel="stylesheet"> tag so that font becomes
+  // available by family name. Removing or changing the URL replaces the
+  // tag — we don't try to garbage-collect previously-loaded sheets.
+  const url = (s.font as any).web_font_url as string | undefined;
+  applyWebFont(url ?? "");
+}
+
+function applyWebFont(url: string): void {
+  const existing = document.getElementById("winmux-web-font") as
+    | HTMLLinkElement
+    | null;
+  const trimmed = (url || "").trim();
+  if (!trimmed) {
+    if (existing) existing.remove();
+    return;
+  }
+  // Don't reload the same URL.
+  if (existing && existing.href === trimmed) return;
+  if (existing) existing.remove();
+  const link = document.createElement("link");
+  link.id = "winmux-web-font";
+  link.rel = "stylesheet";
+  link.href = trimmed;
+  link.crossOrigin = "anonymous";
+  document.head.appendChild(link);
 }
 
 function quoteFamily(family: string): string {

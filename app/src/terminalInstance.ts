@@ -4,6 +4,40 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
 import { reorderRtlForDisplay } from "./bidi";
 
+// Phase 9.A live font apply: a global registry of all live terminals so a
+// settings change can walk every open pane and re-apply the new font. The
+// current values are also tracked so a freshly constructed terminal picks
+// up the user's choice rather than the hard-coded defaults below. 1pt ≈
+// 1.333px at 96dpi; xterm.js wants pixels.
+const PT_TO_PX = 1.3333;
+let g_fontFamily: string | null = null;
+let g_fontSizePx: number | null = null;
+const g_terminals: Set<TerminalInstance> = new Set();
+
+/**
+ * Push a new font family + size into every live xterm and remember the
+ * values so future TerminalInstance constructions inherit them. Family is
+ * passed through `quoteFamily()`-style fallbacks already by the caller.
+ * Called from App.tsx on settings load and on every settings:changed.
+ */
+export function setTerminalFont(family: string, sizePt: number): void {
+  const px = Math.max(8, Math.round(sizePt * PT_TO_PX));
+  g_fontFamily = family;
+  g_fontSizePx = px;
+  for (const ti of g_terminals) {
+    try {
+      ti.term.options.fontFamily = family;
+      ti.term.options.fontSize = px;
+      // Force a re-render + reflow. fit.fit() recomputes cols/rows for the
+      // new glyph metrics; refresh forces a redraw of all rows.
+      ti.fitAndResize();
+      ti.term.refresh(0, ti.term.rows - 1);
+    } catch (e) {
+      console.warn("setTerminalFont: per-instance update failed", e);
+    }
+  }
+}
+
 export class TerminalInstance {
   term: Terminal;
   fit: FitAddon;
@@ -37,8 +71,10 @@ export class TerminalInstance {
     // settings are a first attempt; if it still misbehaves the next step is
     // to verify TERM=xterm-256color is in the remote env.
     this.term = new Terminal({
-      fontFamily: '"Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace',
-      fontSize: 14,
+      fontFamily:
+        g_fontFamily ??
+        '"Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace',
+      fontSize: g_fontSizePx ?? 14,
       lineHeight: 1.15,
       cursorBlink: true,
       cursorStyle: "bar",
@@ -84,6 +120,7 @@ export class TerminalInstance {
 
     this.ro = new ResizeObserver(() => this.fitAndResize());
     this.ro.observe(this.container);
+    g_terminals.add(this);
   }
 
   attach(sessionId: string) {
@@ -133,6 +170,7 @@ export class TerminalInstance {
     this.ro?.disconnect();
     this.ro = null;
     this.detach();
+    g_terminals.delete(this);
     this.term.dispose();
     if (this.container.parentElement) {
       this.container.parentElement.removeChild(this.container);

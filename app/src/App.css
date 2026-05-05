@@ -25,12 +25,16 @@
   --w-error: #f7768e;
   --w-purple: #bb9af7;
 
-  /* type sizes */
-  --w-fs-xs: 10px;
-  --w-fs-sm: 11px;
-  --w-fs-md: 12px;
-  --w-fs-lg: 13px;
-  --w-fs-xl: 14px;
+  /* type sizes — expressed as em ratios off the root font-size, which is
+     in turn driven by the user's Settings → Font → UI size (--w-font-size-ui,
+     written by applyTheme()). Adjusting the slider rescales every UI text
+     element proportionally without touching individual rules. */
+  --w-fs-xs: 0.77em;
+  --w-fs-sm: 0.85em;
+  --w-fs-md: 0.92em;
+  --w-fs-lg: 1em;
+  --w-fs-xl: 1.08em;
+  --w-font-size-ui: 13pt;
 
   /* radii */
   --w-r-sm: 4px;
@@ -46,6 +50,10 @@
   font-family: var(--w-font-ui);
   font-feature-settings: "ss01", "cv11", "ss03";
   -webkit-font-smoothing: antialiased;
+}
+
+html {
+  font-size: var(--w-font-size-ui);
 }
 
 html,

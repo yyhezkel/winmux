@@ -158,6 +158,12 @@ pub(crate) struct Font {
     pub ui_size_pt: u32,
     pub terminal_family: String,
     pub terminal_size_pt: u32,
+    /// Stretch goal: optional URL to a CSS stylesheet (e.g. Google Fonts)
+    /// that the frontend injects via <link rel="stylesheet"> so the user
+    /// can pick a non-installed family and have it fetched at runtime.
+    /// Empty / None = no extra fonts loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_font_url: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -248,6 +254,7 @@ impl Default for Font {
             ui_size_pt: 13,
             terminal_family: "Cascadia Mono".into(),
             terminal_size_pt: 13,
+            web_font_url: None,
         }
     }
 }

@@ -222,26 +222,40 @@ export function SettingsModal(p: Props) {
               </Show>
 
               {/* ── Font ─────────────────────────────────────────────── */}
+              {/* Phase font-bug-fix: family is now <input list=""> + <datalist>
+                  so the user can pick from the detected list OR type any
+                  custom name (CSS will fall back if it's not installed —
+                  the "Web font URL" field below can fetch one at runtime). */}
               <Show when={tab() === "font"}>
                 <section>
                   <h4>UI font</h4>
                   <label>
                     <span>Family</span>
-                    <select
+                    <input
+                      type="text"
+                      list="winmux-ui-fonts"
+                      placeholder="system-ui or any installed font"
                       value={p.settings.font.ui_family}
                       onChange={(e) => update("font", { ...p.settings.font, ui_family: e.currentTarget.value })}
-                    >
-                      <For each={fonts().ui}>{(f) => <option value={f}>{f}</option>}</For>
-                    </select>
+                      onBlur={(e) => update("font", { ...p.settings.font, ui_family: e.currentTarget.value })}
+                    />
                   </label>
+                  <datalist id="winmux-ui-fonts">
+                    <For each={fonts().ui}>{(f) => <option value={f} />}</For>
+                  </datalist>
                   <label>
                     <span>Size (pt)</span>
                     <input
                       type="number"
-                      min="9"
-                      max="20"
+                      min="8"
+                      max="32"
                       value={p.settings.font.ui_size_pt}
-                      onChange={(e) => update("font", { ...p.settings.font, ui_size_pt: parseInt(e.currentTarget.value) || 13 })}
+                      onInput={(e) => {
+                        const n = parseInt(e.currentTarget.value);
+                        if (!Number.isNaN(n) && n >= 8 && n <= 32) {
+                          update("font", { ...p.settings.font, ui_size_pt: n });
+                        }
+                      }}
                     />
                   </label>
                 </section>
@@ -249,23 +263,51 @@ export function SettingsModal(p: Props) {
                   <h4>Terminal font</h4>
                   <label>
                     <span>Family</span>
-                    <select
+                    <input
+                      type="text"
+                      list="winmux-mono-fonts"
+                      placeholder="Cascadia Mono / JetBrains Mono / …"
                       value={p.settings.font.terminal_family}
                       onChange={(e) => update("font", { ...p.settings.font, terminal_family: e.currentTarget.value })}
-                    >
-                      <For each={fonts().mono}>{(f) => <option value={f}>{f}</option>}</For>
-                    </select>
+                      onBlur={(e) => update("font", { ...p.settings.font, terminal_family: e.currentTarget.value })}
+                    />
                   </label>
+                  <datalist id="winmux-mono-fonts">
+                    <For each={fonts().mono}>{(f) => <option value={f} />}</For>
+                  </datalist>
                   <label>
                     <span>Size (pt)</span>
                     <input
                       type="number"
-                      min="9"
-                      max="22"
+                      min="8"
+                      max="32"
                       value={p.settings.font.terminal_size_pt}
-                      onChange={(e) => update("font", { ...p.settings.font, terminal_size_pt: parseInt(e.currentTarget.value) || 13 })}
+                      onInput={(e) => {
+                        const n = parseInt(e.currentTarget.value);
+                        if (!Number.isNaN(n) && n >= 8 && n <= 32) {
+                          update("font", { ...p.settings.font, terminal_size_pt: n });
+                        }
+                      }}
                     />
                   </label>
+                </section>
+                <section>
+                  <h4>Web font (optional)</h4>
+                  <label>
+                    <span>Stylesheet URL</span>
+                    <input
+                      type="text"
+                      placeholder="https://fonts.googleapis.com/css2?family=Iosevka&display=swap"
+                      value={p.settings.font.web_font_url ?? ""}
+                      onChange={(e) =>
+                        update("font", { ...p.settings.font, web_font_url: e.currentTarget.value || null })
+                      }
+                    />
+                  </label>
+                  <p class="settings-hint">
+                    Pastes a CSS link tag at runtime. After it loads, type the
+                    family name in the fields above (e.g. <code>Iosevka</code>).
+                  </p>
                 </section>
               </Show>
 

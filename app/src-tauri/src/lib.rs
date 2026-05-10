@@ -1542,11 +1542,42 @@ async fn try_authenticate(
     }
 
     // 2) Explicit key file (with optional passphrase).
+    //
+    // SSH-key-load Windows fix: `russh_keys::load_secret_key` opens the file
+    // through its own internal helper that, on certain russh-keys versions,
+    // funnels the path through Win32 in a way that rejects perfectly valid
+    // Windows paths with `os error 123` (ERROR_INVALID_NAME) — even when the
+    // exact same path opens fine via `ssh -i`. Reproed by Yossi against
+    // C:\Users\…\claude_code_key1 while the sibling key claude_code_key
+    // worked. We sidestep the bug by reading the file with std::fs ourselves
+    // (which uses CreateFileW correctly) and handing the bytes to russh-keys'
+    // in-memory parser, `decode_secret_key`. dlog dumps the path bytes so a
+    // future "syntax incorrect" report tells us instantly whether the path
+    // contains a hidden char.
     if let Some(p) = key_path {
-        dlog(&format!("ssh.auth: step 2 — explicit key file {p}"));
-        match russh_keys::load_secret_key(p, key_passphrase) {
+        dlog(&format!(
+            "ssh.auth: step 2 — explicit key file {p:?} bytes={:?} len={}",
+            p.as_bytes(),
+            p.len()
+        ));
+        let key_text = match std::fs::read_to_string(p) {
+            Ok(t) => t,
+            Err(e) => {
+                let s = e.to_string();
+                dlog(&format!("ssh.auth: read {p} ERR: {s}"));
+                return Err(format!("load key {p}: {s}"));
+            }
+        };
+        dlog(&format!(
+            "ssh.auth: read {p} OK ({} bytes, head={:?})",
+            key_text.len(),
+            key_text.lines().next().unwrap_or("")
+        ));
+        match russh_keys::decode_secret_key(&key_text, key_passphrase) {
             Ok(key) => {
-                dlog(&format!("ssh.auth: key {p} loaded — attempting authenticate_publickey"));
+                dlog(&format!(
+                    "ssh.auth: key {p} decoded — attempting authenticate_publickey"
+                ));
                 let pkwh = pkwh(key)?;
                 let r = handle
                     .authenticate_publickey(user, pkwh)
@@ -1559,7 +1590,7 @@ async fn try_authenticate(
             }
             Err(e) => {
                 let s = e.to_string();
-                dlog(&format!("ssh.auth: load_secret_key {p} ERR: {s}"));
+                dlog(&format!("ssh.auth: decode_secret_key {p} ERR: {s}"));
                 if key_load_needs_passphrase(&s) {
                     if key_passphrase.is_none() {
                         return Err(format!("KEY_PASSPHRASE_REQUIRED:{}", p));
@@ -1582,7 +1613,15 @@ async fn try_authenticate(
             continue;
         }
         dlog(&format!("ssh.auth: step 3 trying {p}"));
-        if let Ok(key) = russh_keys::load_secret_key(&p, None) {
+        // Same Windows path workaround as step 2 — read with std::fs first.
+        let text = match std::fs::read_to_string(&p) {
+            Ok(t) => t,
+            Err(e) => {
+                dlog(&format!("ssh.auth: step 3 read {p} skip: {e}"));
+                continue;
+            }
+        };
+        if let Ok(key) = russh_keys::decode_secret_key(&text, None) {
             if let Ok(pkwh) = pkwh(key) {
                 let r = handle
                     .authenticate_publickey(user, pkwh)

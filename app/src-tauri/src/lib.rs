@@ -1,3 +1,4 @@
+mod connect_wizard;
 mod dev;
 mod notes;
 mod remote_bootstrap;
@@ -1406,6 +1407,12 @@ fn key_load_needs_passphrase(err: &str) -> bool {
         || s.contains("pem")
         || s.contains("kdf")
         || s.contains("decrypt")
+}
+
+/// Public re-export of `pkwh` for the connect-wizard `test_ssh_connect`
+/// path so it can share the same RSA hash-alg logic without duplicating it.
+pub(crate) fn pkwh_pub(key: PrivateKey) -> Result<PrivateKeyWithHashAlg, String> {
+    pkwh(key)
 }
 
 /// Wraps a `PrivateKey` for authentication. RSA keys get SHA-512; everything else uses None.
@@ -3806,6 +3813,11 @@ pub fn run() {
             settings::settings_reset,
             settings::list_system_fonts,
             updater::check_for_updates_now,
+            connect_wizard::parse_ssh_config,
+            connect_wizard::list_ssh_keys,
+            connect_wizard::check_key_permissions,
+            connect_wizard::fix_key_permissions,
+            connect_wizard::test_ssh_connect,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

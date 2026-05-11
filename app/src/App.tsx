@@ -268,7 +268,7 @@ function App() {
   const splitPane = async (
     paneId: string,
     direction: SplitDirection,
-    kind: "terminal" | "browser" = "terminal",
+    kind: "terminal" | "browser" | "filemanager" = "terminal",
     browserUrl?: string
   ) => {
     const ws = activeWs();
@@ -807,6 +807,16 @@ function App() {
                 }}
               >
                 🌐 + browser
+              </button>
+              <button
+                class="ws-header-btn"
+                title="Split into file manager pane (local + SFTP)"
+                onClick={() => {
+                  const pid = activePaneId();
+                  if (pid) splitPane(pid, "horizontal", "filemanager");
+                }}
+              >
+                🗂 + files
               </button>
             </Show>
           </div>

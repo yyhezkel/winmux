@@ -11,6 +11,7 @@ function workspaceBadge(w: Workspace): { label: string; cls: string; title: stri
   if (panes.length > 1) return { label: `${panes.length}`, cls: "split", title: `${panes.length} panes` };
   const first = findPane(w.layout, panes[0]);
   if (first?.pane_kind === "browser") return { label: "B", cls: "browser", title: "Browser" };
+  if (first?.pane_kind === "filemanager") return { label: "F", cls: "filemanager", title: "File manager" };
   if (first?.connection?.type === "ssh") return { label: "S", cls: "ssh", title: "SSH" };
   return { label: "L", cls: "local", title: "Local" };
 }

@@ -1,5 +1,6 @@
 mod connect_wizard;
 mod dev;
+mod file_manager;
 mod notes;
 mod provisioning;
 mod remote_bootstrap;
@@ -223,6 +224,13 @@ pub(crate) enum PaneKind {
     #[default]
     Terminal,
     Browser,
+    /// Phase 15.B: dual-column file manager (local + remote SFTP).
+    /// The pane itself carries no remote state — it picks up the
+    /// workspace's SSH session at runtime, so a file-manager pane in
+    /// an SSH workspace lights up the right column only after a
+    /// terminal pane in that workspace has authenticated.
+    #[serde(rename = "filemanager", alias = "file_manager", alias = "FileManager")]
+    FileManager,
 }
 
 fn is_terminal_kind(k: &PaneKind) -> bool {
@@ -694,6 +702,13 @@ pub(crate) fn split_pane_in(
                             last_loaded_url: None,
                         };
                         (PaneKind::Browser, None, Some(bs))
+                    }
+                    PaneKind::FileManager => {
+                        // File-manager panes carry no per-pane state in
+                        // workspaces.json — local cwd / show_hidden live in
+                        // frontend signals; the right column uses whatever
+                        // SSH session the workspace currently has.
+                        (PaneKind::FileManager, None, None)
                     }
                 };
                 let new_pane = LayoutNode::Pane {
@@ -3846,6 +3861,18 @@ pub fn run() {
             provisioning::provisioning_profile_save,
             provisioning::provisioning_profile_delete,
             provisioning::provisioning_step_catalog,
+            file_manager::file_list_local,
+            file_manager::file_list_remote,
+            file_manager::file_home_local,
+            file_manager::file_home_remote,
+            file_manager::file_delete_local,
+            file_manager::file_delete_remote,
+            file_manager::file_rename_local,
+            file_manager::file_rename_remote,
+            file_manager::file_mkdir_local,
+            file_manager::file_mkdir_remote,
+            file_manager::file_upload,
+            file_manager::file_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

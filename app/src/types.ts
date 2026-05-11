@@ -5,7 +5,7 @@ export type Connection =
 export type SplitDirection = "horizontal" | "vertical";
 
 // Phase 8.A: pane kind. Default = terminal for legacy panes (server omits the field).
-export type PaneKind = "terminal" | "browser";
+export type PaneKind = "terminal" | "browser" | "filemanager";
 
 export type BrowserState = {
   url: string;

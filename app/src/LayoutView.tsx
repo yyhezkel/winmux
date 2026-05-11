@@ -1,6 +1,7 @@
-import { Show } from "solid-js";
+import { Match, Show, Switch } from "solid-js";
 import { Divider } from "./Divider";
 import { BrowserPane } from "./BrowserPane";
+import { FileManagerPane } from "./FileManagerPane";
 import {
   PaneView,
   type ConnectOpts,
@@ -62,9 +63,17 @@ export function LayoutView(p: Props) {
 // As a stable component, Solid reuses the same instance across re-renders.
 function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" }> }) {
   const isActive = () => props.all.activePaneId === props.pane.pane_id;
+  const kind = () => paneKindOf(props.pane);
+  // Phase 15.B: detect whether the workspace has any SSH-capable pane so
+  // the file manager can decide whether to show the remote column. We
+  // can't ask the backend cheaply here, so fall back to looking at the
+  // pane's own connection (when present) — good enough for the MVP
+  // since a file-manager pane in a workspace generally co-exists with
+  // a terminal pane that has the connection metadata.
+  const workspaceIsSsh = () =>
+    props.pane.connection?.type === "ssh";
   return (
-    <Show
-      when={paneKindOf(props.pane) === "browser"}
+    <Switch
       fallback={
         <PaneView
           workspaceId={props.all.workspaceId}
@@ -89,23 +98,54 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
         />
       }
     >
-      <BrowserPane
-        workspaceId={props.all.workspaceId}
-        pane={props.pane}
-        isActive={isActive()}
-        onFocus={props.all.onFocus}
-        onSplit={props.all.onSplit}
-        onClose={props.all.onClose}
-        onNavigate={props.all.onBrowserNavigate}
-        onGoBack={props.all.onBrowserGoBack}
-        onGoHome={props.all.onBrowserGoHome}
-        onSetForward={props.all.onBrowserSetForward}
-        onSetTitle={props.all.onSetTitle}
-        onSetAnnotation={props.all.onSetAnnotation}
-      />
-    </Show>
+      <Match when={kind() === "browser"}>
+        <BrowserPane
+          workspaceId={props.all.workspaceId}
+          pane={props.pane}
+          isActive={isActive()}
+          onFocus={props.all.onFocus}
+          onSplit={props.all.onSplit}
+          onClose={props.all.onClose}
+          onNavigate={props.all.onBrowserNavigate}
+          onGoBack={props.all.onBrowserGoBack}
+          onGoHome={props.all.onBrowserGoHome}
+          onSetForward={props.all.onBrowserSetForward}
+          onSetTitle={props.all.onSetTitle}
+          onSetAnnotation={props.all.onSetAnnotation}
+        />
+      </Match>
+      <Match when={kind() === "filemanager"}>
+        <div
+          class={`pane ${isActive() ? "active" : ""}`}
+          onClick={() => props.all.onFocus(props.pane.pane_id)}
+        >
+          <div class="pane-header">
+            <span class="pane-conn">🗂 file manager</span>
+            <button
+              class="pane-btn pane-close"
+              title="Close"
+              onClick={(e) => {
+                e.stopPropagation();
+                props.all.onClose(props.pane.pane_id);
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div class="pane-body">
+            <FileManagerPane
+              workspaceId={props.all.workspaceId}
+              hasSsh={workspaceIsSsh() || props.all.connectedPaneIds.size > 0}
+            />
+          </div>
+        </div>
+      </Match>
+    </Switch>
   );
 }
+
+// Keep Show imported so older usages elsewhere keep working.
+void Show;
 
 function SplitView(
   s: Extract<LayoutNode, { kind: "split" }> & { all: Props }

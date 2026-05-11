@@ -348,19 +348,41 @@ export function SettingsModal(p: Props) {
                   <label class="settings-checkbox">
                     <input
                       type="checkbox"
-                      checked={p.settings.terminal.bidi_enabled}
-                      onChange={(e) => update("terminal", { ...p.settings.terminal, bidi_enabled: e.currentTarget.checked })}
-                    />
-                    <span>BiDi (Hebrew/Arabic) reorder</span>
-                  </label>
-                  <label class="settings-checkbox">
-                    <input
-                      type="checkbox"
                       checked={p.settings.terminal.allow_proposed_api}
                       onChange={(e) => update("terminal", { ...p.settings.terminal, allow_proposed_api: e.currentTarget.checked })}
                     />
                     <span>Allow xterm.js proposed API (needed for WebGL)</span>
                   </label>
+                </section>
+                <section>
+                  <h4>Hebrew / Arabic (RTL)</h4>
+                  <p class="settings-hint" style="margin-top:0">
+                    How to display lines that contain right-to-left text.
+                    Switching the mode affects newly-opened panes
+                    immediately; existing panes update the write
+                    pipeline live but keep their original renderer.
+                  </p>
+                  <For each={[
+                    ["auto_per_line", "Per-line auto (Termius-style)", "DOM renderer; each line gets dir=\"auto\" and the browser picks direction by the first strong character. Best default for SSH prompts that occasionally print Hebrew."],
+                    ["bidi_reorder", "Full BiDi reorder (legacy)", "WebGL renderer + bidi-js logical→visual reorder. Faster paint, but rewrites the byte stream — editable lines may surprise."],
+                    ["off", "Off", "WebGL renderer, no reorder. Hebrew bytes render left-to-right as written."],
+                  ] as const}>
+                    {([id, label, desc]) => (
+                      <label class="settings-radio" style="grid-template-columns: none !important; display: flex !important; align-items: flex-start; gap: 8px;">
+                        <input
+                          type="radio"
+                          name="rtl-mode"
+                          value={id}
+                          checked={(p.settings.terminal.rtl_mode ?? "auto_per_line") === id}
+                          onChange={() => update("terminal", { ...p.settings.terminal, rtl_mode: id })}
+                        />
+                        <span style="flex:1">
+                          <strong>{label}</strong>
+                          <div style="color: var(--w-text-dim); font-size: var(--w-fs-sm); margin-top: 2px;">{desc}</div>
+                        </span>
+                      </label>
+                    )}
+                  </For>
                 </section>
               </Show>
 

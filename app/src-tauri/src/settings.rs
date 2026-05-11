@@ -172,6 +172,18 @@ pub(crate) struct TerminalSettings {
     pub scrollback_lines: u32,
     pub bidi_enabled: bool,
     pub allow_proposed_api: bool,
+    /// Phase 15.A: how to handle Hebrew / Arabic in the terminal.
+    /// One of "auto_per_line" (default, Termius-style — DOM renderer
+    /// + dir="auto" on every row), "bidi_reorder" (legacy v1, WebGL +
+    /// bidi-js logical→visual reorder), or "off" (WebGL, no reorder).
+    /// New panes pick up the renderer immediately; live mode swaps
+    /// affect the reorder pipeline on currently-open panes.
+    #[serde(default = "default_rtl_mode")]
+    pub rtl_mode: String,
+}
+
+fn default_rtl_mode() -> String {
+    "auto_per_line".to_string()
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -266,6 +278,7 @@ impl Default for TerminalSettings {
             scrollback_lines: 10000,
             bidi_enabled: true,
             allow_proposed_api: true,
+            rtl_mode: default_rtl_mode(),
         }
     }
 }

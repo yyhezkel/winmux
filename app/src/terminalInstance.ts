@@ -4,21 +4,41 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
 import { reorderRtlForDisplay } from "./bidi";
 
-// Phase 9.A live font apply: a global registry of all live terminals so a
-// settings change can walk every open pane and re-apply the new font. The
-// current values are also tracked so a freshly constructed terminal picks
-// up the user's choice rather than the hard-coded defaults below. 1pt ≈
-// 1.333px at 96dpi; xterm.js wants pixels.
+// Phase 9.A live font apply + Phase 15.A per-line auto-direction.
+//
+// A global registry of all live terminals lets a settings change walk
+// every open pane and re-apply the new font / RTL mode. The current
+// values are also tracked so a freshly constructed terminal picks up
+// the user's choice rather than the hard-coded defaults below.
+//
+// `rtl_mode` selects how mixed Hebrew / Arabic text is displayed:
+//   - "auto_per_line" (default in 15.A): no logical-order reorder; the
+//     terminal uses the DOM renderer and each row div gets `dir="auto"`
+//     so the browser decides direction per line — first strong
+//     directional character wins, exactly like Termius. Mirrors what
+//     most users expect for an SSH prompt that prints Hebrew.
+//   - "bidi_reorder" (legacy v1 behavior): WebGL renderer + bidi-js
+//     reorder bytes into visual order before writing. Faster, but
+//     surprises users who expect editable lines to remain in logical
+//     order, and breaks on selection / copy.
+//   - "off": WebGL renderer, no reorder. Hebrew prints
+//     logical-order-as-written, which most monospace fonts show
+//     left-to-right.
+//
+// 1pt ≈ 1.333px at 96dpi; xterm.js wants pixels.
 const PT_TO_PX = 1.3333;
+export type RtlMode = "auto_per_line" | "bidi_reorder" | "off";
 let g_fontFamily: string | null = null;
 let g_fontSizePx: number | null = null;
+let g_rtlMode: RtlMode = "auto_per_line";
 const g_terminals: Set<TerminalInstance> = new Set();
 
 /**
  * Push a new font family + size into every live xterm and remember the
- * values so future TerminalInstance constructions inherit them. Family is
- * passed through `quoteFamily()`-style fallbacks already by the caller.
- * Called from App.tsx on settings load and on every settings:changed.
+ * values so future TerminalInstance constructions inherit them. Family
+ * is passed through `quoteFamily()`-style fallbacks already by the
+ * caller. Called from App.tsx on settings load and on every
+ * `settings:changed`.
  */
 export function setTerminalFont(family: string, sizePt: number): void {
   const px = Math.max(8, Math.round(sizePt * PT_TO_PX));
@@ -28,8 +48,6 @@ export function setTerminalFont(family: string, sizePt: number): void {
     try {
       ti.term.options.fontFamily = family;
       ti.term.options.fontSize = px;
-      // Force a re-render + reflow. fit.fit() recomputes cols/rows for the
-      // new glyph metrics; refresh forces a redraw of all rows.
       ti.fitAndResize();
       ti.term.refresh(0, ti.term.rows - 1);
     } catch (e) {
@@ -38,38 +56,49 @@ export function setTerminalFont(family: string, sizePt: number): void {
   }
 }
 
+/**
+ * Phase 15.A: switch the RTL handling strategy. Existing terminals
+ * keep their previously-constructed renderer (DOM vs WebGL changes
+ * require a fresh xterm), so this only affects newly-opened panes —
+ * we surface a hint in the Settings UI so the user knows to re-open
+ * affected panes. The reorder pipeline (writeData) flips immediately
+ * for all current panes.
+ */
+export function setRtlMode(mode: RtlMode): void {
+  g_rtlMode = mode;
+  // For panes already in auto-per-line mode, ensure the dir="auto"
+  // observer is running. For panes constructed before the switch, this
+  // is a no-op if their renderer doesn't match — they'll pick the new
+  // strategy on next construction.
+  for (const ti of g_terminals) {
+    ti.ensureDirObserver();
+  }
+}
+
+export function getRtlMode(): RtlMode {
+  return g_rtlMode;
+}
+
 export class TerminalInstance {
   term: Terminal;
   fit: FitAddon;
   container: HTMLDivElement;
   sessionId: string | null = null;
   paneId: string;
+  /** The RTL mode active when this terminal was constructed. Changing
+   * settings later only affects the data-write pipeline (and the
+   * per-row dir attribute observer); the renderer choice is sticky. */
+  rtlModeAtConstruct: RtlMode;
   private dataDisposable: IDisposable | null = null;
   private ro: ResizeObserver | null = null;
+  private dirObserver: MutationObserver | null = null;
 
   constructor(paneId: string) {
     this.paneId = paneId;
+    this.rtlModeAtConstruct = g_rtlMode;
     this.container = document.createElement("div");
     this.container.className = "terminal-container";
 
-    // Polish: tightened theme to match the new app palette + a couple of
-    // xterm config tweaks aimed at full-screen TUIs (Claude Code's
-    // slash-command popup, fzf, etc.) rendering correctly:
-    //   - `allowProposedApi`     keep enabled (WebGL addon needs it)
-    //   - `windowsPty.backend=conpty`  hints xterm to handle the extra clear-line
-    //                            sequences ConPTY emits on local panes; harmless
-    //                            for SSH panes since the remote backend is also
-    //                            invariant under it
-    //   - `cursorStyle: "bar"`   matches what modern interactive UIs expect;
-    //                            block cursors can occlude TUI menu glyphs
-    //   - `scrollOnUserInput: true` (default) — included for clarity
-    //   - `windowOptions: { setWinSizeChars: true }` — let TUIs request
-    //     reflow when their popup needs a different geometry
-    // Known issue (tracked): Claude Code's slash-command dropdown does not
-    // always render correctly inside winmux. Suspected interplay between
-    // ConPTY's narrow line-clear behavior and INK's diff renderer. These
-    // settings are a first attempt; if it still misbehaves the next step is
-    // to verify TERM=xterm-256color is in the remote env.
     this.term = new Terminal({
       fontFamily:
         g_fontFamily ??
@@ -112,15 +141,62 @@ export class TerminalInstance {
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
     this.term.open(this.container);
-    try {
-      this.term.loadAddon(new WebglAddon());
-    } catch (e) {
-      console.warn("WebGL addon unavailable", e);
+
+    // Phase 15.A: only load the WebGL addon for the non-auto modes.
+    // `auto_per_line` needs the DOM renderer so we can attach
+    // dir="auto" per row. WebGL paints to a canvas and has no per-cell
+    // DOM, so the browser BiDi engine has nothing to hook into.
+    if (this.rtlModeAtConstruct !== "auto_per_line") {
+      try {
+        this.term.loadAddon(new WebglAddon());
+      } catch (e) {
+        console.warn("WebGL addon unavailable", e);
+      }
     }
 
     this.ro = new ResizeObserver(() => this.fitAndResize());
     this.ro.observe(this.container);
     g_terminals.add(this);
+
+    this.ensureDirObserver();
+  }
+
+  /**
+   * Attach `dir="auto"` to every row div under `.xterm-rows`, both the
+   * ones present now and any that appear later. xterm.js's DOM
+   * renderer recycles its row divs as the buffer scrolls, so we use a
+   * MutationObserver to keep up. This is what gives us Termius-style
+   * "first strong directional char wins per line".
+   */
+  ensureDirObserver(): void {
+    // Only relevant in auto-per-line mode AND when we built with the
+    // DOM renderer. In any other mode, drop any existing observer.
+    if (this.rtlModeAtConstruct !== "auto_per_line") {
+      if (this.dirObserver) {
+        this.dirObserver.disconnect();
+        this.dirObserver = null;
+      }
+      return;
+    }
+    if (this.dirObserver) return;
+
+    const rowsHost = this.container.querySelector(".xterm-rows") as HTMLElement | null;
+    if (!rowsHost) {
+      // Renderer not mounted yet — retry on the next animation frame.
+      requestAnimationFrame(() => this.ensureDirObserver());
+      return;
+    }
+    rowsHost.setAttribute("dir", "auto");
+    const apply = () => {
+      for (const child of Array.from(rowsHost.children)) {
+        const el = child as HTMLElement;
+        if (el.getAttribute("dir") !== "auto") el.setAttribute("dir", "auto");
+      }
+    };
+    apply();
+    const obs = new MutationObserver(apply);
+    obs.observe(rowsHost, { childList: true, subtree: false });
+    this.dirObserver = obs;
   }
 
   attach(sessionId: string) {
@@ -155,7 +231,14 @@ export class TerminalInstance {
   }
 
   writeData(data: string) {
-    this.term.write(reorderRtlForDisplay(data));
+    // The reorder pipeline keys off the LIVE rtl mode (g_rtlMode), so
+    // a settings change takes effect on the very next write — no
+    // need to wait for a new pane.
+    if (g_rtlMode === "bidi_reorder") {
+      this.term.write(reorderRtlForDisplay(data));
+    } else {
+      this.term.write(data);
+    }
   }
 
   notice(msg: string) {
@@ -169,6 +252,8 @@ export class TerminalInstance {
   dispose() {
     this.ro?.disconnect();
     this.ro = null;
+    this.dirObserver?.disconnect();
+    this.dirObserver = null;
     this.detach();
     g_terminals.delete(this);
     this.term.dispose();

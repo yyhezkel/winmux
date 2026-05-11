@@ -3,7 +3,7 @@
 // this file is the typed mirror used by the frontend.
 
 import { invoke } from "@tauri-apps/api/core";
-import { setTerminalFont } from "./terminalInstance";
+import { setTerminalFont, setRtlMode, type RtlMode } from "./terminalInstance";
 
 export interface AnsiPalette {
   black: string;
@@ -52,6 +52,8 @@ export interface TerminalSettings {
   scrollback_lines: number;
   bidi_enabled: boolean;
   allow_proposed_api: boolean;
+  /** Phase 15.A: how to render Hebrew / Arabic. */
+  rtl_mode?: "auto_per_line" | "bidi_reorder" | "off";
 }
 
 export interface HooksSettings {
@@ -170,6 +172,11 @@ export function applyTheme(s: Settings): void {
   // Push terminal font + size into every live xterm instance. New panes
   // opened later inherit the cached values via the constructor.
   setTerminalFont(quoteFamily(s.font.terminal_family), s.font.terminal_size_pt);
+  // Phase 15.A: push the RTL mode. The write pipeline flips immediately
+  // on every live pane; the renderer choice (DOM vs WebGL) is sticky
+  // per pane and only affects newly-opened terminals.
+  const mode = (s.terminal.rtl_mode ?? "auto_per_line") as RtlMode;
+  setRtlMode(mode);
 
   // Phase font-bug-fix v2 (stretch): if a web font URL is configured,
   // inject a single <link rel="stylesheet"> tag so that font becomes

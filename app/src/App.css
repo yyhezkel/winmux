@@ -1591,6 +1591,137 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   font-size: var(--w-fs-sm);
 }
 
+/* ─── Phase 14.A: provisioning wizard ─── */
+
+.ws-provision {
+  margin: 8px 8px 0 8px;
+  background: rgba(122, 162, 247, 0.08);
+  color: var(--w-accent);
+  border: 1px solid var(--w-border-hi);
+  border-radius: var(--w-r-sm);
+  padding: 7px;
+  font-size: var(--w-fs-md);
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
+  font-family: inherit;
+}
+.ws-provision:hover {
+  background: rgba(122, 162, 247, 0.18);
+  border-color: var(--w-accent);
+  color: var(--w-text);
+}
+
+.provisioning-modal {
+  width: 720px;
+  max-width: 92vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.provisioning-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--w-border);
+}
+.provisioning-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  flex: 1;
+}
+.provisioning-step-indicator {
+  color: var(--w-text-dim);
+  font-family: var(--w-font-mono);
+  font-size: var(--w-fs-sm);
+  letter-spacing: 0.4px;
+}
+.provisioning-body {
+  padding: 18px 22px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.provisioning-h4 {
+  margin: 10px 0 4px 0;
+  font-size: var(--w-fs-md);
+  font-weight: 600;
+  color: var(--w-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.provisioning-steps {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  background: var(--w-bg);
+  border: 1px solid var(--w-border);
+  border-radius: var(--w-r-md);
+  padding: 10px 12px;
+}
+.provisioning-step-row {
+  display: flex !important;
+  gap: 8px !important;
+  align-items: center;
+  margin: 0 !important;
+  grid-template-columns: none !important;
+}
+.provisioning-step-row span { color: var(--w-text); }
+
+.provisioning-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+.provisioning-step-card {
+  border: 1px solid var(--w-border);
+  border-radius: var(--w-r-md);
+  background: var(--w-bg);
+  padding: 9px 12px;
+}
+.provisioning-step-card.state-running { border-color: var(--w-accent); }
+.provisioning-step-card.state-ok      { border-color: rgba(78, 201, 176, 0.4); }
+.provisioning-step-card.state-err     { border-color: rgba(247, 118, 142, 0.5); background: rgba(247, 118, 142, 0.06); }
+.provisioning-step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--w-fs-md);
+}
+.provisioning-step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-weight: 700;
+  color: var(--w-bg);
+}
+.provisioning-step-icon.pending  { background: var(--w-border-hi); color: var(--w-text-dim); }
+.provisioning-step-icon.running  { background: var(--w-accent); animation: pulse-live 1.4s ease-in-out infinite; }
+.provisioning-step-icon.ok       { background: var(--w-success); }
+.provisioning-step-icon.err      { background: var(--w-error); }
+.provisioning-step-label { font-weight: 500; flex: 1; }
+.provisioning-step-log {
+  margin: 6px 0 0 30px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--w-text-dim);
+  padding: 8px 10px;
+  border-radius: var(--w-r-sm);
+  font-family: var(--w-font-mono);
+  font-size: var(--w-fs-xs);
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
 /* ─── Phase 13.A: smart connect wizard ─── */
 
 .wizard-row {

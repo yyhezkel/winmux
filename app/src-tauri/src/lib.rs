@@ -1,6 +1,7 @@
 mod connect_wizard;
 mod dev;
 mod notes;
+mod provisioning;
 mod remote_bootstrap;
 mod rpc_server;
 mod settings;
@@ -1307,6 +1308,27 @@ pub(crate) struct SshClient {
     /// If set, the handler accepts forwarded-tcpip channels and bridges them to the
     /// local Named Pipe RPC server after validating this token on the first line.
     tunnel_token: Option<Arc<String>>,
+}
+
+impl SshClient {
+    /// Construct a tolerant client for one-shot operations (the connect
+    /// wizard test, provisioning steps). Accepts any server key,
+    /// doesn't touch known_hosts, no tunnel token. The host-check
+    /// outcome is captured but never persisted.
+    pub(crate) fn new_anonymous(target: String) -> Self {
+        Self {
+            target,
+            accept_unknown: true,
+            result: Arc::new(Mutex::new(HostCheckOutcome {
+                fingerprint: String::new(),
+                key_type: String::new(),
+                matched: true,
+                is_unknown: false,
+                mismatch_old: None,
+            })),
+            tunnel_token: None,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -3818,6 +3840,12 @@ pub fn run() {
             connect_wizard::check_key_permissions,
             connect_wizard::fix_key_permissions,
             connect_wizard::test_ssh_connect,
+            provisioning::provisioning_inspect,
+            provisioning::provisioning_start,
+            provisioning::provisioning_profiles_list,
+            provisioning::provisioning_profile_save,
+            provisioning::provisioning_profile_delete,
+            provisioning::provisioning_step_catalog,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

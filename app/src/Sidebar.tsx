@@ -21,6 +21,8 @@ interface Props {
   connectedIds: Set<string>;
   onActivate: (id: string) => void;
   onCreate: () => void;
+  /** Phase 14.A — open the server provisioning wizard. */
+  onProvision: () => void;
   onAction: (id: string, action: "rename" | "edit" | "delete" | "disconnect") => void;
 }
 
@@ -121,6 +123,9 @@ export function Sidebar(p: Props) {
           )}
         </For>
       </div>
+      <button class="ws-provision" onClick={p.onProvision} title="Bootstrap a fresh server with users, keys, and tools">
+        ☁ Provision server
+      </button>
       <button class="ws-add" onClick={p.onCreate}>
         {t("sidebar.new_workspace")}
       </button>

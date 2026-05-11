@@ -6,6 +6,7 @@ import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { LayoutView } from "./LayoutView";
 import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
+import { ProvisioningWizard } from "./ProvisioningWizard";
 import { SettingsModal } from "./SettingsModal";
 import { TerminalInstance } from "./terminalInstance";
 import {
@@ -70,6 +71,8 @@ function App() {
   const [settings, setSettings] = createSignal<Settings | null>(null);
   const [showSettings, setShowSettings] = createSignal(false);
   const [updateBanner, setUpdateBanner] = createSignal<UpdateInfo | null>(null);
+  // Phase 14.A: server provisioning wizard.
+  const [showProvision, setShowProvision] = createSignal(false);
   // Phase 11.A: per-pane tmux persistence map { pane_id → session_name }.
   const [panePersistence, setPanePersistence] = createSignal<Record<string, string>>({});
   const refreshPersistence = async () => {
@@ -737,6 +740,7 @@ function App() {
           connectedIds={liveWorkspaceIds()}
           onActivate={handleSetActive}
           onCreate={() => setShowCreate(true)}
+          onProvision={() => setShowProvision(true)}
           onAction={(id, action) => {
             if (action === "rename") handleRename(id);
             else if (action === "edit") {
@@ -920,6 +924,11 @@ function App() {
       >
         ⚙
       </button>
+
+      <ProvisioningWizard
+        open={showProvision()}
+        onClose={() => setShowProvision(false)}
+      />
 
       <Show when={settings()}>
         <SettingsModal

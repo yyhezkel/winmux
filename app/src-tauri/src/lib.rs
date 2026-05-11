@@ -1576,13 +1576,13 @@ async fn try_authenticate(
     // through its own internal helper that, on certain russh-keys versions,
     // funnels the path through Win32 in a way that rejects perfectly valid
     // Windows paths with `os error 123` (ERROR_INVALID_NAME) — even when the
-    // exact same path opens fine via `ssh -i`. Reproed by Yossi against
-    // C:\Users\…\claude_code_key1 while the sibling key claude_code_key
-    // worked. We sidestep the bug by reading the file with std::fs ourselves
-    // (which uses CreateFileW correctly) and handing the bytes to russh-keys'
-    // in-memory parser, `decode_secret_key`. dlog dumps the path bytes so a
-    // future "syntax incorrect" report tells us instantly whether the path
-    // contains a hidden char.
+    // exact same path opens fine via `ssh -i`. Reproed against a real Windows
+    // OpenSSH key file in `%USERPROFILE%\.ssh\` where the same path string
+    // worked under `ssh -i` but failed here. We sidestep the bug by reading
+    // the file with std::fs ourselves (which uses CreateFileW correctly) and
+    // handing the bytes to russh-keys' in-memory parser, `decode_secret_key`.
+    // dlog dumps the path bytes so a future "syntax incorrect" report tells
+    // us instantly whether the path contains a hidden char.
     if let Some(p) = key_path {
         dlog(&format!(
             "ssh.auth: step 2 — explicit key file {p:?} bytes={:?} len={}",

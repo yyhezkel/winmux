@@ -101,7 +101,7 @@ saves the migrated file back. The legacy `connection` field is then `None`
           "pane_id": "p_aaa",
           "connection": {
             "type": "ssh",
-            "host": "161.97.93.172",
+            "host": "203.0.113.5",
             "user": "runner",
             "port": 22,
             "key_path": "C:\\Users\\me\\.ssh\\runner_key"
@@ -112,7 +112,7 @@ saves the migrated file back. The legacy `connection` field is then `None`
           "pane_id": "p_bbb",
           "connection": {
             "type": "ssh",
-            "host": "161.97.93.172",
+            "host": "203.0.113.5",
             "user": "runner",
             "port": 22
           }

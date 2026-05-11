@@ -3,3 +3,9 @@ linker = "rust-lld"
 
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"
+
+# Pre-public hardening: scrub absolute paths from embedded panic strings.
+# Cargo's config.toml does NOT reliably expand env vars across all
+# rustc versions, so we set RUSTFLAGS at build invocation time in
+# `scripts/build-linux-cli.ps1` instead. This file only carries the
+# linker config now.

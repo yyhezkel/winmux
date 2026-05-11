@@ -13,6 +13,21 @@ $resourcesDir = Join-Path $tauriDir "resources"
 $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
 
+# Pre-public hardening: scrub absolute developer paths (incl. Windows
+# username) from compiled-in strings. `file!()` macros and panic
+# locations in dependencies bake the build machine's $CARGO_HOME +
+# $RUSTUP_HOME into .rodata; `strip = "symbols"` cannot remove them.
+# We force every release build through this script to apply consistent
+# --remap-path-prefix flags so the resulting binary is byte-identical
+# regardless of who built it.
+$cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+$rustupHome = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE ".rustup" }
+$cargoHomeFwd = $cargoHome -replace "\\", "/"
+$rustupHomeFwd = $rustupHome -replace "\\", "/"
+$userHomeFwd = $env:USERPROFILE -replace "\\", "/"
+$env:RUSTFLAGS = "--remap-path-prefix=$cargoHome=cargo --remap-path-prefix=$cargoHomeFwd=cargo --remap-path-prefix=$rustupHome=rustup --remap-path-prefix=$rustupHomeFwd=rustup --remap-path-prefix=$env:USERPROFILE=user --remap-path-prefix=$userHomeFwd=user"
+Write-Host "RUSTFLAGS scrub: \$CARGO_HOME=$cargoHome \$RUSTUP_HOME=$rustupHome \$HOME=$env:USERPROFILE"
+
 # Ensure target installed.
 $targets = & rustup target list --installed
 if (-not ($targets -contains "x86_64-unknown-linux-musl")) {

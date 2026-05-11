@@ -2,6 +2,14 @@
 members = [".", "cli", "mcp"]
 resolver = "2"
 
+# Pre-public hardening: strip symbols from release builds. The
+# `--remap-path-prefix` rustflags in `.cargo/config.toml` scrub the
+# developer's $HOME from any embedded panic-location strings — those
+# come from `file!()` macros in the dependency tree and are NOT debug
+# symbols, so `strip` alone doesn't cover them.
+[profile.release]
+strip = "symbols"
+
 [package]
 name = "app"
 version = "0.1.0"

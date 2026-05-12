@@ -1,162 +1,263 @@
+<div align="center">
+
+<img src="docs/assets/logo.svg" width="120" alt="winmux logo">
+
 # winmux
 
-A Windows-native multi-agent terminal for AI coding workflows over SSH.
-Inspired by [cmux](https://github.com/manaflow-ai/cmux).
+**A Windows-native terminal for AI coding agents over SSH.**
 
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL%203.0%2B-blue.svg)](LICENSE)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2B-0078D6.svg)](#)
-[![Built with: Tauri 2 + SolidJS + Rust](https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20SolidJS%20%2B%20Rust-success.svg)](#stack)
+Inspired by [cmux](https://github.com/manaflow-ai/cmux). Built with Tauri 2 + Rust + SolidJS.
 
-> **Status:** v0.1.0 — first public preview. Daily-driver candidate, not yet stable for production-critical workflows. See the Roadmap below for what's done vs. what's coming.
+[![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2B-0078D6.svg)](#install)
+[![Stack: Tauri 2](https://img.shields.io/badge/stack-Tauri%202%20%2B%20Rust%20%2B%20SolidJS-yellow.svg)](https://tauri.app)
+[![Release](https://img.shields.io/github/v/release/yyhezkel/winmux?color=success)](https://github.com/yyhezkel/winmux/releases/latest)
 
-## Documentation
+[**Download**](https://github.com/yyhezkel/winmux/releases/latest) ·
+[Documentation](docs/) ·
+[Roadmap](#roadmap) ·
+[Report a bug](https://github.com/yyhezkel/winmux/issues/new)
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — high-level architecture + ASCII diagram
-- [docs/MODULES.md](docs/MODULES.md) — what each Rust module + frontend file owns
-- [docs/PROTOCOLS.md](docs/PROTOCOLS.md) — JSON-RPC method catalog, named-pipe + TCP framing, HMAC handshake, agent-hook contract, bootstrap protocol
-- [docs/CONFIG.md](docs/CONFIG.md) — `workspaces.json`, `known_hosts.json`, `remote-manifest.json` schemas; environment variables
-- [docs/CLI.md](docs/CLI.md) — every `winmux` command with examples and exit codes
-- [docs/BUILD.md](docs/BUILD.md) — prerequisites, dev / debug builds, Linux cross-compile, common gotchas
-- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) — recipes for adding RPC methods, agent hooks, pane types; logging + commit conventions
+</div>
 
-## Why
+---
 
-cmux is a macOS-only terminal optimized for working with AI coding agents
-(Claude Code, Codex, Cursor) — vertical tabs, splits, agent notifications,
-and SSH workspaces. winmux brings the same model to Windows, with an
-opinionated stack that values native feel and developer iteration speed.
+## What is winmux?
 
-## Stack
+winmux is a desktop terminal for developers who run AI coding agents
+(Claude Code, Codex, Cursor) on remote Linux dev servers and want a
+polished, opinionated Windows-native UX around them. SSH workspaces
+with splits, real BiDi for Hebrew/Arabic, blocking permission cards
+when an agent wants to run a tool, a bundled MCP server, and one-click
+wizards for both first-time server setup and connecting to a host
+you've already configured in `~/.ssh/config`.
 
-- **Frontend:** [Tauri 2](https://tauri.app), SolidJS (TS), [xterm.js](https://xtermjs.org/) with WebGL
-- **Terminal rendering:** xterm.js + [bidi-js](https://github.com/lojjic/bidi-js) for proper Hebrew/Arabic
-- **Backend:** Rust — [portable-pty](https://crates.io/crates/portable-pty) (ConPTY/POSIX), [russh](https://crates.io/crates/russh) (SSH client + ssh-agent), tokio
-- **CLI:** standalone `winmux` binary speaking JSON-RPC v2 over Named Pipe (Windows) or TCP (remote Linux)
+If you live in your terminal, work primarily with remote Linux servers,
+and want fine-grained control over what AI agents do on those servers —
+winmux is for you.
 
 ## Features
 
-**Local & SSH terminals**
-- Local PTY (PowerShell / cmd / pwsh) with full xterm.js rendering, GPU-accelerated WebGL
-- SSH workspaces via [russh](https://crates.io/crates/russh) — OpenSSH agent + Pageant, key files (encrypted keys prompt for passphrase), password fallback
-- TOFU host key verification with `known_hosts.json`; clear mismatch warnings
-- Splits: binary tree of horizontal/vertical panes per workspace, draggable dividers
-- Hebrew/Arabic RTL via [bidi-js](https://github.com/lojjic/bidi-js) (UAX #9) — mixed `Hello שלום world` lines display correctly
-- `tmux` persistence on connect (optional): detach instead of disconnect; sessions survive
+<!-- TODO: drop a 1280×720 screenshot here once one's available. -->
+<!-- ![Screenshot](docs/assets/screenshot.png) -->
 
-**AI-agent workflow**
-- Claude Code hook integration: agent permission requests + lifecycle events stream to the desktop UI as cards with Allow/Deny buttons (env-gated by `WINMUX_PANE_ID` so unrelated terminals aren't affected)
-- Browser pane that can serve `localhost:port` over an auto-managed reverse SSH tunnel
-- Bundled `winmux-mcp` server: MCP-aware agents (Claude Code, Cursor, etc.) drive winmux's browser panes natively
-- "Smart connect" dropdown: default / tmux / plain / specific cwd / specific command / `claude` / `claude --resume` from a session browser
+### 🖥️ A native Windows terminal that actually feels good
 
-**Setup automation** *(new in v0.1.0)*
-- **Smart connect wizard** — import from `~/.ssh/config`, auto-detect keys with fingerprints, one-click permission auto-fix via `icacls`, in-modal "Test connection" with method/stage/hint diagnostics
-- **Server provisioning wizard** — bootstrap a fresh server end-to-end: package update → user creation → key deploy → install Node/Python/Docker → install Claude Code → register hooks. Three built-in profiles (default / hardened / minimal); profile editor on disk. Initial password DPAPI-wrapped per user/machine
+GPU-accelerated rendering via xterm.js + WebGL, or DOM-mode with
+per-line `dir="auto"` for Termius-style Hebrew/Arabic handling.
+Five built-in themes (Tokyo Night, Dracula, Solarized Dark/Light,
+Nord), full color customization, font picker, live theme + font-size
+slider — no restart.
 
-**UX**
-- Five theme presets (Tokyo Night, Dracula, Solarized Dark/Light, Nord) + per-color customization + live apply
-- Font picker (system fonts + custom name + Google-Fonts-style web font URL); live UI + terminal font-size slider
-- Localization (en / he / ar / ru) with RTL/LTR live switch
-- Toast notifications via Windows WinRT
-- Update checker (manifest fetch, no auto-install)
+### 🌐 SSH workspaces that don't get in your way
 
-**CLI + RPC**
-- Standalone `winmux` binary speaking JSON-RPC v2 over Named Pipe (Windows) or TCP (remote Linux over an HMAC-SHA256-authenticated reverse tunnel)
-- `winmux dev` introspection: state snapshot, debug-log tail, console-event tail, bug-report capture
-- `winmux settings show/set/preset/export/import` for scripting your config
+OpenSSH agent + Pageant + key files (encrypted ones prompt for
+passphrase) + password fallback. TOFU host-key verification with clear
+mismatch warnings. `tmux` persistence on connect — detach instead of
+disconnect; sessions survive. Binary tree of splits per workspace.
+Reverse SSH tunnel + HMAC-SHA256 lets a remote-Linux CLI call back
+into the desktop securely.
 
-## Install (release)
+### 🤖 First-class AI agent integration
 
-The MSI installer ships both the GUI app and the `winmux` CLI in one package.
+One-click Claude Code launch with `--resume` / `--continue` /
+`--dangerously-skip-permissions` from the Smart Connect dropdown.
+Browse and resume recent Claude sessions on the remote (reads
+`~/.claude/projects/`). Blocking permission hooks: the agent waits
+for your Allow/Deny in the UI. Hooks are env-gated by
+`WINMUX_PANE_ID`, so unrelated terminals on the same machine don't
+fire them.
 
-1. Download `winmux_0.1.0_x64_en-US.msi` (or the matching `winmux_0.1.0_x64-setup.exe` if you prefer the NSIS installer) from the Releases page.
-2. Double-click → install. Default location: `C:\Program Files\winmux\`.
-3. The GUI is launched from Start Menu → "winmux".
-4. The CLI lands at `C:\Program Files\winmux\resources\winmux-cli.exe`. To call it as just `winmux` from any terminal, add that directory to your `PATH`:
+### 🛠️ MCP server bundled
 
-   ```powershell
-   # PowerShell, current user, persistent
-   [Environment]::SetEnvironmentVariable(
-     'Path',
-     "$([Environment]::GetEnvironmentVariable('Path','User'));C:\Program Files\winmux\resources",
-     'User'
-   )
-   ```
+`winmux-mcp.exe` exposes 15 browser-automation tools (click, type,
+eval, find, snapshot, wait_for, etc.) over stdio JSON-RPC. Drop one
+line into `~/.claude/mcp.json` and Claude Code can drive the browser
+pane natively.
 
-   Restart your terminal. PATH auto-registration via WiX is on the roadmap; this step is manual for now.
+### 🚀 Server provisioning wizard
 
-To uninstall: Settings → Apps → winmux → Uninstall. All files removed; user data in `%APPDATA%\winmux\` is preserved unless you delete it manually.
+Give it `root` + password, get back a hardened user with sudo, an
+ed25519 keypair deployed, Node/Python/Docker installed if you want
+them, Claude Code installed, hooks registered. Original credentials
+wrapped via Windows DPAPI per user/machine.
 
-## Build
+### 🪄 Smart connect wizard
 
-### Prerequisites
+Import hosts from `~/.ssh/config` with one click. Auto-detect keys
+under `~/.ssh/` with type + fingerprint. One-click permission fix
+via `icacls` when a key is "too open". "Test connection" runs the
+full auth ladder and tells you exactly which stage failed and why.
 
-- Rust (stable), via [rustup](https://rustup.rs/)
-- Node.js 18+
-- Microsoft C++ Build Tools (Visual Studio 2022 with `Microsoft.VisualStudio.Workload.VCTools`)
-- WebView2 runtime (already present on Win10 21H2+ / Win11)
-- For cross-compile to Linux CLI: `rustup target add x86_64-unknown-linux-musl`
+### 📁 File manager pane
 
-### Dev
+Dual-column local + remote SFTP — navigate, upload, download, rename,
+delete, mkdir. Piggy-backs on the workspace's existing SSH session.
 
-```cmd
-cd app
+### ⚙️ Settings, notes, localization
+
+Everything you'd expect: a settings panel with theme presets and a
+custom color picker, a notes panel for "I had an idea, capture it",
+localization for English, Hebrew, Arabic, Russian with live RTL/LTR
+switch, an update checker, and a CLI (`winmux settings show/set/
+preset/export/import`) for scripting it all.
+
+## Install
+
+Download the latest [release](https://github.com/yyhezkel/winmux/releases/latest)
+and run the MSI:
+
+```pwsh
+winget download yyhezkel/winmux   # once we ship on winget
+# or grab winmux_0.1.0_x64_en-US.msi from GitHub and double-click
+```
+
+Or build from source:
+
+```pwsh
+git clone https://github.com/yyhezkel/winmux
+cd winmux/app
 npm install
-npm run tauri dev
+npm run tauri build              # release MSI + NSIS bundles
+npm run tauri build -- --debug   # standalone debug app.exe
 ```
 
-### Standalone debug build
+Requires Rust (stable, via [rustup](https://rustup.rs)), Node.js 18+,
+and the Microsoft C++ Build Tools (`Microsoft.VisualStudio.Workload.VCTools`).
+WebView2 is already present on Windows 10 21H2+ / Windows 11.
 
-```cmd
-cd app
-npm run tauri build -- --debug
+> The MSI is **not code-signed yet** — SmartScreen will warn on first
+> launch. Click "More info" → "Run anyway". Code signing is on the
+> v0.2 roadmap.
+
+## Quick start
+
+1. Launch winmux. The first run drops `%APPDATA%\winmux\settings.json`
+   with sensible defaults; tweak from the gear icon (⚙) whenever.
+2. Click **+ New workspace** → pick **SSH** → either fill the fields
+   or hit **Import from SSH config** to pull a host from `~/.ssh/config`.
+   The wizard auto-detects keys under `~/.ssh/`, flags too-open
+   permissions, and offers an in-place "Test connection".
+3. **Connect**. winmux SFTP-uploads its remote CLI on first connection
+   and exposes a reverse tunnel back to the desktop. From the Connect
+   dropdown you can spawn `claude`, `claude --resume` from the session
+   browser, a plain shell, or any custom command.
+
+When an agent triggers a permission hook, a card appears top-right
+with Allow / Deny. The agent blocks until you decide.
+
+## Compared to alternatives
+
+This is a small space; the choices here are real tradeoffs, not
+"winmux beats everything". Be honest with yourself about what you
+need.
+
+| | **winmux** | [cmux](https://github.com/manaflow-ai/cmux) | [Warp](https://www.warp.dev) | [Termius](https://termius.com) |
+|---|---|---|---|---|
+| Primary platform        | Windows                | macOS                  | macOS / Linux / Windows | Windows / macOS / Linux / iOS / Android |
+| License                 | GPL-3.0-or-later       | AGPL-3.0               | AGPL-3.0 (app)         | Proprietary (free tier with limits)     |
+| SSH workspaces          | ✓                      | ✓                      | ✓                      | ✓                                       |
+| Splits / tabs           | ✓ (binary tree)        | ✓                      | ✓                      | ✓                                       |
+| Blocking agent hooks    | ✓                      | ✓                      | partial (built-in only)| ✗                                       |
+| Bundled MCP server      | ✓ (15 tools)           | ✗                      | ✗                      | ✗                                       |
+| Claude Code launcher    | ✓ with session browser | ✓                      | ✗                      | ✗                                       |
+| File manager (SFTP)     | ✓                      | ✗                      | ✗                      | ✓                                       |
+| Server provisioning     | ✓ wizard               | ✗                      | ✗                      | ✓ snippets                              |
+| RTL (Hebrew / Arabic)   | ✓ per-line auto + BiDi | ✗                      | partial                | partial                                 |
+| Free for personal use   | ✓                      | ✓                      | ✓                      | partial                                 |
+
+If you're on macOS, look at **cmux** first — it's the project that
+inspired winmux and is more mature there. If you want a polished
+cross-platform terminal with built-in AI features and don't need
+remote-server provisioning, **Warp** is excellent. If you want a
+mature commercial SSH client across every device including mobile,
+**Termius** is the standard. winmux is the one to pick when you're on
+Windows, work primarily with remote Linux dev servers, run AI agents
+on those servers, and want them gated behind a UI you control.
+
+## Architecture
+
+```
+┌─────────────────────────────────┐         ┌──────────────────────────────┐
+│  Windows desktop                 │         │  Remote Linux server         │
+│                                  │         │                              │
+│  ┌────────────┐  ┌────────────┐  │         │  ┌────────────────────────┐  │
+│  │  app.exe   │  │winmux.exe  │  │         │  │  winmux (CLI, musl)    │  │
+│  │  (Tauri)   │  │  (CLI)     │  │         │  │  bootstrapped via SFTP │  │
+│  └─────┬──────┘  └─────┬──────┘  │         │  └────────┬───────────────┘  │
+│        │ Named Pipe    │ Named Pipe         │           │                  │
+│        │ JSON-RPC v2   │ JSON-RPC v2        │           │ HMAC-SHA256      │
+│        ▼               ▼                    │           │ reverse tunnel   │
+│  ┌────────────────────────────┐  ◄──────────┼───────────┘ JSON-RPC v2      │
+│  │   in-process RPC server    │  reverse SSH│                              │
+│  └────────────────────────────┘             │  ┌────────────────────────┐  │
+│  ┌────────────┐                              │  │ Claude Code            │  │
+│  │winmux-mcp  │  ──── MCP (stdio) ───►       │  │ + ~/.claude/hooks      │  │
+│  │  .exe      │                              │  │   → winmux claude-hook │  │
+│  └────────────┘                              │  └────────────────────────┘  │
+└─────────────────────────────────┘            └──────────────────────────────┘
 ```
 
-Output: `app\src-tauri\target\debug\app.exe` and `app\src-tauri\target\debug\winmux.exe`.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full
+narrative version with ASCII state diagrams and module ownership.
 
 ## Roadmap
 
-Shipped in v0.1.0 — Phases 1 through 14.A:
+Shipped in **v0.1.0** (Phases 1 through 15.B):
 
-- ✅ Local PTY pipeline (Tauri + xterm.js + portable-pty + WebGL)
-- ✅ BiDi for Hebrew/RTL via bidi-js (UAX #9)
-- ✅ SSH workspaces via russh, agent + key + password
-- ✅ Multi-workspace sidebar with persistence + splits (binary tree)
-- ✅ CLI + JSON-RPC over Named Pipe + reverse SSH tunnel
-- ✅ MSI + NSIS installers with bundled CLI
-- ✅ Remote-Linux CLI bootstrap (SFTP upload + symlink)
-- ✅ HMAC-SHA256 challenge-response over the reverse tunnel
-- ✅ Agent feed + permission cards + Claude Code hook contract
-- ✅ Notes / quick-capture
-- ✅ Browser panes via iframe + postMessage bridge
-- ✅ winmux-mcp standalone MCP server (15 tools, browser automation)
-- ✅ Settings panel + 5 theme presets + live theme apply
-- ✅ Update checker (manifest fetch)
-- ✅ tmux persistence on connect
-- ✅ Localization (en / he / ar / ru) + RTL/LTR switch
-- ✅ Smart Connect with Claude Code launcher + session browser
-- ✅ Smart connect wizard (ssh_config import, key auto-detect, perms fix, test)
-- ✅ Server provisioning wizard (fresh-server bootstrap)
+local PTY · BiDi (UAX #9) · SSH via russh · multi-workspace +
+persistence + splits · CLI + JSON-RPC over Named Pipe + reverse
+SSH tunnel · MSI + NSIS · remote-Linux CLI bootstrap · HMAC-SHA256
+auth · agent feed + permission cards · notes · browser panes ·
+winmux-mcp MCP server · settings panel + 5 themes + live apply ·
+update checker · tmux persistence · localization (en / he / ar / ru) ·
+smart-connect (Claude session browser, ssh_config import, key
+auto-detect, perms fix, connection test) · server provisioning
+wizard · file manager pane (dual local + SFTP).
 
 Coming next:
 
 - 🔮 PATH auto-registration in the WiX installer
-- 🔮 ARM64 Windows build
-- 🔮 aarch64-linux CLI
 - 🔮 Code-signing for the MSI / NSIS
 - 🔮 Auto-update via signed manifest + delta downloads
+- 🔮 ARM64 Windows build
+- 🔮 aarch64-linux CLI
+- 🔮 winget / Scoop manifests
 
-## Inspirations
+## Documentation
 
-- [cmux](https://github.com/manaflow-ai/cmux) — the macOS reference
-- [Warp](https://www.warp.dev) — agentic terminal (now open-source under AGPLv3)
-- [Tauri](https://tauri.app), [xterm.js](https://xtermjs.org)
+- [Architecture](docs/ARCHITECTURE.md) — high-level overview + ASCII diagram
+- [Modules](docs/MODULES.md) — what each Rust module + frontend file owns
+- [Protocols](docs/PROTOCOLS.md) — JSON-RPC catalog, framing, HMAC handshake, agent-hook contract
+- [Config](docs/CONFIG.md) — `workspaces.json` / `settings.json` / `known_hosts.json` schemas; env vars
+- [CLI reference](docs/CLI.md) — every `winmux` subcommand with examples and exit codes
+- [Build](docs/BUILD.md) — prerequisites, dev / debug builds, Linux cross-compile, common gotchas
+- [Contributing](docs/CONTRIBUTING.md) — adding RPC methods, agent hooks, pane types; logging + commit conventions
+- [Security](SECURITY.md) — vulnerability disclosure policy
+
+## Acknowledgments
+
+winmux stands on the shoulders of giants:
+
+- **[cmux](https://github.com/manaflow-ai/cmux)** — the macOS reference design that inspired the workspace + permission-card UX
+- **[Tauri](https://tauri.app)** — the framework that makes a 7 MB Rust + WebView desktop app possible
+- **[xterm.js](https://xtermjs.org)** — the terminal frontend; with the WebGL addon for fast paint
+- **[russh](https://crates.io/crates/russh)** + **[russh-keys](https://crates.io/crates/russh-keys)** + **[russh-sftp](https://crates.io/crates/russh-sftp)** — pure-Rust SSH client + sftp
+- **[bidi-js](https://github.com/lojjic/bidi-js)** — UAX #9 BiDi reorder for Hebrew/Arabic
+- **[portable-pty](https://crates.io/crates/portable-pty)** — ConPTY/POSIX PTY abstraction
+- **[SolidJS](https://www.solidjs.com)** — the frontend reactive runtime
+- **[tokio](https://tokio.rs)** — async runtime
+- And countless dependencies pinned in `Cargo.toml` / `package.json`
+
+Thank you also to the **Claude Code** team at Anthropic for the
+public hooks + MCP specs that make first-class agent integration
+feasible.
 
 ## Security
 
-Found a vulnerability? See [SECURITY.md](SECURITY.md) — please report
-privately to the email listed there rather than opening a public issue.
+Found a vulnerability? See [SECURITY.md](SECURITY.md) — please email
+the maintainer privately rather than opening a public issue.
 
 ## License
 
-GPL-3.0-or-later. See `LICENSE`.
+[GPL-3.0-or-later](LICENSE). Copyright © 2026 Yossi Yehezkel.

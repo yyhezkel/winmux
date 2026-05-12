@@ -1852,6 +1852,35 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   overflow-y: auto;
 }
 
+/* ─── Phase 12.C: local PTY wizard mode tabs ─── */
+
+.local-wizard-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 12px 0;
+  padding: 3px;
+  background: var(--w-bg);
+  border: 1px solid var(--w-border-hi);
+  border-radius: var(--w-r-md);
+}
+.local-wizard-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--w-text-dim);
+  padding: 5px 11px;
+  border-radius: var(--w-r-sm);
+  cursor: pointer;
+  font-size: var(--w-fs-sm);
+  font-family: inherit;
+  transition: background 100ms ease, color 100ms ease;
+}
+.local-wizard-tab:hover { color: var(--w-text); }
+.local-wizard-tab.active {
+  background: rgba(122, 162, 247, 0.16);
+  color: var(--w-accent);
+}
+
 /* ─── Phase 13.A: smart connect wizard ─── */
 
 .wizard-row {

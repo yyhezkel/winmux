@@ -228,5 +228,21 @@
   "ws_header.split_filemanager_title": "פצל לפאנל מנהל קבצים (מקומי + SFTP)",
 
   "sidebar.provision_server": "☁ הקם שרת",
-  "sidebar.provision_server_tooltip": "הקמת שרת חדש עם משתמשים, מפתחות וכלים"
+  "sidebar.provision_server_tooltip": "הקמת שרת חדש עם משתמשים, מפתחות וכלים",
+
+  "ws.create.mode.wizard": "אשף",
+  "ws.create.mode.custom": "פקודה מותאמת",
+  "ws.create.shell.label": "Shell",
+  "ws.create.shell.pwsh": "PowerShell 7",
+  "ws.create.shell.powershell": "Windows PowerShell",
+  "ws.create.shell.cmd": "Command Prompt",
+  "ws.create.shell.gitbash": "Git Bash",
+  "ws.create.shell.wsl": "WSL bash",
+  "ws.create.shell.not_installed": "(לא מותקן)",
+  "ws.create.cwd.label": "תיקיית עבודה",
+  "ws.create.cwd.placeholder": "C:\\Users\\you או הדבק נתיב",
+  "ws.create.cwd.recent": "אחרונים",
+  "ws.create.cwd.defaults": "מיקומים נפוצים",
+  "ws.create.custom_cmd.label": "פקודה",
+  "ws.create.custom_cmd.placeholder": "למשל: pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd"
 }

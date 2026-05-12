@@ -5,6 +5,18 @@ import type { Connection, EnvVar, Workspace } from "./types";
 
 // Phase 13.A wizard data shapes — mirror the Rust definitions in
 // src-tauri/src/connect_wizard.rs.
+interface ShellInfo {
+  id: string;
+  label: string;
+  command: string;
+  available: boolean;
+}
+
+interface RecentPathSuggestion {
+  path: string;
+  kind: "recent" | "default";
+}
+
 interface SshConfigHost {
   alias: string;
   hostname?: string | null;
@@ -51,6 +63,7 @@ interface Props {
     name: string;
     connection: Connection;
     color?: string;
+    cwd?: string;
     setup_command?: string;
     teardown_command?: string;
     env?: EnvVar[];
@@ -80,6 +93,17 @@ export function CreateWorkspaceModal(p: Props) {
   const [setupCmd, setSetupCmd] = createSignal("");
   const [teardownCmd, setTeardownCmd] = createSignal("");
   const [envRows, setEnvRows] = createSignal<EnvVar[]>([]);
+
+  // Phase 12.C local PTY mini-wizard state. `wizardMode` toggles between
+  // "wizard" (shell dropdown + cwd combobox seeded from history) and
+  // "custom" (a single free-text command field). The cwd signal is
+  // separate from `shell` so the wizard preserves the user's directory
+  // when they flip between shells.
+  const [wizardMode, setWizardMode] = createSignal<"wizard" | "custom">("wizard");
+  const [shellId, setShellId] = createSignal<string>("powershell");
+  const [cwd, setCwd] = createSignal<string>("");
+  const [detectedShells, setDetectedShells] = createSignal<ShellInfo[]>([]);
+  const [recentPaths, setRecentPaths] = createSignal<RecentPathSuggestion[]>([]);
 
   // Phase 13.A wizard state.
   const [sshHosts, setSshHosts] = createSignal<SshConfigHost[]>([]);
@@ -111,6 +135,21 @@ export function CreateWorkspaceModal(p: Props) {
       setDetectedKeys(keys);
     } catch (e) {
       console.warn("list_ssh_keys failed", e);
+    }
+    // Phase 12.C: load the local PTY wizard inputs too. Both are cheap
+    // (one PATH walk + one tiny JSON read) so we always pre-fetch even
+    // if the user starts on the SSH tab.
+    try {
+      const shells = await invoke<ShellInfo[]>("detect_local_shells");
+      setDetectedShells(shells);
+    } catch (e) {
+      console.warn("detect_local_shells failed", e);
+    }
+    try {
+      const paths = await invoke<RecentPathSuggestion[]>("list_recent_paths");
+      setRecentPaths(paths);
+    } catch (e) {
+      console.warn("list_recent_paths failed", e);
     }
   };
 
@@ -240,6 +279,9 @@ export function CreateWorkspaceModal(p: Props) {
         setSetupCmd("");
         setTeardownCmd("");
         setEnvRows([]);
+        setWizardMode("wizard");
+        setShellId("powershell");
+        setCwd("");
       }
     }
   });
@@ -263,8 +305,22 @@ export function CreateWorkspaceModal(p: Props) {
     }
 
     let connection: Connection;
+    let workspaceCwd: string | undefined;
     if (type() === "local") {
-      connection = { type: "local", shell: shell() || undefined };
+      // Phase 12.C: pick the shell from the active mode. Wizard mode
+      // maps shellId → the detected command string (or a sensible
+      // default if detection failed). Custom mode passes the typed
+      // `shell` straight through. The cwd lands at the workspace
+      // level so any local pane in the workspace picks it up.
+      let cmd: string | undefined;
+      if (wizardMode() === "wizard") {
+        const found = detectedShells().find((s) => s.id === shellId());
+        cmd = found?.command;
+      } else {
+        cmd = shell().trim() || undefined;
+      }
+      connection = { type: "local", shell: cmd };
+      workspaceCwd = cwd().trim() || undefined;
     } else {
       if (!host().trim() || !user().trim()) return;
       connection = {
@@ -279,10 +335,17 @@ export function CreateWorkspaceModal(p: Props) {
       name: name().trim(),
       connection,
       color: color(),
+      cwd: workspaceCwd,
       setup_command: setupCmd() || undefined,
       teardown_command: teardownCmd() || undefined,
       env: cleanedEnv().length ? cleanedEnv() : undefined,
     });
+    // Phase 12.C: bump the chosen cwd into the recent-paths history so
+    // it shows up in the combobox next time. Best-effort — silently
+    // ignore RPC failures.
+    if (workspaceCwd) {
+      invoke("record_recent_path", { path: workspaceCwd }).catch(() => {});
+    }
     p.onClose();
   };
 
@@ -326,15 +389,93 @@ export function CreateWorkspaceModal(p: Props) {
           </label>
 
           <Show when={type() === "local"}>
-            <label>
-              <span>{t("ws.create.field.shell")}</span>
-              <input
-                value={shell()}
-                onInput={(e) => setShell(e.currentTarget.value)}
-                placeholder={t("ws.create.field.shell.placeholder")}
-                disabled={isEdit()}
-              />
-            </label>
+            {/* Phase 12.C: mode toggle. Wizard = shell dropdown +
+                cwd combobox; Custom = single free-text command. */}
+            <Show when={!isEdit()}>
+              <div class="local-wizard-tabs">
+                <button
+                  type="button"
+                  class={`local-wizard-tab ${wizardMode() === "wizard" ? "active" : ""}`}
+                  onClick={() => setWizardMode("wizard")}
+                >
+                  {t("ws.create.mode.wizard")}
+                </button>
+                <button
+                  type="button"
+                  class={`local-wizard-tab ${wizardMode() === "custom" ? "active" : ""}`}
+                  onClick={() => setWizardMode("custom")}
+                >
+                  {t("ws.create.mode.custom")}
+                </button>
+              </div>
+            </Show>
+            <Show when={wizardMode() === "wizard" && !isEdit()}>
+              <label>
+                <span>{t("ws.create.shell.label")}</span>
+                <select
+                  value={shellId()}
+                  onChange={(e) => setShellId(e.currentTarget.value)}
+                >
+                  <For each={detectedShells()}>
+                    {(s) => (
+                      <option value={s.id} disabled={!s.available}>
+                        {t(`ws.create.shell.${s.id}`, {}) || s.label}
+                        {!s.available ? " " + t("ws.create.shell.not_installed") : ""}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </label>
+              <label>
+                <span>{t("ws.create.cwd.label")}</span>
+                <input
+                  type="text"
+                  list="winmux-recent-paths"
+                  value={cwd()}
+                  onInput={(e) => setCwd(e.currentTarget.value)}
+                  placeholder={t("ws.create.cwd.placeholder")}
+                />
+              </label>
+              <datalist id="winmux-recent-paths">
+                <For each={recentPaths()}>
+                  {(rp) => (
+                    <option value={rp.path}>
+                      {rp.kind === "recent"
+                        ? t("ws.create.cwd.recent")
+                        : t("ws.create.cwd.defaults")}
+                    </option>
+                  )}
+                </For>
+              </datalist>
+            </Show>
+            <Show when={wizardMode() === "custom" || isEdit()}>
+              <label>
+                <span>{t("ws.create.custom_cmd.label")}</span>
+                <input
+                  value={shell()}
+                  onInput={(e) => setShell(e.currentTarget.value)}
+                  placeholder={t("ws.create.custom_cmd.placeholder")}
+                  disabled={isEdit()}
+                />
+              </label>
+              <Show when={!isEdit()}>
+                <label>
+                  <span>{t("ws.create.cwd.label")}</span>
+                  <input
+                    type="text"
+                    list="winmux-recent-paths"
+                    value={cwd()}
+                    onInput={(e) => setCwd(e.currentTarget.value)}
+                    placeholder={t("ws.create.cwd.placeholder")}
+                  />
+                </label>
+                <datalist id="winmux-recent-paths">
+                  <For each={recentPaths()}>
+                    {(rp) => <option value={rp.path} />}
+                  </For>
+                </datalist>
+              </Show>
+            </Show>
           </Show>
 
           <Show when={type() === "ssh"}>

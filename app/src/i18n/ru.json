@@ -228,5 +228,21 @@
   "ws_header.split_filemanager_title": "Разделить на панель файлового менеджера (локальный + SFTP)",
 
   "sidebar.provision_server": "☁ Подготовить сервер",
-  "sidebar.provision_server_tooltip": "Подготовка нового сервера: пользователи, ключи, утилиты"
+  "sidebar.provision_server_tooltip": "Подготовка нового сервера: пользователи, ключи, утилиты",
+
+  "ws.create.mode.wizard": "Мастер",
+  "ws.create.mode.custom": "Своя команда",
+  "ws.create.shell.label": "Shell",
+  "ws.create.shell.pwsh": "PowerShell 7",
+  "ws.create.shell.powershell": "Windows PowerShell",
+  "ws.create.shell.cmd": "Command Prompt",
+  "ws.create.shell.gitbash": "Git Bash",
+  "ws.create.shell.wsl": "WSL bash",
+  "ws.create.shell.not_installed": "(не установлен)",
+  "ws.create.cwd.label": "Рабочий каталог",
+  "ws.create.cwd.placeholder": "C:\\Users\\you или вставьте путь",
+  "ws.create.cwd.recent": "Недавние",
+  "ws.create.cwd.defaults": "Частые папки",
+  "ws.create.custom_cmd.label": "Команда",
+  "ws.create.custom_cmd.placeholder": "например: pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd"
 }

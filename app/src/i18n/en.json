@@ -228,5 +228,21 @@
   "ws_header.split_filemanager_title": "Split into file manager pane (local + SFTP)",
 
   "sidebar.provision_server": "☁ Provision server",
-  "sidebar.provision_server_tooltip": "Bootstrap a fresh server with users, keys, and tools"
+  "sidebar.provision_server_tooltip": "Bootstrap a fresh server with users, keys, and tools",
+
+  "ws.create.mode.wizard": "Wizard",
+  "ws.create.mode.custom": "Custom command",
+  "ws.create.shell.label": "Shell",
+  "ws.create.shell.pwsh": "PowerShell 7",
+  "ws.create.shell.powershell": "Windows PowerShell",
+  "ws.create.shell.cmd": "Command Prompt",
+  "ws.create.shell.gitbash": "Git Bash",
+  "ws.create.shell.wsl": "WSL bash",
+  "ws.create.shell.not_installed": "(not installed)",
+  "ws.create.cwd.label": "Working directory",
+  "ws.create.cwd.placeholder": "C:\\Users\\you or paste a path",
+  "ws.create.cwd.recent": "Recent",
+  "ws.create.cwd.defaults": "Common locations",
+  "ws.create.custom_cmd.label": "Command",
+  "ws.create.custom_cmd.placeholder": "e.g. pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd"
 }

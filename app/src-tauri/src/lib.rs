@@ -1,6 +1,7 @@
 mod connect_wizard;
 mod dev;
 mod file_manager;
+mod local_wizard;
 mod notes;
 mod provisioning;
 mod remote_bootstrap;
@@ -164,6 +165,8 @@ pub(crate) struct AppState {
     pub(crate) notes: Arc<Mutex<notes::NotesFile>>,
     // Phase 9.A: persistent app settings (theme, fonts, terminal, hooks, etc.)
     pub(crate) settings: Arc<Mutex<settings::Settings>>,
+    // Phase 12.C: small history of recently-used cwds for local PTY workspaces.
+    pub(crate) recent_paths: Arc<Mutex<local_wizard::RecentPathsFile>>,
     // Phase 8.B: per-(workspace, remote_port) port forwards.
     pub(crate) forwards: ForwardMap,
     // Phase 8.C: pending browser requests (eval/screenshot) awaiting frontend reply.
@@ -3768,6 +3771,17 @@ pub fn run() {
                     dlog(&format!("setup: notes load failed: {e} (starting empty)"));
                 }
             }
+            // Phase 12.C: load recent paths history (or empty on first run).
+            match local_wizard::load_recent_from_disk() {
+                Ok(rf) => {
+                    let count = rf.entries.len();
+                    *state.recent_paths.lock().unwrap() = rf;
+                    dlog(&format!("setup: recent_paths loaded ({count} entries)"));
+                }
+                Err(e) => {
+                    dlog(&format!("setup: recent_paths load failed: {e} (starting empty)"));
+                }
+            }
             // Phase 9.A: load settings (or write defaults on first run).
             match settings::load_from_disk() {
                 Ok(s) => {
@@ -3873,6 +3887,9 @@ pub fn run() {
             file_manager::file_mkdir_remote,
             file_manager::file_upload,
             file_manager::file_download,
+            local_wizard::detect_local_shells,
+            local_wizard::list_recent_paths,
+            local_wizard::record_recent_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

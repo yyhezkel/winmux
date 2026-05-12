@@ -228,5 +228,21 @@
   "ws_header.split_filemanager_title": "تقسيم إلى لوحة مدير الملفات (محلي + SFTP)",
 
   "sidebar.provision_server": "☁ إعداد خادم",
-  "sidebar.provision_server_tooltip": "إعداد خادم جديد بمستخدمين ومفاتيح وأدوات"
+  "sidebar.provision_server_tooltip": "إعداد خادم جديد بمستخدمين ومفاتيح وأدوات",
+
+  "ws.create.mode.wizard": "معالج",
+  "ws.create.mode.custom": "أمر مخصص",
+  "ws.create.shell.label": "Shell",
+  "ws.create.shell.pwsh": "PowerShell 7",
+  "ws.create.shell.powershell": "Windows PowerShell",
+  "ws.create.shell.cmd": "Command Prompt",
+  "ws.create.shell.gitbash": "Git Bash",
+  "ws.create.shell.wsl": "WSL bash",
+  "ws.create.shell.not_installed": "(غير مثبت)",
+  "ws.create.cwd.label": "مجلد العمل",
+  "ws.create.cwd.placeholder": "C:\\Users\\you أو ألصق مسارًا",
+  "ws.create.cwd.recent": "الأخيرة",
+  "ws.create.cwd.defaults": "مواقع شائعة",
+  "ws.create.custom_cmd.label": "الأمر",
+  "ws.create.custom_cmd.placeholder": "مثل: pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd"
 }

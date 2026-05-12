@@ -170,6 +170,7 @@ function App() {
     name: string;
     connection: Connection;
     color?: string;
+    cwd?: string;
     setup_command?: string;
     teardown_command?: string;
     env?: EnvVar[];

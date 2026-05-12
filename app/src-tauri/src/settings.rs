@@ -279,6 +279,27 @@ impl Default for ClaudeOptions {
     }
 }
 
+/// Phase 18: per-user state for the hooks-outdated banner. Tracked
+/// separately from `Hooks` (which is per-agent enablement) because
+/// the dismiss list belongs to the UI layer, not to the hook spec.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub(crate) struct HooksUpdates {
+    pub show_banners: bool,
+    /// `agent → [version-strings-the-user-said-skip]`. Empty entries
+    /// are tolerated so a Clear-from-Settings can keep the agent key
+    /// around without re-listing every dismissed version.
+    pub dismissed: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+impl Default for HooksUpdates {
+    fn default() -> Self {
+        Self {
+            show_banners: true,
+            dismissed: Default::default(),
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -319,6 +340,9 @@ pub(crate) struct Settings {
     /// Phase 17. Claude session summary options.
     #[serde(default)]
     pub claude: ClaudeOptions,
+    /// Phase 18. Hooks-outdated banner show/skip state.
+    #[serde(default)]
+    pub hooks_updates: HooksUpdates,
 }
 
 impl Default for Theme {
@@ -414,6 +438,7 @@ impl Default for Settings {
             i18n: I18n::default(),
             shortcuts: Shortcuts::default(),
             claude: ClaudeOptions::default(),
+            hooks_updates: HooksUpdates::default(),
         }
     }
 }

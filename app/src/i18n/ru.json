@@ -305,5 +305,14 @@
   "settings.shortcuts.summarize_claude": "Сводка сессии Claude",
   "claude.summary.toast": "Сводка сохранена как заметка ({count} сообщений)",
   "claude.summary.no_workspace": "Нет активного рабочего пространства.",
-  "claude.summary.empty": "Сообщений в сессии не найдено."
+  "claude.summary.empty": "Сообщений в сессии не найдено.",
+
+  "hooks_update.banner.title": "Доступно обновление hooks",
+  "hooks_update.banner.text": "{agent} hooks v{current} → v{latest} на этом сервере",
+  "hooks_update.btn.update": "Обновить сейчас",
+  "hooks_update.btn.later": "Позже",
+  "hooks_update.btn.skip": "Пропустить эту версию",
+  "hooks_update.toast_done": "Hooks обновлены до v{version}. Перезапустите агент.",
+  "settings.hooks_updates.title": "Баннеры обновлений hooks",
+  "settings.hooks_updates.show_banners": "Показывать баннер, когда hooks агента устарели"
 }

@@ -54,6 +54,27 @@ gh release create vX.Y.Z `
   app/src-tauri/target/release/bundle/nsis/winmux_X.Y.Z_x64-setup.exe
 ```
 
+## 4½. Bump hook specs (only when hooks changed)
+
+If this release changes any of `hooks/*.json` (added a Claude Code
+event, switched a matcher, renamed a subcommand…):
+
+1. Bump `winmux_hooks_version` in the affected `hooks/<agent>.json`
+   file (semver: bump major if events were removed/renamed, minor for
+   additive changes, patch for matcher tweaks).
+2. Bump the matching `BUNDLED_CLAUDE_VERSION` constant in
+   `app/src-tauri/cli/src/hooks.rs` so the bundled fallback stays in
+   sync (and matches what `setup-hooks --source bundled` writes).
+3. In `manifest.json`, bump the matching `hooks.<agent>.version`
+   field so the desktop's outdated-check picks up the new version
+   on the next SSH connect.
+
+The desktop's `check_remote_hooks` (in `updater.rs`) compares each
+remote's `~/.claude/settings.json::winmux_meta.hooks_version` against
+manifest's `hooks.claude-code.version`. When a server is on an older
+version AND the user hasn't dismissed that version (Settings → Claude
+→ Hook updates), a banner fires.
+
 ## 5. Update `manifest.json`
 
 The updater (`updater.rs`) polls

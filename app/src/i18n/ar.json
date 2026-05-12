@@ -305,5 +305,14 @@
   "settings.shortcuts.summarize_claude": "تلخيص جلسة Claude",
   "claude.summary.toast": "تم حفظ الملخص كملاحظة ({count} رسائل)",
   "claude.summary.no_workspace": "لا توجد بيئة عمل نشطة.",
-  "claude.summary.empty": "لم يتم العثور على رسائل في الجلسة."
+  "claude.summary.empty": "لم يتم العثور على رسائل في الجلسة.",
+
+  "hooks_update.banner.title": "تحديث Hooks متاح",
+  "hooks_update.banner.text": "{agent} hooks v{current} → v{latest} على هذا الخادم",
+  "hooks_update.btn.update": "تحديث الآن",
+  "hooks_update.btn.later": "لاحقًا",
+  "hooks_update.btn.skip": "تخطّي هذا الإصدار",
+  "hooks_update.toast_done": "تم تحديث Hooks إلى v{version}. أعد تشغيل العميل.",
+  "settings.hooks_updates.title": "شعارات تحديث Hooks",
+  "settings.hooks_updates.show_banners": "إظهار شعار عندما تكون hooks العميل قديمة"
 }

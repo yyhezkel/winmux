@@ -305,5 +305,14 @@
   "settings.shortcuts.summarize_claude": "Summarize Claude session",
   "claude.summary.toast": "Summary saved as note ({count} messages)",
   "claude.summary.no_workspace": "No active workspace.",
-  "claude.summary.empty": "No messages found in session."
+  "claude.summary.empty": "No messages found in session.",
+
+  "hooks_update.banner.title": "Hook spec update available",
+  "hooks_update.banner.text": "{agent} hooks v{current} → v{latest} on this server",
+  "hooks_update.btn.update": "Update now",
+  "hooks_update.btn.later": "Later",
+  "hooks_update.btn.skip": "Skip this version",
+  "hooks_update.toast_done": "Hooks updated to v{version}. Restart your agent to take effect.",
+  "settings.hooks_updates.title": "Hook update banners",
+  "settings.hooks_updates.show_banners": "Show a banner when an agent's hook spec is outdated"
 }

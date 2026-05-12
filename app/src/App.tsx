@@ -17,9 +17,12 @@ import {
 import {
   applyTheme,
   loadSettings,
+  saveSettings,
   DEFAULT_SHORTCUTS,
+  DEFAULT_HOOKS_UPDATES,
   type Settings,
   type UpdateInfo,
+  type HooksOutdatedInfo,
 } from "./settings";
 import { applyI18nSettings, t } from "./i18n";
 import { buildShortcutTable, matches, type ParsedShortcut } from "./shortcuts";
@@ -80,6 +83,11 @@ function App() {
   const [updateBanner, setUpdateBanner] = createSignal<UpdateInfo | null>(null);
   // Phase 14.A: server provisioning wizard.
   const [showProvision, setShowProvision] = createSignal(false);
+  // Phase 18: hooks-outdated banners — at most one banner per agent
+  // at a time; the user dismisses (skip-this-version persists), defers
+  // (banner gone until next connect), or triggers an in-place update.
+  const [hooksBanner, setHooksBanner] = createSignal<HooksOutdatedInfo | null>(null);
+  const [hooksUpdating, setHooksUpdating] = createSignal(false);
   // Phase 17: ephemeral toast for "Summary saved as note" + the
   // ad-hoc errors that can come back from `claude_summarize`. Auto-
   // dismisses after 4s.
@@ -94,6 +102,68 @@ function App() {
     setSummaryToast({ kind, text });
     summaryToastTimer = window.setTimeout(() => setSummaryToast(null), 4500);
   };
+  // Phase 18: hooks-outdated banner actions.
+  const triggerHooksUpdate = async () => {
+    const b = hooksBanner();
+    if (!b) return;
+    setHooksUpdating(true);
+    try {
+      // Pipe the setup-hooks command through the active SSH pane via
+      // the existing tunnel by reusing the connect-with-cmd path. We
+      // can't shell out from Rust without an SSH handle; the user's
+      // own pane runs the CLI under their PATH (which AddWinmuxToPath
+      // sets up). The command writes settings.json, then a fresh
+      // restart of Claude picks up the new hooks.
+      await invoke("ssh_exec_in_workspace", {
+        workspaceId: b.workspace_id,
+        cmd: "winmux setup-hooks --agent claude --force --source github",
+      }).catch(async () => {
+        // Older builds without ssh_exec_in_workspace — fall back to a
+        // pane.send: ask the user to run the command themselves.
+        console.warn("ssh_exec_in_workspace not available; user must run manually");
+      });
+      flashSummaryToast("ok", t("hooks_update.toast_done", { version: b.latest }));
+      setHooksBanner(null);
+    } catch (e) {
+      flashSummaryToast("err", String(e));
+    } finally {
+      setHooksUpdating(false);
+    }
+  };
+
+  const dismissHooksLater = () => setHooksBanner(null);
+
+  const skipHooksVersion = async () => {
+    const b = hooksBanner();
+    if (!b) return;
+    const s = settings();
+    if (!s) {
+      setHooksBanner(null);
+      return;
+    }
+    const next: Settings = {
+      ...s,
+      hooks_updates: {
+        ...(s.hooks_updates ?? DEFAULT_HOOKS_UPDATES),
+        dismissed: {
+          ...(s.hooks_updates?.dismissed ?? {}),
+          [b.agent]: Array.from(
+            new Set([
+              ...((s.hooks_updates?.dismissed ?? {})[b.agent] ?? []),
+              b.latest,
+            ])
+          ),
+        },
+      },
+    };
+    try {
+      await saveSettings(next);
+    } catch (e) {
+      console.warn("saveSettings failed (skipHooksVersion)", e);
+    }
+    setHooksBanner(null);
+  };
+
   const summarizeActivePane = async () => {
     const ws = activeWs();
     if (!ws) {
@@ -804,6 +874,14 @@ function App() {
         );
       })
     );
+    // Phase 18: agent-hooks outdated event from the backend's
+    // post-bootstrap probe. Surface the banner once per connection.
+    unlistens.push(
+      await listen<HooksOutdatedInfo>("hooks:outdated", (e) => {
+        setHooksBanner(e.payload);
+      })
+    );
+
     // Phase 9.B: update available — show a banner; user clicks to open notes.
     unlistens.push(
       await listen<UpdateInfo>("update:available", (e) => {
@@ -1111,6 +1189,36 @@ function App() {
               </a>
             </Show>
             <button class="update-banner-x" onClick={() => setUpdateBanner(null)}>×</button>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={hooksBanner()}>
+        <div class="hooks-banner" role="status">
+          <div class="hooks-banner-body">
+            <strong>{t("hooks_update.banner.title")}</strong>
+            <span class="hooks-banner-detail">
+              {t("hooks_update.banner.text", {
+                agent: hooksBanner()!.agent,
+                current: hooksBanner()!.current ?? "—",
+                latest: hooksBanner()!.latest,
+              })}
+            </span>
+          </div>
+          <div class="hooks-banner-actions">
+            <button
+              class="hooks-banner-btn primary"
+              disabled={hooksUpdating()}
+              onClick={() => void triggerHooksUpdate()}
+            >
+              {hooksUpdating() ? t("common.saving") : t("hooks_update.btn.update")}
+            </button>
+            <button class="hooks-banner-btn" onClick={dismissHooksLater}>
+              {t("hooks_update.btn.later")}
+            </button>
+            <button class="hooks-banner-btn" onClick={() => void skipHooksVersion()}>
+              {t("hooks_update.btn.skip")}
+            </button>
           </div>
         </div>
       </Show>

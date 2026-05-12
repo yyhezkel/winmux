@@ -305,5 +305,14 @@
   "settings.shortcuts.summarize_claude": "סכם סשן Claude",
   "claude.summary.toast": "הסיכום נשמר כהערה ({count} הודעות)",
   "claude.summary.no_workspace": "אין סביבת עבודה פעילה.",
-  "claude.summary.empty": "לא נמצאו הודעות בסשן."
+  "claude.summary.empty": "לא נמצאו הודעות בסשן.",
+
+  "hooks_update.banner.title": "עדכון hooks זמין",
+  "hooks_update.banner.text": "{agent} hooks v{current} ← v{latest} בשרת",
+  "hooks_update.btn.update": "עדכן עכשיו",
+  "hooks_update.btn.later": "אחר כך",
+  "hooks_update.btn.skip": "דלג על גרסה זו",
+  "hooks_update.toast_done": "ה-hooks עודכנו ל-v{version}. הפעל מחדש את הסוכן.",
+  "settings.hooks_updates.title": "באנרים של עדכוני hooks",
+  "settings.hooks_updates.show_banners": "הצג באנר כש-hook spec של סוכן מיושן"
 }

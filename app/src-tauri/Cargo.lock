@@ -6661,6 +6661,7 @@ dependencies = [
  "chrono",
  "clap",
  "hmac",
+ "serde",
  "serde_json",
  "sha2",
  "tokio",

@@ -35,6 +35,21 @@ pub(crate) struct Manifest {
     pub msi_sha256: Option<String>,
     #[serde(default)]
     pub min_supported_version: Option<String>,
+    /// Phase 18: per-agent hook spec versions. Map keyed by agent
+    /// id (`"claude-code"`, `"codex"`, `"gemini"`). Pre-18 manifests
+    /// without this field load fine — the desktop's hooks-outdated
+    /// check just no-ops.
+    #[serde(default)]
+    pub hooks: std::collections::BTreeMap<String, ManifestHook>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ManifestHook {
+    pub version: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub min_winmux_version: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -216,6 +231,175 @@ pub(crate) async fn check_for_updates_now(
     app: AppHandle,
 ) -> Result<UpdateInfo, String> {
     Ok(check(&state, &app).await)
+}
+
+// ─── Phase 18: hooks-outdated probe ────────────────────────────────────────
+
+#[derive(Clone, Serialize)]
+pub(crate) struct HooksOutdatedInfo {
+    pub workspace_id: String,
+    pub pane_id: String,
+    pub agent: String,
+    pub current: Option<String>,
+    pub latest: String,
+}
+
+/// Read the cached manifest (fetching if absent), then over the
+/// established SSH handle ask the remote what version it has
+/// installed. Emit `hooks:outdated` when the remote's version is
+/// older AND the user hasn't dismissed it.
+pub(crate) async fn check_remote_hooks(
+    state: &AppState,
+    app: &AppHandle,
+    handle: &std::sync::Arc<russh::client::Handle<crate::SshClient>>,
+    workspace_id: &str,
+    pane_id: &str,
+) {
+    // 1. Fetch the latest manifest (cached in last_check…). Cheap if
+    //    cached, otherwise a single curl call.
+    let manifest_url = match state
+        .settings
+        .lock()
+        .ok()
+        .and_then(|s| s.updates.manifest_url.clone())
+    {
+        Some(u) if !u.is_empty() => u,
+        _ => return,
+    };
+    let manifest = match fetch_manifest(&manifest_url).await {
+        Ok(m) => m,
+        Err(e) => {
+            dlog(&format!("hooks-check: fetch manifest failed: {e}"));
+            return;
+        }
+    };
+    let claude_latest = match manifest.hooks.get("claude-code") {
+        Some(h) => h.version.clone(),
+        None => return,
+    };
+
+    // 2. Ask the remote what `winmux_meta.hooks_version` is in
+    //    ~/.claude/settings.json. `jq` does the lookup cleanly; we
+    //    fall back to grep for hosts without jq.
+    let cmd = "if [ -f \"$HOME/.claude/settings.json\" ]; then \
+               if command -v jq >/dev/null; then \
+                 jq -r '.winmux_meta.hooks_version // \"none\"' \"$HOME/.claude/settings.json\" 2>/dev/null; \
+               else \
+                 grep -oE '\"hooks_version\"\\s*:\\s*\"[^\"]+\"' \"$HOME/.claude/settings.json\" 2>/dev/null \
+                   | head -1 | sed -E 's/.*\"([^\"]+)\"$/\\1/'; \
+               fi; \
+             else echo MISSING; fi";
+    let current = match ssh_exec_simple(handle, cmd).await {
+        Ok(s) => s.trim().to_string(),
+        Err(e) => {
+            dlog(&format!("hooks-check: remote read failed: {e}"));
+            return;
+        }
+    };
+    let current_opt: Option<String> = match current.as_str() {
+        "" | "MISSING" | "none" | "null" => None,
+        other => Some(other.to_string()),
+    };
+
+    // 3. Compare. None → hooks never installed (caller may want
+    //    "install now" prompt later; for outdated banner we skip).
+    //    Older → emit. Same/newer → no-op.
+    let need_banner = match &current_opt {
+        Some(cur) => matches!(cmp_versions(&claude_latest, cur), std::cmp::Ordering::Greater),
+        None => false,
+    };
+    if !need_banner {
+        dlog(&format!(
+            "hooks-check: workspace={workspace_id} agent=claude-code current={current_opt:?} latest={claude_latest} → up-to-date or missing"
+        ));
+        return;
+    }
+
+    // 4. Honor the user's dismissed list.
+    let dismissed = state
+        .settings
+        .lock()
+        .ok()
+        .and_then(|s| {
+            s.hooks_updates
+                .dismissed
+                .get("claude-code")
+                .cloned()
+        })
+        .unwrap_or_default();
+    if dismissed.contains(&claude_latest) {
+        dlog(&format!(
+            "hooks-check: workspace={workspace_id} claude-code v{claude_latest} silently dismissed"
+        ));
+        return;
+    }
+    let show_banners = state
+        .settings
+        .lock()
+        .ok()
+        .map(|s| s.hooks_updates.show_banners)
+        .unwrap_or(true);
+    if !show_banners {
+        return;
+    }
+
+    let info = HooksOutdatedInfo {
+        workspace_id: workspace_id.to_string(),
+        pane_id: pane_id.to_string(),
+        agent: "claude-code".to_string(),
+        current: current_opt,
+        latest: claude_latest,
+    };
+    let _ = app.emit("hooks:outdated", &info);
+}
+
+/// Phase 18: run an arbitrary shell command in a workspace's active
+/// SSH session. Used by the hooks-banner "Update now" button to fire
+/// `winmux setup-hooks --agent claude --force --source github` over
+/// the tunnel without making the user open a pane and type it.
+/// Errors when no SSH session is alive for the workspace.
+#[tauri::command]
+pub(crate) async fn ssh_exec_in_workspace(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+    cmd: String,
+) -> Result<String, String> {
+    let handle = {
+        let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        sessions.values().find_map(|s| match s {
+            crate::Session::Ssh(ssh) if ssh.workspace_id == workspace_id => {
+                Some(ssh.handle.clone())
+            }
+            _ => None,
+        })
+    }
+    .ok_or_else(|| "no active SSH session for this workspace".to_string())?;
+    ssh_exec_simple(&handle, &cmd).await
+}
+
+async fn ssh_exec_simple(
+    handle: &std::sync::Arc<russh::client::Handle<crate::SshClient>>,
+    cmd: &str,
+) -> Result<String, String> {
+    use russh::ChannelMsg;
+    let mut ch = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("channel_open: {e}"))?;
+    ch.exec(true, cmd).await.map_err(|e| format!("exec: {e}"))?;
+    let mut stdout = Vec::new();
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(6), async {
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                ChannelMsg::Data { ref data } => stdout.extend_from_slice(data),
+                ChannelMsg::Eof | ChannelMsg::Close | ChannelMsg::ExitStatus { .. } => break,
+                _ => {}
+            }
+        }
+    })
+    .await;
+    let _ = ch.close().await;
+    Ok(String::from_utf8_lossy(&stdout).to_string())
 }
 
 /// Helper for CLI / RPC dispatch — not a Tauri command.

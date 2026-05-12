@@ -386,6 +386,18 @@ enum Cmd {
         /// Replace any existing winmux hook entries even if already registered.
         #[arg(long)]
         force: bool,
+        /// Phase 18: where to load the hook spec from. `github` (default) pulls
+        /// from raw.githubusercontent.com/yyhezkel/winmux/main/hooks/<agent>.json
+        /// with a `~/.winmux/cache/hooks/<agent>.json` fallback; `bundled`
+        /// uses the hardcoded spec compiled into this CLI; `url=<custom>`
+        /// fetches from an arbitrary HTTPS URL.
+        #[arg(long, default_value = "github")]
+        source: String,
+        /// Optional version pin. Currently informational — emitted into
+        /// settings.json's `winmux_hooks_version` field so the desktop's
+        /// outdated-check can compare to manifest.
+        #[arg(long, default_value = "latest")]
+        hooks_version: String,
     },
 
     /// Phase 9.A: read or modify persisted app settings.
@@ -1749,7 +1761,20 @@ async fn real_main() -> ExitCode {
             agent,
             dry_run,
             force,
+            source,
+            hooks_version,
         } => {
+            // hooks_version is informational for now; we surface it
+            // in the log so a user explicitly pinning to a version
+            // sees their request acknowledged. The actual fetch
+            // pulls `main`'s copy from raw.githubusercontent — pinning
+            // to a tag URL would happen via `--source url=…` instead.
+            if hooks_version != "latest" {
+                eprintln!(
+                    "setup-hooks: --hooks-version={hooks_version} requested; \
+                     note that the github source always tracks `main` for now"
+                );
+            }
             let mut adapters: Vec<Box<dyn hooks::HookAdapter>> = Vec::new();
             match agent.as_str() {
                 "claude" => adapters.push(Box::new(hooks::Claude)),
@@ -1766,7 +1791,7 @@ async fn real_main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             }
-            hooks::run_all(&adapters, *dry_run, *force);
+            hooks::run_all(&adapters, *dry_run, *force, source);
             return ExitCode::SUCCESS;
         }
         Cmd::PaneDisconnect { pane, kill } => {

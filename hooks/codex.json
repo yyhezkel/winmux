@@ -1,0 +1,12 @@
+{
+  "winmux_hooks_version": "0.0.1",
+  "agent": "codex",
+  "min_winmux_version": "0.1.0",
+  "settings_file": null,
+  "events": {},
+  "_notes": [
+    "Codex CLI does not yet expose a public hook contract analogous to Claude Code's ~/.claude/settings.json hooks array.",
+    "This file is a placeholder so the manifest + setup-hooks pipeline can reference it once a contract lands.",
+    "When that happens: bump winmux_hooks_version, populate `events`, drop `settings_file`."
+  ]
+}

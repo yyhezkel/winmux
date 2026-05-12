@@ -1,0 +1,11 @@
+{
+  "winmux_hooks_version": "0.0.1",
+  "agent": "gemini",
+  "min_winmux_version": "0.1.0",
+  "settings_file": null,
+  "events": {},
+  "_notes": [
+    "Gemini CLI does not yet expose a public hook contract.",
+    "Placeholder for symmetry with claude-code.json and codex.json. Bump + populate when a contract is defined."
+  ]
+}

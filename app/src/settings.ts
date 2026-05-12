@@ -106,6 +106,25 @@ export interface ClaudeSettings {
   summary_language: string;
 }
 
+export interface HooksUpdatesSettings {
+  show_banners: boolean;
+  /** Map of agent_id → list of dismissed version strings. */
+  dismissed: Record<string, string[]>;
+}
+
+export const DEFAULT_HOOKS_UPDATES: HooksUpdatesSettings = {
+  show_banners: true,
+  dismissed: {},
+};
+
+export interface HooksOutdatedInfo {
+  workspace_id: string;
+  pane_id: string;
+  agent: string;
+  current?: string | null;
+  latest: string;
+}
+
 export const DEFAULT_CLAUDE_SETTINGS: ClaudeSettings = {
   auto_summarize_on_stop: false,
   summary_history_count: 10,
@@ -130,6 +149,7 @@ export interface Settings {
   i18n: I18nSettings;
   shortcuts?: ShortcutsSettings;
   claude?: ClaudeSettings;
+  hooks_updates?: HooksUpdatesSettings;
 }
 
 export interface SummaryResult {

@@ -1,0 +1,28 @@
+{
+  "winmux_hooks_version": "1.0.0",
+  "agent": "claude-code",
+  "min_winmux_version": "0.1.0",
+  "settings_file": "~/.claude/settings.json",
+  "events": {
+    "PreToolUse": {
+      "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Task",
+      "command": "${WINMUX_BIN} claude-hook pre-tool-use"
+    },
+    "Notification": {
+      "matcher": "*",
+      "command": "${WINMUX_BIN} claude-hook notification"
+    },
+    "SessionStart": {
+      "matcher": "*",
+      "command": "${WINMUX_BIN} claude-hook session-start"
+    },
+    "SessionEnd": {
+      "matcher": "*",
+      "command": "${WINMUX_BIN} claude-hook session-end"
+    },
+    "Stop": {
+      "matcher": "*",
+      "command": "${WINMUX_BIN} claude-hook stop"
+    }
+  }
+}

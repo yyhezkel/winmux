@@ -1903,6 +1903,31 @@ async fn spawn_ssh(
     let handle_for_state = Arc::clone(&handle_arc);
     let workspace_id_for_state = workspace_id.clone();
 
+    // Phase 18: hooks-outdated probe. Fire-and-forget — never blocks
+    // the SSH bring-up. Compares the version stamped into the
+    // remote's ~/.claude/settings.json (under
+    // `winmux_meta.hooks_version`) with the manifest's
+    // `hooks.claude-code.version`. When the remote is older AND the
+    // user hasn't dismissed that version, emit `hooks:outdated` so
+    // the frontend banner appears.
+    {
+        let app_clone = app.clone();
+        let state_clone: AppState = (*state).clone();
+        let ws_id = workspace_id.clone();
+        let pane_id_clone = pane_id.clone();
+        let handle_for_hooks = Arc::clone(&handle_arc);
+        tauri::async_runtime::spawn(async move {
+            crate::updater::check_remote_hooks(
+                &state_clone,
+                &app_clone,
+                &handle_for_hooks,
+                &ws_id,
+                &pane_id_clone,
+            )
+            .await;
+        });
+    }
+
     let id_for_task = id.clone();
     let pane_for_task = pane_id.clone();
     let app_for_task = app.clone();
@@ -3865,6 +3890,7 @@ pub fn run() {
             settings::settings_reset,
             settings::list_system_fonts,
             updater::check_for_updates_now,
+            updater::ssh_exec_in_workspace,
             connect_wizard::parse_ssh_config,
             connect_wizard::list_ssh_keys,
             connect_wizard::check_key_permissions,

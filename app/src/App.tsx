@@ -8,14 +8,21 @@ import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
 import { ProvisioningWizard } from "./ProvisioningWizard";
 import { SettingsModal } from "./SettingsModal";
-import { TerminalInstance } from "./terminalInstance";
+import {
+  TerminalInstance,
+  copyTerminalSelection,
+  pasteIntoActiveTerminal,
+  setCtrlCCopyOnSelect,
+} from "./terminalInstance";
 import {
   applyTheme,
   loadSettings,
+  DEFAULT_SHORTCUTS,
   type Settings,
   type UpdateInfo,
 } from "./settings";
 import { applyI18nSettings, t } from "./i18n";
+import { buildShortcutTable, matches, type ParsedShortcut } from "./shortcuts";
 import {
   collectPanes,
   describeConnection,
@@ -73,6 +80,12 @@ function App() {
   const [updateBanner, setUpdateBanner] = createSignal<UpdateInfo | null>(null);
   // Phase 14.A: server provisioning wizard.
   const [showProvision, setShowProvision] = createSignal(false);
+  // Phase 16: parsed shortcut accelerators, rebuilt on every settings
+  // load + settings:changed event. Backfilled with DEFAULT_SHORTCUTS
+  // when the field is missing (pre-16 settings.json).
+  const [shortcutTable, setShortcutTable] = createSignal<
+    Record<string, ParsedShortcut | null>
+  >(buildShortcutTable(DEFAULT_SHORTCUTS));
   // Phase 11.A: per-pane tmux persistence map { pane_id → session_name }.
   const [panePersistence, setPanePersistence] = createSignal<Record<string, string>>({});
   const refreshPersistence = async () => {
@@ -553,12 +566,46 @@ function App() {
   // ─── keyboard shortcuts ─────────────────────────────────────────────────
 
   const handleKey = (e: KeyboardEvent) => {
-    if (!e.ctrlKey || !e.shiftKey) return;
-    if (e.key === "N" || e.key === "n") {
+    // Phase 16: configurable shortcuts. The static Ctrl+Shift+D / E /
+    // W bindings (split right / split down / close pane) remain
+    // hardcoded for now — they're pane-relative and bound to the
+    // active pane, not a global "action", so they don't fit the
+    // shortcut-table model. Everything else flows through the table.
+    const sc = shortcutTable();
+    if (matches(e, sc.toggle_notes)) {
       e.preventDefault();
       setShowNotes((v) => !v);
       return;
     }
+    if (matches(e, sc.toggle_settings)) {
+      e.preventDefault();
+      setShowSettings((v) => !v);
+      return;
+    }
+    if (matches(e, sc.new_workspace)) {
+      e.preventDefault();
+      setShowCreate(true);
+      return;
+    }
+    if (matches(e, sc.copy)) {
+      // Try the focused terminal first; if it has a selection, copy.
+      // Otherwise let the browser handle the event (which may be a
+      // text-selection copy in a non-terminal pane).
+      void copyTerminalSelection().then((handled) => {
+        if (handled) e.preventDefault();
+      });
+      return;
+    }
+    if (matches(e, sc.paste)) {
+      e.preventDefault();
+      navigator.clipboard.readText().then((text) => {
+        if (text) pasteIntoActiveTerminal(text);
+      }).catch((err) => console.warn("paste failed", err));
+      return;
+    }
+    // Pane-relative legacy shortcuts (split / close) still on
+    // Ctrl+Shift+D/E/W until we expand the table.
+    if (!e.ctrlKey || !e.shiftKey) return;
     const target = activePaneId();
     if (!target) return;
     if (e.key === "D" || e.key === "d") {
@@ -604,6 +651,10 @@ function App() {
       setSettings(s);
       applyTheme(s);
       applyI18nSettings(s.i18n);
+      setShortcutTable(buildShortcutTable(s.shortcuts ?? DEFAULT_SHORTCUTS));
+      setCtrlCCopyOnSelect(
+        (s.shortcuts ?? DEFAULT_SHORTCUTS).copy_on_select_with_ctrl_c,
+      );
     } catch (e) {
       console.warn("settings_load failed", e);
     }
@@ -700,6 +751,12 @@ function App() {
         setSettings(e.payload);
         applyTheme(e.payload);
         applyI18nSettings(e.payload.i18n);
+        setShortcutTable(
+          buildShortcutTable(e.payload.shortcuts ?? DEFAULT_SHORTCUTS),
+        );
+        setCtrlCCopyOnSelect(
+          (e.payload.shortcuts ?? DEFAULT_SHORTCUTS).copy_on_select_with_ctrl_c,
+        );
       })
     );
     // Phase 9.B: update available — show a banner; user clicks to open notes.
@@ -857,6 +914,25 @@ function App() {
                 node={activeWs()!.layout!}
                 activePaneId={activePaneId()}
                 connectedPaneIds={connectedPanes()}
+                workspaceIsSsh={
+                  // Phase 16: walk the active workspace's layout looking for
+                  // any pane with an SSH connection. We pre-compute this
+                  // here so FileManagerPane (which lives deeper in the
+                  // tree and has no connection of its own) can render the
+                  // remote column even before the user opens a terminal.
+                  (() => {
+                    const ws = activeWs();
+                    if (!ws) return false;
+                    if (ws.connection?.type === "ssh") return true;
+                    const walk = (n: LayoutNode): boolean => {
+                      if (n.kind === "pane") {
+                        return n.connection?.type === "ssh";
+                      }
+                      return walk(n.first) || walk(n.second);
+                    };
+                    return ws.layout ? walk(ws.layout) : false;
+                  })()
+                }
                 pendingPasswordFor={pendingPwFor()}
                 pendingPassphrase={pendingPassphraseFor()}
                 pendingHostTrust={pendingHostTrust()}

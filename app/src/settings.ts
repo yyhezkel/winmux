@@ -75,6 +75,28 @@ export interface UpdatesSettings {
   last_seen_version?: string | null;
 }
 
+export interface ShortcutsSettings {
+  copy: string;
+  paste: string;
+  select_all: string;
+  find: string;
+  new_workspace: string;
+  toggle_notes: string;
+  toggle_settings: string;
+  copy_on_select_with_ctrl_c: boolean;
+}
+
+export const DEFAULT_SHORTCUTS: ShortcutsSettings = {
+  copy: "Ctrl+Shift+C",
+  paste: "Ctrl+Shift+V",
+  select_all: "Ctrl+Shift+A",
+  find: "Ctrl+F",
+  new_workspace: "Ctrl+N",
+  toggle_notes: "Ctrl+Shift+N",
+  toggle_settings: "Ctrl+,",
+  copy_on_select_with_ctrl_c: true,
+};
+
 export interface I18nSettings {
   language: "en" | "he" | "ar" | "ru" | string;
   direction: "auto" | "ltr" | "rtl" | string;
@@ -89,6 +111,7 @@ export interface Settings {
   notifications: NotificationSettings;
   updates: UpdatesSettings;
   i18n: I18nSettings;
+  shortcuts?: ShortcutsSettings;
 }
 
 export interface PresetEntry {

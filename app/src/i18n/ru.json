@@ -260,5 +260,21 @@
   "provisioning.done.workspace_created": "✓ Рабочее пространство \"{name}\" создано и готово.",
   "provisioning.done.workspace_skipped": "Подготовка завершилась без успешного входа по ключу — пространство не создано. Запустите мастер снова или создайте вручную.",
   "provisioning.done.btn.open_now": "Открыть сейчас",
-  "provisioning.done.btn.open_with_claude": "Открыть с Claude Code"
+  "provisioning.done.btn.open_with_claude": "Открыть с Claude Code",
+
+  "settings.tab.shortcuts": "горячие клавиши",
+  "settings.shortcuts.title": "Горячие клавиши",
+  "settings.shortcuts.hint": "Щёлкните привязку для записи новой комбинации. Esc отменяет. Сочетания только из модификаторов (один Ctrl и т.п.) отвергаются.",
+  "settings.shortcuts.copy": "Копировать",
+  "settings.shortcuts.paste": "Вставить",
+  "settings.shortcuts.select_all": "Выделить всё",
+  "settings.shortcuts.find": "Найти",
+  "settings.shortcuts.new_workspace": "Новое рабочее пространство",
+  "settings.shortcuts.toggle_notes": "Переключить заметки",
+  "settings.shortcuts.toggle_settings": "Переключить настройки",
+  "settings.shortcuts.ctrl_c_copy": "Когда выделен текст, Ctrl+C копирует вместо отправки SIGINT",
+  "settings.shortcuts.recording": "нажмите комбинацию…",
+
+  "fm.checkbox.show_local": "Показать локальный",
+  "fm.empty.connect_terminal_first": "Подключите панель терминала в этом пространстве для загрузки удалённых файлов."
 }

@@ -23,6 +23,11 @@ interface Props {
   /** True if the workspace is an SSH workspace (i.e. the right column
    *  should be visible). When false we show only the local column.    */
   hasSsh: boolean;
+  /** Phase 16: True iff a terminal pane in the workspace currently
+   *  has an active SSH session. When false (SSH workspace, no
+   *  terminal connected yet) the remote column shows a friendly
+   *  "connect a terminal first" placeholder instead of an error. */
+  hasActiveSession?: boolean;
 }
 
 type Side = "local" | "remote";
@@ -38,6 +43,11 @@ export function FileManagerPane(p: Props) {
   const [busy, setBusy] = createSignal(false);
   const [err, setErr] = createSignal<string | null>(null);
   const [status, setStatus] = createSignal<string>("");
+  // Phase 16: toolbar toggle for hiding the local column when the
+  // user only cares about remote. Default on SSH workspaces is to
+  // show both columns; users who want a wider remote pane flip
+  // this off.
+  const [showLocal, setShowLocal] = createSignal(true);
 
   const refreshLocal = async () => {
     try {
@@ -295,45 +305,56 @@ export function FileManagerPane(p: Props) {
         <Show when={p.hasSsh}>
           <button class="fm-action" disabled={!localSel() || busy()} onClick={() => void uploadSel()}>{t("fm.btn.upload")}</button>
           <button class="fm-action" disabled={!remoteSel() || busy()} onClick={() => void downloadSel()}>{t("fm.btn.download")}</button>
+          <label class="fm-checkbox">
+            <input
+              type="checkbox"
+              checked={showLocal()}
+              onChange={(e) => setShowLocal(e.currentTarget.checked)}
+            />
+            <span>{t("fm.checkbox.show_local")}</span>
+          </label>
         </Show>
         <span class="fm-status">{busy() ? "…" : status()}</span>
         <Show when={err()}>
           <span class="fm-err" title={err()!}>⚠ {err()}</span>
         </Show>
       </div>
-      <div class={`fm-grid ${p.hasSsh ? "fm-grid-dual" : "fm-grid-single"}`}>
-        {/* Local column */}
-        <div class="fm-col">
-          <ColumnHeader side="local" path={localPath} setPath={setLocalPath} refresh={refreshLocal} />
-          <div class="fm-list">
-            <For each={localEntries()}>
-              {(e) => (
-                <div
-                  class={`fm-row ${localSel() === e.name ? "selected" : ""}`}
-                  onClick={() => setLocalSel(e.name)}
-                  onDblClick={() => navIntoLocal(e)}
-                  onContextMenu={(ev) => {
-                    ev.preventDefault();
-                    setLocalSel(e.name);
-                    const action = window.prompt(
-                      t("fm.action.prompt_local", { name: e.name }),
-                      e.is_dir ? "o" : "u"
-                    );
-                    if (action === "o" && e.is_dir) navIntoLocal(e);
-                    else if (action === "u" && p.hasSsh) void uploadSel();
-                    else if (action === "r") void renameSel("local");
-                    else if (action === "d") void deleteSel("local");
-                  }}
-                >
-                  <span class="fm-icon">{e.is_dir ? "📁" : e.is_link ? "🔗" : "📄"}</span>
-                  <span class="fm-name">{e.name}</span>
-                  <span class="fm-size">{e.is_dir ? "" : fmtSize(e.size)}</span>
-                  <span class="fm-time">{fmtTime(e.modified)}</span>
-                </div>
-              )}
-            </For>
+      <div class={`fm-grid ${p.hasSsh && showLocal() ? "fm-grid-dual" : "fm-grid-single"}`}>
+        {/* Local column — hidden when the user untoggles "Show local"
+            and we have an SSH workspace to focus on. */}
+        <Show when={!p.hasSsh || showLocal()}>
+          <div class="fm-col">
+            <ColumnHeader side="local" path={localPath} setPath={setLocalPath} refresh={refreshLocal} />
+            <div class="fm-list">
+              <For each={localEntries()}>
+                {(e) => (
+                  <div
+                    class={`fm-row ${localSel() === e.name ? "selected" : ""}`}
+                    onClick={() => setLocalSel(e.name)}
+                    onDblClick={() => navIntoLocal(e)}
+                    onContextMenu={(ev) => {
+                      ev.preventDefault();
+                      setLocalSel(e.name);
+                      const action = window.prompt(
+                        t("fm.action.prompt_local", { name: e.name }),
+                        e.is_dir ? "o" : "u"
+                      );
+                      if (action === "o" && e.is_dir) navIntoLocal(e);
+                      else if (action === "u" && p.hasSsh) void uploadSel();
+                      else if (action === "r") void renameSel("local");
+                      else if (action === "d") void deleteSel("local");
+                    }}
+                  >
+                    <span class="fm-icon">{e.is_dir ? "📁" : e.is_link ? "🔗" : "📄"}</span>
+                    <span class="fm-name">{e.name}</span>
+                    <span class="fm-size">{e.is_dir ? "" : fmtSize(e.size)}</span>
+                    <span class="fm-time">{fmtTime(e.modified)}</span>
+                  </div>
+                )}
+              </For>
+            </div>
           </div>
-        </div>
+        </Show>
         {/* Remote column (SSH workspaces only) */}
         <Show when={p.hasSsh}>
           <div class="fm-col">
@@ -343,7 +364,16 @@ export function FileManagerPane(p: Props) {
                 when={remoteEntries().length > 0}
                 fallback={
                   <div class="fm-empty">
-                    {err() ? t("fm.empty.no_ssh") : t("fm.empty.empty")}
+                    {/* Phase 16: differentiate "SSH workspace, terminal not
+                         connected yet" from a true error. The backend
+                         returns `no active SSH session` precisely in this
+                         shape — surface a friendlier message that points
+                         the user at the fix. */}
+                    {!p.hasActiveSession
+                      ? t("fm.empty.connect_terminal_first")
+                      : err()
+                      ? t("fm.empty.no_ssh")
+                      : t("fm.empty.empty")}
                   </div>
                 }
               >

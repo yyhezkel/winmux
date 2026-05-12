@@ -31,6 +31,10 @@ export type RtlMode = "auto_per_line" | "bidi_reorder" | "off";
 let g_fontFamily: string | null = null;
 let g_fontSizePx: number | null = null;
 let g_rtlMode: RtlMode = "auto_per_line";
+/** Phase 16: when true, Ctrl+C with a non-empty selection copies the
+ *  selection to clipboard instead of sending SIGINT. Mirrors Windows
+ *  Terminal / VS Code's behavior. Settings → Shortcuts toggles it. */
+let g_ctrlCCopyOnSelect = true;
 const g_terminals: Set<TerminalInstance> = new Set();
 
 /**
@@ -77,6 +81,51 @@ export function setRtlMode(mode: RtlMode): void {
 
 export function getRtlMode(): RtlMode {
   return g_rtlMode;
+}
+
+/** Phase 16: flip the Ctrl+C-copies-on-selection behavior at runtime. */
+export function setCtrlCCopyOnSelect(enabled: boolean): void {
+  g_ctrlCCopyOnSelect = enabled;
+}
+
+/** Paste arbitrary text into the active terminal. xterm.js will wrap
+ *  the bytes with bracketed-paste escape codes if the connected shell
+ *  has enabled the mode (which most modern shells do). Falls back to
+ *  the first focused terminal if a specific instance isn't passed. */
+export function pasteIntoActiveTerminal(text: string): void {
+  if (!text) return;
+  let target: TerminalInstance | null = null;
+  for (const ti of g_terminals) {
+    if (ti.container.contains(document.activeElement)) {
+      target = ti;
+      break;
+    }
+  }
+  if (!target) target = g_terminals.values().next().value ?? null;
+  try {
+    target?.term.paste(text);
+  } catch (e) {
+    console.warn("paste failed", e);
+  }
+}
+
+/** Copy the current xterm.js selection (if any) to the system
+ *  clipboard. Returns true on success — the caller uses the boolean
+ *  to decide whether to fall through to a different binding. */
+export async function copyTerminalSelection(): Promise<boolean> {
+  for (const ti of g_terminals) {
+    if (!ti.container.contains(document.activeElement)) continue;
+    const sel = ti.term.getSelection();
+    if (!sel) return false;
+    try {
+      await navigator.clipboard.writeText(sel);
+      return true;
+    } catch (e) {
+      console.warn("clipboard.writeText failed", e);
+      return false;
+    }
+  }
+  return false;
 }
 
 export class TerminalInstance {
@@ -141,6 +190,33 @@ export class TerminalInstance {
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
     this.term.open(this.container);
+
+    // Phase 16: custom key handler. When the user presses plain
+    // Ctrl+C with a non-empty selection AND the setting is enabled,
+    // copy to clipboard + suppress the keystroke (so the shell never
+    // sees a SIGINT). All other keystrokes fall through unchanged.
+    // Returning `false` from `attachCustomKeyEventHandler` tells
+    // xterm.js NOT to forward the event to the PTY.
+    this.term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      if (
+        g_ctrlCCopyOnSelect &&
+        e.ctrlKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        (e.key === "c" || e.key === "C")
+      ) {
+        const sel = this.term.getSelection();
+        if (sel) {
+          navigator.clipboard.writeText(sel).catch((err) =>
+            console.warn("ctrl-c copy failed", err)
+          );
+          return false; // swallow — don't send SIGINT
+        }
+      }
+      return true;
+    });
 
     // Phase 15.A: only load the WebGL addon for the non-auto modes.
     // `auto_per_line` needs the DOM renderer so we can attach

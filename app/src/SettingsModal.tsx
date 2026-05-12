@@ -11,8 +11,10 @@ import {
   saveSettings,
   listSystemFonts,
   checkForUpdates,
+  DEFAULT_SHORTCUTS,
 } from "./settings";
 import { applyI18nSettings, LANGUAGES, t } from "./i18n";
+import { formatEvent } from "./shortcuts";
 
 interface Props {
   open: boolean;
@@ -21,7 +23,7 @@ interface Props {
   onChange: (next: Settings) => void;
 }
 
-type Tab = "theme" | "font" | "terminal" | "hooks" | "notifications" | "updates" | "language";
+type Tab = "theme" | "font" | "terminal" | "shortcuts" | "hooks" | "notifications" | "updates" | "language";
 
 export function SettingsModal(p: Props) {
   const [tab, setTab] = createSignal<Tab>("theme");
@@ -140,7 +142,7 @@ export function SettingsModal(p: Props) {
 
           <div class="settings-body">
             <nav class="settings-tabs">
-              <For each={["theme", "font", "terminal", "hooks", "notifications", "updates", "language"] as Tab[]}>
+              <For each={["theme", "font", "terminal", "shortcuts", "hooks", "notifications", "updates", "language"] as Tab[]}>
                 {(name) => (
                   <button
                     class={`settings-tab ${tab() === name ? "active" : ""}`}
@@ -382,6 +384,52 @@ export function SettingsModal(p: Props) {
                 </section>
               </Show>
 
+              {/* ── Shortcuts ────────────────────────────────────────── */}
+              <Show when={tab() === "shortcuts"}>
+                <section>
+                  <h4>{t("settings.shortcuts.title")}</h4>
+                  <p class="settings-hint" style="margin-top:0">
+                    {t("settings.shortcuts.hint")}
+                  </p>
+                  <For each={[
+                    ["copy", "settings.shortcuts.copy"],
+                    ["paste", "settings.shortcuts.paste"],
+                    ["select_all", "settings.shortcuts.select_all"],
+                    ["find", "settings.shortcuts.find"],
+                    ["new_workspace", "settings.shortcuts.new_workspace"],
+                    ["toggle_notes", "settings.shortcuts.toggle_notes"],
+                    ["toggle_settings", "settings.shortcuts.toggle_settings"],
+                  ] as const}>
+                    {([key, labelKey]) => (
+                      <ShortcutRow
+                        label={t(labelKey)}
+                        value={(p.settings.shortcuts ?? DEFAULT_SHORTCUTS)[key]}
+                        defaultValue={DEFAULT_SHORTCUTS[key]}
+                        onChange={(v) =>
+                          update("shortcuts", {
+                            ...(p.settings.shortcuts ?? DEFAULT_SHORTCUTS),
+                            [key]: v,
+                          } as Settings["shortcuts"])
+                        }
+                      />
+                    )}
+                  </For>
+                  <label class="settings-checkbox" style="margin-top: 12px;">
+                    <input
+                      type="checkbox"
+                      checked={(p.settings.shortcuts ?? DEFAULT_SHORTCUTS).copy_on_select_with_ctrl_c}
+                      onChange={(e) =>
+                        update("shortcuts", {
+                          ...(p.settings.shortcuts ?? DEFAULT_SHORTCUTS),
+                          copy_on_select_with_ctrl_c: e.currentTarget.checked,
+                        } as Settings["shortcuts"])
+                      }
+                    />
+                    <span>{t("settings.shortcuts.ctrl_c_copy")}</span>
+                  </label>
+                </section>
+              </Show>
+
               {/* ── Hooks ────────────────────────────────────────────── */}
               <Show when={tab() === "hooks"}>
                 <section>
@@ -546,6 +594,51 @@ function ColorRow(p: { label: string; value: string; onInput: (v: string) => voi
         onInput={(e) => p.onInput(e.currentTarget.value)}
       />
       <span>{p.label}</span>
+    </div>
+  );
+}
+
+function ShortcutRow(p: {
+  label: string;
+  value: string;
+  defaultValue: string;
+  onChange: (v: string) => void;
+}) {
+  const [recording, setRecording] = createSignal(false);
+  return (
+    <div class="settings-shortcut-row">
+      <span class="settings-shortcut-label">{p.label}</span>
+      <input
+        type="text"
+        class="settings-shortcut-input"
+        value={recording() ? t("settings.shortcuts.recording") : p.value}
+        readOnly
+        onFocus={() => setRecording(true)}
+        onBlur={() => setRecording(false)}
+        onKeyDown={(e) => {
+          if (!recording()) return;
+          // Esc cancels the recording without committing.
+          if (e.key === "Escape") {
+            e.preventDefault();
+            (e.currentTarget as HTMLInputElement).blur();
+            return;
+          }
+          const formatted = formatEvent(e);
+          if (formatted) {
+            e.preventDefault();
+            p.onChange(formatted);
+            (e.currentTarget as HTMLInputElement).blur();
+          }
+        }}
+      />
+      <button
+        class="settings-shortcut-reset"
+        type="button"
+        title={t("common.reset")}
+        onClick={() => p.onChange(p.defaultValue)}
+      >
+        ↺
+      </button>
     </div>
   );
 }

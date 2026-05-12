@@ -40,6 +40,12 @@ interface Props {
   onBrowserGoHome: (paneId: string) => void;
   // Phase 8.B: per-pane forward toggle.
   onBrowserSetForward: (paneId: string, forward: boolean) => void;
+  // Phase 16: workspace-level SSH detection. The file manager pane
+  // can't tell from its own LayoutNode whether the workspace is SSH
+  // (file-manager panes carry no connection), so the parent (App)
+  // tells it explicitly. True iff the workspace has at least one
+  // pane with an SSH connection.
+  workspaceIsSsh: boolean;
 }
 
 export function LayoutView(p: Props) {
@@ -64,14 +70,12 @@ export function LayoutView(p: Props) {
 function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" }> }) {
   const isActive = () => props.all.activePaneId === props.pane.pane_id;
   const kind = () => paneKindOf(props.pane);
-  // Phase 15.B: detect whether the workspace has any SSH-capable pane so
-  // the file manager can decide whether to show the remote column. We
-  // can't ask the backend cheaply here, so fall back to looking at the
-  // pane's own connection (when present) — good enough for the MVP
-  // since a file-manager pane in a workspace generally co-exists with
-  // a terminal pane that has the connection metadata.
-  const workspaceIsSsh = () =>
-    props.pane.connection?.type === "ssh";
+  // Phase 16: SSH detection moved up to the workspace level. Reading
+  // it off the file-manager pane's own connection (the previous code
+  // path) always returned false because file-manager panes don't
+  // carry one — that left the file manager rendering only the local
+  // column even in clearly-SSH workspaces.
+  const workspaceIsSsh = () => props.all.workspaceIsSsh;
   return (
     <Switch
       fallback={
@@ -135,7 +139,8 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           <div class="pane-body">
             <FileManagerPane
               workspaceId={props.all.workspaceId}
-              hasSsh={workspaceIsSsh() || props.all.connectedPaneIds.size > 0}
+              hasSsh={workspaceIsSsh()}
+              hasActiveSession={props.all.connectedPaneIds.size > 0}
             />
           </div>
         </div>

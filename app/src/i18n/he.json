@@ -260,5 +260,21 @@
   "provisioning.done.workspace_created": "✓ סביבת העבודה \"{name}\" נוצרה ומוכנה.",
   "provisioning.done.workspace_skipped": "ההקמה הסתיימה ללא כניסה מוצלחת עם המפתח — לא נוצרה סביבת עבודה. הרץ את האשף שוב או צור ידנית.",
   "provisioning.done.btn.open_now": "פתח עכשיו",
-  "provisioning.done.btn.open_with_claude": "פתח עם Claude Code"
+  "provisioning.done.btn.open_with_claude": "פתח עם Claude Code",
+
+  "settings.tab.shortcuts": "קיצורי דרך",
+  "settings.shortcuts.title": "קיצורי מקלדת",
+  "settings.shortcuts.hint": "לחץ על קיצור כדי להקליט צירוף חדש. Esc מבטל. צירופים של מקש modifier בלבד (Ctrl לבדו, וכו') יידחו.",
+  "settings.shortcuts.copy": "העתק",
+  "settings.shortcuts.paste": "הדבק",
+  "settings.shortcuts.select_all": "בחר הכל",
+  "settings.shortcuts.find": "חיפוש",
+  "settings.shortcuts.new_workspace": "סביבת עבודה חדשה",
+  "settings.shortcuts.toggle_notes": "החלף תצוגת הערות",
+  "settings.shortcuts.toggle_settings": "החלף תצוגת הגדרות",
+  "settings.shortcuts.ctrl_c_copy": "כשטקסט מסומן, Ctrl+C מעתיק במקום לשלוח SIGINT",
+  "settings.shortcuts.recording": "הקש צירוף מקשים…",
+
+  "fm.checkbox.show_local": "הצג מקומי",
+  "fm.empty.connect_terminal_first": "חבר פאנל טרמינל ב-workspace הזה כדי לטעון קבצים מהשרת."
 }

@@ -1871,6 +1871,50 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   overflow-y: auto;
 }
 
+/* ─── Phase 16: shortcuts settings tab ─── */
+
+.settings-shortcut-row {
+  display: grid;
+  grid-template-columns: 1fr 180px 32px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.settings-shortcut-label {
+  color: var(--w-text);
+  font-size: var(--w-fs-md);
+}
+.settings-shortcut-input {
+  background: var(--w-bg);
+  color: var(--w-text);
+  border: 1px solid var(--w-border-hi);
+  border-radius: var(--w-r-sm);
+  padding: 4px 8px;
+  font-family: var(--w-font-mono);
+  font-size: var(--w-fs-sm);
+  text-align: center;
+  cursor: pointer;
+  outline: none;
+}
+.settings-shortcut-input:focus {
+  border-color: var(--w-accent);
+  background: rgba(122, 162, 247, 0.1);
+}
+.settings-shortcut-reset {
+  background: transparent;
+  border: 1px solid var(--w-border-hi);
+  color: var(--w-text-dim);
+  border-radius: var(--w-r-sm);
+  cursor: pointer;
+  font-size: var(--w-fs-md);
+  width: 100%;
+  padding: 3px 0;
+}
+.settings-shortcut-reset:hover {
+  background: var(--w-surface-hi);
+  color: var(--w-text);
+}
+
 /* ─── Phase 12.C: local PTY wizard mode tabs ─── */
 
 .local-wizard-tabs {

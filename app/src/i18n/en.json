@@ -260,5 +260,21 @@
   "provisioning.done.workspace_created": "✓ Workspace \"{name}\" created and ready.",
   "provisioning.done.workspace_skipped": "Provisioning ended without a working key login — no workspace was created. Re-run the wizard or create one manually.",
   "provisioning.done.btn.open_now": "Open it now",
-  "provisioning.done.btn.open_with_claude": "Open with Claude Code"
+  "provisioning.done.btn.open_with_claude": "Open with Claude Code",
+
+  "settings.tab.shortcuts": "shortcuts",
+  "settings.shortcuts.title": "Keyboard shortcuts",
+  "settings.shortcuts.hint": "Click a binding to record a new combination. Esc cancels. Modifier-only chords (Ctrl alone, etc.) are rejected.",
+  "settings.shortcuts.copy": "Copy",
+  "settings.shortcuts.paste": "Paste",
+  "settings.shortcuts.select_all": "Select all",
+  "settings.shortcuts.find": "Find",
+  "settings.shortcuts.new_workspace": "New workspace",
+  "settings.shortcuts.toggle_notes": "Toggle notes",
+  "settings.shortcuts.toggle_settings": "Toggle settings",
+  "settings.shortcuts.ctrl_c_copy": "When text is selected, Ctrl+C copies instead of sending SIGINT",
+  "settings.shortcuts.recording": "press a key combo…",
+
+  "fm.checkbox.show_local": "Show local",
+  "fm.empty.connect_terminal_first": "Connect a terminal pane in this workspace to load remote files."
 }

@@ -226,6 +226,45 @@ impl Default for I18n {
     }
 }
 
+/// Phase 16: configurable keyboard shortcuts. Stored as human-readable
+/// `Ctrl+Shift+X` strings — parsed in the frontend (see
+/// `src/shortcuts.ts`) so users can hand-edit settings.json and the
+/// next launch picks up the change.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub(crate) struct Shortcuts {
+    pub copy: String,
+    pub paste: String,
+    pub select_all: String,
+    pub find: String,
+    pub new_workspace: String,
+    pub toggle_notes: String,
+    pub toggle_settings: String,
+    /// When true and the terminal has a selection, plain Ctrl+C copies
+    /// to clipboard instead of sending SIGINT. Matches Windows Terminal
+    /// + most modern terminal apps. Set to false to always send SIGINT.
+    #[serde(default = "default_true")]
+    pub copy_on_select_with_ctrl_c: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Shortcuts {
+    fn default() -> Self {
+        Self {
+            copy: "Ctrl+Shift+C".into(),
+            paste: "Ctrl+Shift+V".into(),
+            select_all: "Ctrl+Shift+A".into(),
+            find: "Ctrl+F".into(),
+            new_workspace: "Ctrl+N".into(),
+            toggle_notes: "Ctrl+Shift+N".into(),
+            toggle_settings: "Ctrl+,".into(),
+            copy_on_select_with_ctrl_c: true,
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub(crate) struct Settings {
     pub version: u32,
@@ -239,6 +278,10 @@ pub(crate) struct Settings {
     // settings.json files load without the field.
     #[serde(default)]
     pub i18n: I18n,
+    /// Phase 16. `#[serde(default)]` so pre-16 settings.json files
+    /// load with the built-in defaults.
+    #[serde(default)]
+    pub shortcuts: Shortcuts,
 }
 
 impl Default for Theme {
@@ -332,6 +375,7 @@ impl Default for Settings {
             notifications: Notifications::default(),
             updates: Updates::default(),
             i18n: I18n::default(),
+            shortcuts: Shortcuts::default(),
         }
     }
 }

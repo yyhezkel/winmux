@@ -1,4 +1,5 @@
 import { createSignal, For, Show, createMemo } from "solid-js";
+import { t } from "./i18n";
 import type { Note, Workspace } from "./types";
 
 interface Props {
@@ -70,12 +71,12 @@ export function NotesModal(p: Props) {
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <h3>Notes</h3>
+          <h3>{t("notes.title")}</h3>
 
           <div class="notes-add">
             <textarea
               class="notes-text"
-              placeholder="Drop an idea, bug, or todo… Ctrl+Enter to save."
+              placeholder={t("notes.placeholder")}
               rows="3"
               value={text()}
               onInput={(e) => setText(e.currentTarget.value)}
@@ -206,7 +207,7 @@ export function NotesModal(p: Props) {
           </div>
 
           <div class="modal-buttons">
-            <button onClick={p.onClose}>Close</button>
+            <button onClick={p.onClose}>{t("notes.btn.close")}</button>
           </div>
         </div>
       </div>
@@ -238,7 +239,7 @@ function NoteCard(props: {
             fallback={
               <button
                 class="note-btn"
-                title="Reopen"
+                title={t("notes.btn.reopen")}
                 onClick={() => props.onReopen(props.note.id)}
               >
                 ↺
@@ -247,7 +248,7 @@ function NoteCard(props: {
           >
             <button
               class="note-btn"
-              title="Mark done"
+              title={t("notes.btn.mark_done")}
               onClick={() => props.onDone(props.note.id)}
             >
               ✓
@@ -255,7 +256,7 @@ function NoteCard(props: {
           </Show>
           <button
             class="note-btn note-delete"
-            title="Delete"
+            title={t("notes.btn.delete")}
             onClick={() => {
               if (window.confirm("Delete this note?")) props.onDelete(props.note.id);
             }}

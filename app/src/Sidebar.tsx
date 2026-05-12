@@ -124,8 +124,8 @@ export function Sidebar(p: Props) {
           )}
         </For>
       </div>
-      <button class="ws-provision" onClick={p.onProvision} title="Bootstrap a fresh server with users, keys, and tools">
-        ☁ Provision server
+      <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
+        {t("sidebar.provision_server")}
       </button>
       <button class="ws-add" onClick={p.onCreate}>
         {t("sidebar.new_workspace")}

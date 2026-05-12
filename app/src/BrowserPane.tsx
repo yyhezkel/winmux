@@ -2,6 +2,7 @@ import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import html2canvas from "html2canvas";
+import { t } from "./i18n";
 import type { LayoutNode, SplitDirection } from "./types";
 
 interface Props {
@@ -280,7 +281,7 @@ export function BrowserPane(p: Props) {
       <div class="pane-header browser-header">
         <button
           class="pane-btn"
-          title="Back"
+          title={t("browser.btn.back")}
           disabled={browser().history.length === 0}
           onClick={(e) => {
             e.stopPropagation();
@@ -291,7 +292,7 @@ export function BrowserPane(p: Props) {
         </button>
         <button
           class="pane-btn"
-          title="Reload"
+          title={t("browser.btn.reload")}
           onClick={(e) => {
             e.stopPropagation();
             reload();
@@ -301,7 +302,7 @@ export function BrowserPane(p: Props) {
         </button>
         <button
           class="pane-btn"
-          title="Home"
+          title={t("browser.btn.home")}
           disabled={!browser().home_url}
           onClick={(e) => {
             e.stopPropagation();
@@ -326,7 +327,7 @@ export function BrowserPane(p: Props) {
         />
         <button
           class="pane-btn"
-          title="Go"
+          title={t("browser.btn.go")}
           onClick={(e) => {
             e.stopPropagation();
             submitUrl();
@@ -349,7 +350,7 @@ export function BrowserPane(p: Props) {
         </Show>
         <label
           class="browser-forward-toggle"
-          title="Forward localhost via SSH (Phase 8.B)"
+          title={t("browser.btn.forward_localhost")}
           onMouseDown={(e) => e.stopPropagation()}
         >
           <input
@@ -368,7 +369,7 @@ export function BrowserPane(p: Props) {
         </Show>
         <button
           class="pane-btn"
-          title="Split right"
+          title={t("browser.btn.split_right")}
           onClick={(e) => {
             e.stopPropagation();
             p.onSplit(p.pane.pane_id, "horizontal");
@@ -378,7 +379,7 @@ export function BrowserPane(p: Props) {
         </button>
         <button
           class="pane-btn"
-          title="Split down"
+          title={t("browser.btn.split_down")}
           onClick={(e) => {
             e.stopPropagation();
             p.onSplit(p.pane.pane_id, "vertical");
@@ -388,7 +389,7 @@ export function BrowserPane(p: Props) {
         </button>
         <button
           class="pane-btn pane-close"
-          title="Close pane"
+          title={t("browser.btn.close")}
           onClick={(e) => {
             e.stopPropagation();
             p.onClose(p.pane.pane_id);
@@ -403,7 +404,7 @@ export function BrowserPane(p: Props) {
             Cleared as soon as a successful resolve sets resolvedUrl. */}
         <Show when={resolveErr()?.includes("no active SSH session")}>
           <div class="browser-waiting">
-            <p>Waiting for SSH session to come up…</p>
+            <p>{t("browser.waiting_ssh")}</p>
             <p class="browser-hint">
               Connect a terminal pane in this workspace to enable port forwarding,
               then press ↺ to retry.
@@ -415,7 +416,7 @@ export function BrowserPane(p: Props) {
           fallback={
             <Show when={!resolveErr()?.includes("no active SSH session")}>
               <div class="browser-placeholder">
-                <p>Enter a URL above to load a page.</p>
+                <p>{t("browser.empty_url")}</p>
                 <p class="browser-hint">
                   Note: many sites (Google, banks, etc.) block iframe embedding via
                   X-Frame-Options. WebView2 native panes will lift this in a later

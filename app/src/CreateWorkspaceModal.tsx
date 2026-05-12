@@ -1,5 +1,6 @@
 import { createEffect, createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "./i18n";
 import type { Connection, EnvVar, Workspace } from "./types";
 
 // Phase 13.A wizard data shapes — mirror the Rust definitions in
@@ -289,20 +290,20 @@ export function CreateWorkspaceModal(p: Props) {
     <Show when={p.open}>
       <div class="modal-backdrop" onClick={p.onClose}>
         <div class="modal" onClick={(e) => e.stopPropagation()}>
-          <h3>{isEdit() ? "Edit workspace" : "New workspace"}</h3>
+          <h3>{isEdit() ? t("ws.create.title.edit") : t("ws.create.title.new")}</h3>
 
           <label>
-            <span>Name</span>
+            <span>{t("ws.create.field.name")}</span>
             <input
               autofocus
               value={name()}
               onInput={(e) => setName(e.currentTarget.value)}
-              placeholder="e.g. Local PowerShell"
+              placeholder={t("ws.create.field.name.placeholder")}
             />
           </label>
 
           <label>
-            <span>Color</span>
+            <span>{t("ws.create.field.color")}</span>
             <input
               type="color"
               value={color()}
@@ -311,7 +312,7 @@ export function CreateWorkspaceModal(p: Props) {
           </label>
 
           <label>
-            <span>Type</span>
+            <span>{t("ws.create.field.type")}</span>
             <select
               value={type()}
               onChange={(e) =>
@@ -319,18 +320,18 @@ export function CreateWorkspaceModal(p: Props) {
               }
               disabled={isEdit()}
             >
-              <option value="local">Local PTY</option>
-              <option value="ssh">SSH</option>
+              <option value="local">{t("ws.create.field.type.local")}</option>
+              <option value="ssh">{t("ws.create.field.type.ssh")}</option>
             </select>
           </label>
 
           <Show when={type() === "local"}>
             <label>
-              <span>Shell</span>
+              <span>{t("ws.create.field.shell")}</span>
               <input
                 value={shell()}
                 onInput={(e) => setShell(e.currentTarget.value)}
-                placeholder="(auto: pwsh→powershell→cmd)"
+                placeholder={t("ws.create.field.shell.placeholder")}
                 disabled={isEdit()}
               />
             </label>
@@ -346,11 +347,11 @@ export function CreateWorkspaceModal(p: Props) {
                   onClick={() => setShowHostPicker(true)}
                   title={
                     sshHosts().length === 0
-                      ? "No ~/.ssh/config hosts found"
-                      : `Pick from ${sshHosts().length} ssh_config host(s)`
+                      ? t("wizard.import_no_hosts")
+                      : t("wizard.import_hosts_tooltip", { n: sshHosts().length })
                   }
                 >
-                  Import from SSH config
+                  {t("wizard.import_btn")}
                   <Show when={sshHosts().length > 0}>
                     <span class="wizard-pill">{sshHosts().length}</span>
                   </Show>
@@ -358,7 +359,7 @@ export function CreateWorkspaceModal(p: Props) {
               </div>
             </Show>
             <label>
-              <span>User</span>
+              <span>{t("ws.create.field.user")}</span>
               <input
                 value={user()}
                 onInput={(e) => setUser(e.currentTarget.value)}
@@ -367,16 +368,16 @@ export function CreateWorkspaceModal(p: Props) {
               />
             </label>
             <label>
-              <span>Host</span>
+              <span>{t("ws.create.field.host")}</span>
               <input
                 value={host()}
                 onInput={(e) => setHost(e.currentTarget.value)}
-                placeholder="example.com or 1.2.3.4"
+                placeholder={t("ws.create.field.host.placeholder")}
                 disabled={isEdit()}
               />
             </label>
             <label>
-              <span>Port</span>
+              <span>{t("ws.create.field.port")}</span>
               <input
                 type="number"
                 value={port()}
@@ -387,7 +388,7 @@ export function CreateWorkspaceModal(p: Props) {
               />
             </label>
             <label>
-              <span>Key</span>
+              <span>{t("ws.create.field.key")}</span>
               <select
                 value={keyMode()}
                 disabled={isEdit()}
@@ -402,11 +403,11 @@ export function CreateWorkspaceModal(p: Props) {
                   }
                 }}
               >
-                <option value="auto">Auto (ssh-agent → ~/.ssh defaults)</option>
+                <option value="auto">{t("ws.create.key.mode.auto")}</option>
                 <option value="detected" disabled={detectedKeys().length === 0}>
-                  Detected key ({detectedKeys().length} found)
+                  {t("ws.create.key.mode.detected", { n: detectedKeys().length })}
                 </option>
-                <option value="custom">Custom path…</option>
+                <option value="custom">{t("ws.create.key.mode.custom")}</option>
               </select>
             </label>
             <Show when={keyMode() === "detected"}>
@@ -439,38 +440,38 @@ export function CreateWorkspaceModal(p: Props) {
                     if (e.currentTarget.value) void refreshPermsFor(e.currentTarget.value);
                     else setKeyPerms(null);
                   }}
-                  placeholder="C:\Users\you\.ssh\id_ed25519"
+                  placeholder={t("ws.create.field.key.placeholder")}
                   disabled={isEdit()}
                 />
               </label>
             </Show>
             <Show when={keyPath() && keyPerms() && !keyPerms()!.ok && !isEdit()}>
               <div class="wizard-row wizard-warn">
-                <span>⚠ Permissions too open: {keyPerms()!.error}</span>
+                <span>{t("wizard.perms_warn", { err: keyPerms()!.error ?? "" })}</span>
                 <button
                   type="button"
                   class="wizard-fix"
                   onClick={() => void onFixPerms()}
                 >
-                  Fix permissions
+                  {t("wizard.perms_fix")}
                 </button>
               </div>
             </Show>
             <Show when={keyPath() && keyPerms()?.ok && !isEdit()}>
-              <div class="wizard-row wizard-ok">✓ Permissions locked to current user</div>
+              <div class="wizard-row wizard-ok">{t("wizard.perms_ok")}</div>
             </Show>
             <Show when={!isEdit()}>
               <div class="wizard-test">
                 <div class="wizard-test-fields">
                   <input
                     type="password"
-                    placeholder="Password (only if needed)"
+                    placeholder={t("wizard.test_password.placeholder")}
                     value={testPassword()}
                     onInput={(e) => setTestPassword(e.currentTarget.value)}
                   />
                   <input
                     type="password"
-                    placeholder="Key passphrase (only if needed)"
+                    placeholder={t("wizard.test_passphrase.placeholder")}
                     value={testPassphrase()}
                     onInput={(e) => setTestPassphrase(e.currentTarget.value)}
                   />
@@ -481,7 +482,7 @@ export function CreateWorkspaceModal(p: Props) {
                   disabled={testing()}
                   onClick={() => void onTestConnect()}
                 >
-                  {testing() ? "Testing…" : "Test connection"}
+                  {testing() ? t("wizard.testing") : t("wizard.test_btn")}
                 </button>
                 <Show when={testResult()}>
                   <div
@@ -490,12 +491,15 @@ export function CreateWorkspaceModal(p: Props) {
                     <div class="wizard-test-line">
                       {testResult()!.ok ? "✓" : "✗"}{" "}
                       {testResult()!.message ??
-                        (testResult()!.ok ? "Connected" : "Failed")}
+                        (testResult()!.ok ? t("wizard.test_connected") : t("wizard.test_failed"))}
                     </div>
                     <Show when={testResult()!.method}>
                       <div class="wizard-test-meta">
-                        Method: {testResult()!.method} · Stage:{" "}
-                        {testResult()!.stage} · {testResult()!.elapsed_ms}ms
+                        {t("wizard.test_meta", {
+                          method: testResult()!.method ?? "",
+                          stage: testResult()!.stage,
+                          ms: testResult()!.elapsed_ms,
+                        })}
                       </div>
                     </Show>
                     <Show when={!testResult()!.ok && testResult()!.hint}>
@@ -510,33 +514,33 @@ export function CreateWorkspaceModal(p: Props) {
           <hr class="modal-sep" />
 
           <label class="modal-textarea-label">
-            <span>Setup cmd</span>
+            <span>{t("ws.create.field.setup_cmd")}</span>
             <textarea
               rows="2"
               value={setupCmd()}
               onInput={(e) => setSetupCmd(e.currentTarget.value)}
-              placeholder="run after the shell prompt is ready, e.g. 'cd /repo && nvm use'"
+              placeholder={t("ws.create.field.setup_cmd.placeholder")}
             />
           </label>
 
           <label class="modal-textarea-label">
-            <span>Teardown cmd</span>
+            <span>{t("ws.create.field.teardown_cmd")}</span>
             <textarea
               rows="2"
               value={teardownCmd()}
               onInput={(e) => setTeardownCmd(e.currentTarget.value)}
-              placeholder="run before disconnect, e.g. 'make clean'"
+              placeholder={t("ws.create.field.teardown_cmd.placeholder")}
             />
           </label>
 
           <div class="env-editor">
             <div class="env-editor-head">
-              <span>Env vars</span>
+              <span>{t("ws.create.field.env")}</span>
               <button
                 class="env-add"
                 onClick={() => setEnvRows([...envRows(), { key: "", value: "" }])}
               >
-                + add
+                {t("ws.create.btn.add_env")}
               </button>
             </div>
             <For each={envRows()}>
@@ -581,9 +585,9 @@ export function CreateWorkspaceModal(p: Props) {
           </div>
 
           <div class="modal-buttons">
-            <button onClick={p.onClose}>Cancel</button>
+            <button onClick={p.onClose}>{t("common.cancel")}</button>
             <button class="primary" onClick={submit}>
-              {isEdit() ? "Save" : "Create"}
+              {isEdit() ? t("common.save") : t("ws.create.btn.create")}
             </button>
           </div>
         </div>
@@ -598,13 +602,11 @@ export function CreateWorkspaceModal(p: Props) {
             class="modal wizard-host-picker"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3>Pick a host from ~/.ssh/config</h3>
+            <h3>{t("wizard.picker.title")}</h3>
             <Show
               when={sshHosts().length > 0}
               fallback={
-                <p class="status-line">
-                  No Host blocks found. Add some to ~/.ssh/config to use this.
-                </p>
+                <p class="status-line">{t("wizard.picker.empty")}</p>
               }
             >
               <ul class="wizard-host-list">
@@ -629,7 +631,7 @@ export function CreateWorkspaceModal(p: Props) {
               </ul>
             </Show>
             <div class="modal-buttons">
-              <button onClick={() => setShowHostPicker(false)}>Close</button>
+              <button onClick={() => setShowHostPicker(false)}>{t("common.close")}</button>
             </div>
           </div>
         </div>

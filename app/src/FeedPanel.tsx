@@ -1,4 +1,5 @@
 import { For, Show } from "solid-js";
+import { t } from "./i18n";
 import type { FeedItem } from "./types";
 
 interface Props {
@@ -27,7 +28,7 @@ export function FeedPanel(p: Props) {
                 </Show>
                 <button
                   class="feed-x"
-                  title="Dismiss"
+                  title={t("feed.btn.dismiss")}
                   onClick={() => p.onDismiss(item.request_id)}
                 >
                   ×
@@ -43,13 +44,13 @@ export function FeedPanel(p: Props) {
                     class="feed-allow"
                     onClick={() => p.onDecide(item.request_id, "allow")}
                   >
-                    Allow
+                    {t("feed.allow")}
                   </button>
                   <button
                     class="feed-deny"
                     onClick={() => p.onDecide(item.request_id, "deny")}
                   >
-                    Deny
+                    {t("feed.deny")}
                   </button>
                 </div>
               </Show>

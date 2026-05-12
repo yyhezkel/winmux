@@ -292,9 +292,9 @@ export function SettingsModal(p: Props) {
                   </label>
                 </section>
                 <section>
-                  <h4>Web font (optional)</h4>
+                  <h4>{t("settings.font.web.title")}</h4>
                   <label>
-                    <span>Stylesheet URL</span>
+                    <span>{t("settings.font.web.url")}</span>
                     <input
                       type="text"
                       placeholder="https://fonts.googleapis.com/css2?family=Iosevka&display=swap"
@@ -305,8 +305,7 @@ export function SettingsModal(p: Props) {
                     />
                   </label>
                   <p class="settings-hint">
-                    Pastes a CSS link tag at runtime. After it loads, type the
-                    family name in the fields above (e.g. <code>Iosevka</code>).
+                    {t("settings.font.web.hint", { example: "Iosevka" })}
                   </p>
                 </section>
               </Show>
@@ -355,19 +354,16 @@ export function SettingsModal(p: Props) {
                   </label>
                 </section>
                 <section>
-                  <h4>Hebrew / Arabic (RTL)</h4>
+                  <h4>{t("settings.terminal.rtl.title")}</h4>
                   <p class="settings-hint" style="margin-top:0">
-                    How to display lines that contain right-to-left text.
-                    Switching the mode affects newly-opened panes
-                    immediately; existing panes update the write
-                    pipeline live but keep their original renderer.
+                    {t("settings.terminal.rtl.hint")}
                   </p>
                   <For each={[
-                    ["auto_per_line", "Per-line auto (Termius-style)", "DOM renderer; each line gets dir=\"auto\" and the browser picks direction by the first strong character. Best default for SSH prompts that occasionally print Hebrew."],
-                    ["bidi_reorder", "Full BiDi reorder (legacy)", "WebGL renderer + bidi-js logical→visual reorder. Faster paint, but rewrites the byte stream — editable lines may surprise."],
-                    ["off", "Off", "WebGL renderer, no reorder. Hebrew bytes render left-to-right as written."],
+                    ["auto_per_line", "settings.terminal.rtl.auto.label", "settings.terminal.rtl.auto.desc"],
+                    ["bidi_reorder", "settings.terminal.rtl.bidi.label", "settings.terminal.rtl.bidi.desc"],
+                    ["off", "settings.terminal.rtl.off.label", "settings.terminal.rtl.off.desc"],
                   ] as const}>
-                    {([id, label, desc]) => (
+                    {([id, labelKey, descKey]) => (
                       <label class="settings-radio" style="grid-template-columns: none !important; display: flex !important; align-items: flex-start; gap: 8px;">
                         <input
                           type="radio"
@@ -377,8 +373,8 @@ export function SettingsModal(p: Props) {
                           onChange={() => update("terminal", { ...p.settings.terminal, rtl_mode: id })}
                         />
                         <span style="flex:1">
-                          <strong>{label}</strong>
-                          <div style="color: var(--w-text-dim); font-size: var(--w-fs-sm); margin-top: 2px;">{desc}</div>
+                          <strong>{t(labelKey)}</strong>
+                          <div style="color: var(--w-text-dim); font-size: var(--w-fs-sm); margin-top: 2px;">{t(descKey)}</div>
                         </span>
                       </label>
                     )}

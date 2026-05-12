@@ -800,23 +800,23 @@ function App() {
             <Show when={activeWs()!.layout && activePaneId()}>
               <button
                 class="ws-header-btn"
-                title="Split into browser pane"
+                title={t("ws_header.split_browser_title")}
                 onClick={() => {
                   const pid = activePaneId();
                   if (pid) splitPane(pid, "horizontal", "browser");
                 }}
               >
-                🌐 + browser
+                {t("ws_header.add_browser")}
               </button>
               <button
                 class="ws-header-btn"
-                title="Split into file manager pane (local + SFTP)"
+                title={t("ws_header.split_filemanager_title")}
                 onClick={() => {
                   const pid = activePaneId();
                   if (pid) splitPane(pid, "horizontal", "filemanager");
                 }}
               >
-                🗂 + files
+                {t("ws_header.add_filemanager")}
               </button>
             </Show>
           </div>

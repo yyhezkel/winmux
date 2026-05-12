@@ -1,6 +1,7 @@
 import { createSignal, For, Show, onMount, onCleanup, createMemo } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { t } from "./i18n";
 
 // Phase 14.A type mirrors — see src-tauri/src/provisioning.rs.
 interface InspectResult {
@@ -190,26 +191,22 @@ export function ProvisioningWizard(p: Props) {
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div class="provisioning-head">
-            <h3>Provision new server</h3>
+            <h3>{t("provisioning.title")}</h3>
             <span class="provisioning-step-indicator">
-              {wizStep() === "connect" && "1 / 4 · Connect"}
-              {wizStep() === "configure" && "2 / 4 · Configure"}
-              {wizStep() === "execute" && "3 / 4 · Execute"}
-              {wizStep() === "done" && "4 / 4 · Done"}
+              {wizStep() === "connect" && t("provisioning.step.connect")}
+              {wizStep() === "configure" && t("provisioning.step.configure")}
+              {wizStep() === "execute" && t("provisioning.step.execute")}
+              {wizStep() === "done" && t("provisioning.step.done")}
             </span>
-            <button class="feed-x" onClick={p.onClose}>×</button>
+            <button class="feed-x" title={t("common.close")} onClick={p.onClose}>×</button>
           </div>
 
           <div class="provisioning-body">
             {/* Step 1: connect + inspect */}
             <Show when={wizStep() === "connect"}>
-              <p class="settings-hint">
-                Enter the initial credentials your hosting provider gave you
-                (commonly <code>root</code> + password). winmux will inspect
-                the server before any mutation.
-              </p>
+              <p class="settings-hint">{t("provisioning.hint.connect")}</p>
               <label>
-                <span>Host</span>
+                <span>{t("provisioning.field.host")}</span>
                 <input
                   value={host()}
                   onInput={(e) => setHost(e.currentTarget.value)}
@@ -217,7 +214,7 @@ export function ProvisioningWizard(p: Props) {
                 />
               </label>
               <label>
-                <span>Port</span>
+                <span>{t("provisioning.field.port")}</span>
                 <input
                   type="number"
                   value={port()}
@@ -225,32 +222,32 @@ export function ProvisioningWizard(p: Props) {
                 />
               </label>
               <label>
-                <span>Initial user</span>
+                <span>{t("provisioning.field.initial_user")}</span>
                 <input
                   value={user()}
                   onInput={(e) => setUser(e.currentTarget.value)}
                 />
               </label>
               <label>
-                <span>Password</span>
+                <span>{t("provisioning.field.password")}</span>
                 <input
                   type="password"
                   value={password()}
                   onInput={(e) => setPassword(e.currentTarget.value)}
-                  placeholder="(if password-only)"
+                  placeholder={t("provisioning.field.password.placeholder")}
                 />
               </label>
               <label>
-                <span>Key path</span>
+                <span>{t("provisioning.field.key_path")}</span>
                 <input
                   value={keyPath()}
                   onInput={(e) => setKeyPath(e.currentTarget.value)}
-                  placeholder="(if provider gave you a key)"
+                  placeholder={t("provisioning.field.key_path.placeholder")}
                 />
               </label>
               <Show when={keyPath()}>
                 <label>
-                  <span>Key passphrase</span>
+                  <span>{t("provisioning.field.key_passphrase")}</span>
                   <input
                     type="password"
                     value={keyPass()}
@@ -265,14 +262,18 @@ export function ProvisioningWizard(p: Props) {
                 >
                   <Show when={inspect()!.ok}>
                     <div class="wizard-test-line">
-                      ✓ {inspect()!.os_pretty_name ?? "OS detected"}
+                      ✓ {inspect()!.os_pretty_name ?? t("provisioning.inspect.os_detected")}
                     </div>
                     <div class="wizard-test-meta">
-                      package_manager: {inspect()!.package_manager} ·
-                      whoami: {inspect()!.whoami?.trim()}
+                      {t("provisioning.inspect.meta", {
+                        pm: inspect()!.package_manager ?? "?",
+                        who: inspect()!.whoami?.trim() ?? "?",
+                      })}
                     </div>
                     <Show when={inspect()!.df_h}>
-                      <div class="wizard-test-meta">disk: {inspect()!.df_h?.trim()}</div>
+                      <div class="wizard-test-meta">
+                        {t("provisioning.inspect.disk", { df: inspect()!.df_h!.trim() })}
+                      </div>
                     </Show>
                   </Show>
                   <Show when={!inspect()!.ok}>
@@ -282,13 +283,13 @@ export function ProvisioningWizard(p: Props) {
               </Show>
 
               <div class="modal-buttons">
-                <button onClick={p.onClose}>Cancel</button>
+                <button onClick={p.onClose}>{t("common.cancel")}</button>
                 <button
                   class="primary"
                   disabled={inspecting() || !host() || !user()}
                   onClick={() => void runInspect()}
                 >
-                  {inspecting() ? "Inspecting…" : "Connect & inspect"}
+                  {inspecting() ? t("provisioning.inspecting") : t("provisioning.btn.connect_inspect")}
                 </button>
               </div>
             </Show>
@@ -296,12 +297,14 @@ export function ProvisioningWizard(p: Props) {
             {/* Step 2: configure */}
             <Show when={wizStep() === "configure"}>
               <p class="settings-hint">
-                Target: <code>{host()}</code> ·{" "}
-                <code>{inspect()?.os_pretty_name ?? "OS"}</code> · pm:{" "}
-                <code>{inspect()?.package_manager}</code>
+                {t("provisioning.target", {
+                  host: host(),
+                  os: inspect()?.os_pretty_name ?? "OS",
+                  pm: inspect()?.package_manager ?? "?",
+                })}
               </p>
               <label>
-                <span>Profile</span>
+                <span>{t("provisioning.field.profile")}</span>
                 <select
                   value={profileId()}
                   onChange={(e) => {
@@ -317,13 +320,13 @@ export function ProvisioningWizard(p: Props) {
                 </select>
               </label>
               <label>
-                <span>New user name</span>
+                <span>{t("provisioning.field.new_user")}</span>
                 <input
                   value={newUser()}
                   onInput={(e) => setNewUser(e.currentTarget.value)}
                 />
               </label>
-              <h4 class="provisioning-h4">Steps (uncheck to skip)</h4>
+              <h4 class="provisioning-h4">{t("provisioning.steps.title")}</h4>
               <div class="provisioning-steps">
                 <For each={stepCatalog()}>
                   {([id, label]) => (
@@ -339,9 +342,9 @@ export function ProvisioningWizard(p: Props) {
                 </For>
               </div>
               <div class="modal-buttons">
-                <button onClick={() => setWizStep("connect")}>Back</button>
+                <button onClick={() => setWizStep("connect")}>{t("provisioning.btn.back")}</button>
                 <button class="primary" onClick={() => void startRun()}>
-                  Execute
+                  {t("provisioning.btn.execute")}
                 </button>
               </div>
             </Show>
@@ -349,8 +352,10 @@ export function ProvisioningWizard(p: Props) {
             {/* Step 3: execute */}
             <Show when={wizStep() === "execute"}>
               <p class="settings-hint">
-                Run: <code>{runId() ?? "(starting…)"}</code> ·{" "}
-                target <code>{host()}</code>
+                {t("provisioning.run.label", {
+                  id: runId() ?? t("provisioning.run.starting"),
+                  host: host(),
+                })}
               </p>
               <div class="provisioning-step-list">
                 <For each={effectiveSteps()}>
@@ -376,14 +381,14 @@ export function ProvisioningWizard(p: Props) {
                 </For>
               </div>
               <div class="modal-buttons">
-                <button onClick={() => setWizStep("done")}>Mark done</button>
+                <button onClick={() => setWizStep("done")}>{t("provisioning.btn.mark_done")}</button>
               </div>
             </Show>
 
             <Show when={wizStep() === "done"}>
-              <p>Provisioning finished. You can close this dialog.</p>
+              <p>{t("provisioning.done.message")}</p>
               <div class="modal-buttons">
-                <button class="primary" onClick={p.onClose}>Close</button>
+                <button class="primary" onClick={p.onClose}>{t("common.close")}</button>
               </div>
             </Show>
           </div>

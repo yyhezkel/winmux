@@ -1,5 +1,6 @@
 import { createSignal, For, Show, onMount, createMemo } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "./i18n";
 
 // Phase 15.B: dual-column file manager (local + remote SFTP).
 //
@@ -194,7 +195,7 @@ export function FileManagerPane(p: Props) {
   const deleteSel = async (side: Side) => {
     const name = side === "local" ? localSel() : remoteSel();
     if (!name) return;
-    if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
+    if (!window.confirm(t("fm.action.confirm_delete", { name }))) return;
     if (side === "local") {
       const path = fullLocal(name);
       await wrap(`delete ${name}`, () => invoke("file_delete_local", { path }));
@@ -210,7 +211,7 @@ export function FileManagerPane(p: Props) {
   const renameSel = async (side: Side) => {
     const name = side === "local" ? localSel() : remoteSel();
     if (!name) return;
-    const next = window.prompt(`Rename "${name}" to:`, name);
+    const next = window.prompt(t("fm.action.rename_prompt", { name }), name);
     if (!next || next === name) return;
     if (side === "local") {
       await wrap(`rename ${name}`, () =>
@@ -232,7 +233,7 @@ export function FileManagerPane(p: Props) {
     }
   };
   const mkdirIn = async (side: Side) => {
-    const name = window.prompt("New folder name:");
+    const name = window.prompt(t("fm.action.mkdir_prompt"));
     if (!name) return;
     if (side === "local") {
       await wrap(`mkdir ${name}`, () =>
@@ -252,7 +253,7 @@ export function FileManagerPane(p: Props) {
 
   const ColumnHeader = (props: { side: Side; path: () => string; setPath: (v: string) => void; refresh: () => void }) => (
     <div class="fm-col-head">
-      <button class="fm-up" title="Up" onClick={() => goUp(props.side)}>↑</button>
+      <button class="fm-up" title={t("fm.btn.up")} onClick={() => goUp(props.side)}>↑</button>
       <input
         class="fm-path"
         value={props.path()}
@@ -268,8 +269,8 @@ export function FileManagerPane(p: Props) {
         }}
         spellcheck={false}
       />
-      <button class="fm-tool" title="Refresh" onClick={props.refresh}>⟳</button>
-      <button class="fm-tool" title="New folder" onClick={() => mkdirIn(props.side)}>＋</button>
+      <button class="fm-tool" title={t("fm.btn.refresh")} onClick={props.refresh}>⟳</button>
+      <button class="fm-tool" title={t("fm.btn.new_folder")} onClick={() => mkdirIn(props.side)}>＋</button>
     </div>
   );
 
@@ -289,11 +290,11 @@ export function FileManagerPane(p: Props) {
               void refreshRemote();
             }}
           />
-          <span>Hidden</span>
+          <span>{t("fm.checkbox.hidden")}</span>
         </label>
         <Show when={p.hasSsh}>
-          <button class="fm-action" disabled={!localSel() || busy()} onClick={() => void uploadSel()}>↦ Upload</button>
-          <button class="fm-action" disabled={!remoteSel() || busy()} onClick={() => void downloadSel()}>↤ Download</button>
+          <button class="fm-action" disabled={!localSel() || busy()} onClick={() => void uploadSel()}>{t("fm.btn.upload")}</button>
+          <button class="fm-action" disabled={!remoteSel() || busy()} onClick={() => void downloadSel()}>{t("fm.btn.download")}</button>
         </Show>
         <span class="fm-status">{busy() ? "…" : status()}</span>
         <Show when={err()}>
@@ -315,7 +316,7 @@ export function FileManagerPane(p: Props) {
                     ev.preventDefault();
                     setLocalSel(e.name);
                     const action = window.prompt(
-                      `${e.name} — type:\n  o = open (cd into / OS open)\n  u = upload to remote\n  r = rename\n  d = delete`,
+                      t("fm.action.prompt_local", { name: e.name }),
                       e.is_dir ? "o" : "u"
                     );
                     if (action === "o" && e.is_dir) navIntoLocal(e);
@@ -342,9 +343,7 @@ export function FileManagerPane(p: Props) {
                 when={remoteEntries().length > 0}
                 fallback={
                   <div class="fm-empty">
-                    {err()
-                      ? "Remote unavailable — connect an SSH terminal pane in this workspace first."
-                      : "(empty)"}
+                    {err() ? t("fm.empty.no_ssh") : t("fm.empty.empty")}
                   </div>
                 }
               >
@@ -358,7 +357,7 @@ export function FileManagerPane(p: Props) {
                         ev.preventDefault();
                         setRemoteSel(e.name);
                         const action = window.prompt(
-                          `${e.name} — type:\n  o = open (cd into)\n  d = download to local\n  r = rename\n  x = delete`,
+                          t("fm.action.prompt_remote", { name: e.name }),
                           e.is_dir ? "o" : "d"
                         );
                         if (action === "o" && e.is_dir) navIntoRemote(e);

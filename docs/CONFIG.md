@@ -251,7 +251,7 @@ type Settings = {
   updates: {
     check_on_startup: boolean;
     auto_download: boolean;       // currently always false (no signing keys yet)
-    manifest_url?: string;        // defaults to a placeholder until repo goes public
+    manifest_url?: string;        // default: raw.githubusercontent.com/yyhezkel/winmux/main/manifest.json
     last_check_iso?: string;
     last_seen_version?: string;
   };
@@ -271,6 +271,10 @@ Built-in presets are returned by `settings.get-presets` (RPC) or `winmux setting
 ### Live theme apply
 
 The frontend reads `settings.theme` on startup and writes the colors as CSS custom properties on `<html>` (`--w-bg`, `--w-accent`, etc.) — `App.css` references all colors through these vars, so a theme change re-tints the entire UI without reload. Subscribed to the `settings:changed` event so updates from the CLI reflect live.
+
+### Update manifest
+
+`settings.updates.manifest_url` (default `https://raw.githubusercontent.com/yyhezkel/winmux/main/manifest.json`) is polled by `updater.rs` on startup (after a 3-second grace period). The manifest is a static JSON file in the repo root — see [docs/RELEASING.md](RELEASING.md) for the full release flow and the manifest schema. The file lives on `main`, so it's globally cached + served fast by GitHub's CDN, with no API rate limits.
 
 ## Environment variables
 

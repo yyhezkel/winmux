@@ -1,0 +1,12 @@
+{
+  "version": "0.1.0",
+  "released_at": "2026-05-12T00:08:00Z",
+  "notes_url": "https://github.com/yyhezkel/winmux/releases/tag/v0.1.0",
+  "msi_url": "https://github.com/yyhezkel/winmux/releases/download/v0.1.0/winmux_0.1.0_x64_en-US.msi",
+  "msi_sha256": "eed6b70e9987d7e63c35f9f172cea6ad540b8fb3a7b1c99a56e3ae3b7b4e6b13",
+  "msi_size": 7237632,
+  "nsis_url": "https://github.com/yyhezkel/winmux/releases/download/v0.1.0/winmux_0.1.0_x64-setup.exe",
+  "nsis_sha256": "876987dffac18db56b7a4e869838ec049da375a872e70a67a4b3e58521d4987b",
+  "nsis_size": 4772427,
+  "min_supported_version": "0.1.0"
+}

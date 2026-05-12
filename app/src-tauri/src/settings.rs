@@ -307,12 +307,13 @@ impl Default for Updates {
         Self {
             check_on_startup: true,
             auto_download: false,
-            // Placeholder — switched to a real URL once the repo goes public
-            // and we publish the first manifest. Keeping it here in settings
-            // (rather than hardcoded in updater.rs) means a power user can
-            // override the URL without recompiling.
+            // Real manifest served as a static file from the repo's main
+            // branch via raw.githubusercontent.com — no GitHub Pages, no
+            // API rate limits. Updated as part of each release flow
+            // (see RELEASING.md). A power user can override the URL
+            // here without recompiling.
             manifest_url: Some(
-                "https://winmux.example.com/manifest.json".into(),
+                "https://raw.githubusercontent.com/yyhezkel/winmux/main/manifest.json".into(),
             ),
             last_check_iso: None,
             last_seen_version: None,

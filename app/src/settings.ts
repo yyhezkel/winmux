@@ -83,6 +83,7 @@ export interface ShortcutsSettings {
   new_workspace: string;
   toggle_notes: string;
   toggle_settings: string;
+  summarize_claude: string;
   copy_on_select_with_ctrl_c: boolean;
 }
 
@@ -94,7 +95,23 @@ export const DEFAULT_SHORTCUTS: ShortcutsSettings = {
   new_workspace: "Ctrl+N",
   toggle_notes: "Ctrl+Shift+N",
   toggle_settings: "Ctrl+,",
+  summarize_claude: "Ctrl+Alt+B",
   copy_on_select_with_ctrl_c: true,
+};
+
+export interface ClaudeSettings {
+  auto_summarize_on_stop: boolean;
+  summary_history_count: number;
+  summary_prompt: string;
+  summary_language: string;
+}
+
+export const DEFAULT_CLAUDE_SETTINGS: ClaudeSettings = {
+  auto_summarize_on_stop: false,
+  summary_history_count: 10,
+  summary_prompt:
+    "Summarize the last {N} exchanges in 2-3 sentences in the same language the conversation used.",
+  summary_language: "auto",
 };
 
 export interface I18nSettings {
@@ -112,6 +129,15 @@ export interface Settings {
   updates: UpdatesSettings;
   i18n: I18nSettings;
   shortcuts?: ShortcutsSettings;
+  claude?: ClaudeSettings;
+}
+
+export interface SummaryResult {
+  text: string;
+  session_id: string;
+  messages_count: number;
+  generated_at: string;
+  note_id?: string | null;
 }
 
 export interface PresetEntry {

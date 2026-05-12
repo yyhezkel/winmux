@@ -1,3 +1,4 @@
+mod claude_summary;
 mod connect_wizard;
 mod dev;
 mod file_manager;
@@ -3894,6 +3895,7 @@ pub fn run() {
             file_manager::file_write_local,
             file_manager::file_write_remote,
             file_manager::file_large_threshold,
+            claude_summary::claude_summarize,
             local_wizard::detect_local_shells,
             local_wizard::list_recent_paths,
             local_wizard::record_recent_path,

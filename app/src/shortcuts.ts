@@ -119,6 +119,7 @@ export function buildShortcutTable(
     new_workspace: parseShortcut(merged.new_workspace),
     toggle_notes: parseShortcut(merged.toggle_notes),
     toggle_settings: parseShortcut(merged.toggle_settings),
+    summarize_claude: parseShortcut(merged.summarize_claude),
     // copy_on_select_with_ctrl_c is a boolean toggle, not a parsed
     // shortcut. Carried in the table for shape consistency — callers
     // should check `settings.shortcuts.copy_on_select_with_ctrl_c`

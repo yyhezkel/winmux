@@ -12,6 +12,7 @@ import {
   listSystemFonts,
   checkForUpdates,
   DEFAULT_SHORTCUTS,
+  DEFAULT_CLAUDE_SETTINGS,
 } from "./settings";
 import { applyI18nSettings, LANGUAGES, t } from "./i18n";
 import { formatEvent } from "./shortcuts";
@@ -23,7 +24,7 @@ interface Props {
   onChange: (next: Settings) => void;
 }
 
-type Tab = "theme" | "font" | "terminal" | "shortcuts" | "hooks" | "notifications" | "updates" | "language";
+type Tab = "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "updates" | "language";
 
 export function SettingsModal(p: Props) {
   const [tab, setTab] = createSignal<Tab>("theme");
@@ -142,7 +143,7 @@ export function SettingsModal(p: Props) {
 
           <div class="settings-body">
             <nav class="settings-tabs">
-              <For each={["theme", "font", "terminal", "shortcuts", "hooks", "notifications", "updates", "language"] as Tab[]}>
+              <For each={["theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "updates", "language"] as Tab[]}>
                 {(name) => (
                   <button
                     class={`settings-tab ${tab() === name ? "active" : ""}`}
@@ -399,6 +400,7 @@ export function SettingsModal(p: Props) {
                     ["new_workspace", "settings.shortcuts.new_workspace"],
                     ["toggle_notes", "settings.shortcuts.toggle_notes"],
                     ["toggle_settings", "settings.shortcuts.toggle_settings"],
+                    ["summarize_claude", "settings.shortcuts.summarize_claude"],
                   ] as const}>
                     {([key, labelKey]) => (
                       <ShortcutRow
@@ -427,6 +429,61 @@ export function SettingsModal(p: Props) {
                     />
                     <span>{t("settings.shortcuts.ctrl_c_copy")}</span>
                   </label>
+                </section>
+              </Show>
+
+              {/* ── Claude (Phase 17) ────────────────────────────────── */}
+              <Show when={tab() === "claude"}>
+                <section>
+                  <h4>{t("settings.claude.title")}</h4>
+                  <p class="settings-hint" style="margin-top:0">
+                    {t("settings.claude.hint")}
+                  </p>
+                  <label class="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={(p.settings.claude ?? DEFAULT_CLAUDE_SETTINGS).auto_summarize_on_stop}
+                      onChange={(e) =>
+                        update("claude", {
+                          ...(p.settings.claude ?? DEFAULT_CLAUDE_SETTINGS),
+                          auto_summarize_on_stop: e.currentTarget.checked,
+                        } as Settings["claude"])
+                      }
+                    />
+                    <span>{t("settings.claude.auto_on_stop")}</span>
+                  </label>
+                  <label>
+                    <span>{t("settings.claude.history_count")}</span>
+                    <input
+                      type="number"
+                      min="5"
+                      max="50"
+                      value={(p.settings.claude ?? DEFAULT_CLAUDE_SETTINGS).summary_history_count}
+                      onChange={(e) =>
+                        update("claude", {
+                          ...(p.settings.claude ?? DEFAULT_CLAUDE_SETTINGS),
+                          summary_history_count:
+                            Math.max(5, Math.min(50, parseInt(e.currentTarget.value) || 10)),
+                        } as Settings["claude"])
+                      }
+                    />
+                  </label>
+                  <label class="modal-textarea-label">
+                    <span>{t("settings.claude.summary_prompt")}</span>
+                    <textarea
+                      rows="3"
+                      value={(p.settings.claude ?? DEFAULT_CLAUDE_SETTINGS).summary_prompt}
+                      onChange={(e) =>
+                        update("claude", {
+                          ...(p.settings.claude ?? DEFAULT_CLAUDE_SETTINGS),
+                          summary_prompt: e.currentTarget.value,
+                        } as Settings["claude"])
+                      }
+                    />
+                  </label>
+                  <p class="settings-hint">
+                    {t("settings.claude.prompt_hint")}
+                  </p>
                 </section>
               </Show>
 

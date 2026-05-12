@@ -291,5 +291,17 @@
   "editor.unsaved_confirm": "إلغاء التغييرات غير المحفوظة؟",
   "editor.binary_warning": "ملف بنائي — استخدم فتح بدلاً من ذلك.",
   "editor.large_file_warning": "الملف كبير ({size}). قد يكون التحرير بطيئًا.",
-  "editor.dirty": "غير محفوظ"
+  "editor.dirty": "غير محفوظ",
+
+  "settings.tab.claude": "claude",
+  "settings.claude.title": "ملخص جلسة Claude",
+  "settings.claude.hint": "يمرر آخر N محادثات من جلسة Claude Code عبر `claude -p` على البعيد، يحفظ النتيجة كملاحظة winmux بوسم `summary`. التشغيل اليدوي عبر اختصار لوحة المفاتيح؛ التلقائي عبر التفعيل أدناه.",
+  "settings.claude.auto_on_stop": "تلخيص تلقائي عند انتهاء جلسة Claude Code (Stop hook)",
+  "settings.claude.history_count": "عدد المحادثات",
+  "settings.claude.summary_prompt": "موجه التلخيص",
+  "settings.claude.prompt_hint": "استخدم {N} كعنصر نائب لعدد المحادثات (يُستبدل في وقت التشغيل).",
+  "settings.shortcuts.summarize_claude": "تلخيص جلسة Claude",
+  "claude.summary.toast": "تم حفظ الملخص كملاحظة ({count} رسائل)",
+  "claude.summary.no_workspace": "لا توجد بيئة عمل نشطة.",
+  "claude.summary.empty": "لم يتم العثور على رسائل في الجلسة."
 }

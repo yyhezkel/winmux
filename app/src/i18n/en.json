@@ -291,5 +291,17 @@
   "editor.unsaved_confirm": "Discard unsaved changes?",
   "editor.binary_warning": "Binary file — use Open instead.",
   "editor.large_file_warning": "File is large ({size}). Editing may be slow.",
-  "editor.dirty": "unsaved"
+  "editor.dirty": "unsaved",
+
+  "settings.tab.claude": "claude",
+  "settings.claude.title": "Claude session summary",
+  "settings.claude.hint": "Pipe the last N exchanges of a Claude Code conversation through `claude -p` on the remote, save the result as a winmux note tagged `summary`. Manual trigger: keyboard shortcut. Automatic: opt in below.",
+  "settings.claude.auto_on_stop": "Auto-summarize when Claude Code finishes a session (Stop hook)",
+  "settings.claude.history_count": "History count",
+  "settings.claude.summary_prompt": "Summary prompt",
+  "settings.claude.prompt_hint": "Use {N} as a placeholder for the history count (substituted at run time).",
+  "settings.shortcuts.summarize_claude": "Summarize Claude session",
+  "claude.summary.toast": "Summary saved as note ({count} messages)",
+  "claude.summary.no_workspace": "No active workspace.",
+  "claude.summary.empty": "No messages found in session."
 }

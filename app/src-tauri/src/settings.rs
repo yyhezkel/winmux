@@ -239,11 +239,44 @@ pub(crate) struct Shortcuts {
     pub new_workspace: String,
     pub toggle_notes: String,
     pub toggle_settings: String,
+    /// Phase 17: trigger a manual Claude session summary. Default
+    /// Ctrl+Alt+B (B for "brief"). #[serde(default)] so pre-17
+    /// settings.json files don't need to be touched.
+    #[serde(default = "default_summarize_claude")]
+    pub summarize_claude: String,
     /// When true and the terminal has a selection, plain Ctrl+C copies
     /// to clipboard instead of sending SIGINT. Matches Windows Terminal
     /// + most modern terminal apps. Set to false to always send SIGINT.
     #[serde(default = "default_true")]
     pub copy_on_select_with_ctrl_c: bool,
+}
+
+fn default_summarize_claude() -> String {
+    "Ctrl+Alt+B".to_string()
+}
+
+/// Phase 17: Claude-specific options.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub(crate) struct ClaudeOptions {
+    pub auto_summarize_on_stop: bool,
+    pub summary_history_count: u32,
+    pub summary_prompt: String,
+    /// `"auto"` lets the prompt itself control language (default).
+    /// A specific ISO code (`"he"`, `"en"`) appends a hint like
+    /// "Respond in Hebrew." to the prompt. Frontend currently just
+    /// surfaces "auto" — the field is here for future expansion.
+    pub summary_language: String,
+}
+
+impl Default for ClaudeOptions {
+    fn default() -> Self {
+        Self {
+            auto_summarize_on_stop: false,
+            summary_history_count: 10,
+            summary_prompt: "Summarize the last {N} exchanges in 2-3 sentences in the same language the conversation used.".to_string(),
+            summary_language: "auto".into(),
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -260,6 +293,7 @@ impl Default for Shortcuts {
             new_workspace: "Ctrl+N".into(),
             toggle_notes: "Ctrl+Shift+N".into(),
             toggle_settings: "Ctrl+,".into(),
+            summarize_claude: default_summarize_claude(),
             copy_on_select_with_ctrl_c: true,
         }
     }
@@ -282,6 +316,9 @@ pub(crate) struct Settings {
     /// load with the built-in defaults.
     #[serde(default)]
     pub shortcuts: Shortcuts,
+    /// Phase 17. Claude session summary options.
+    #[serde(default)]
+    pub claude: ClaudeOptions,
 }
 
 impl Default for Theme {
@@ -376,6 +413,7 @@ impl Default for Settings {
             updates: Updates::default(),
             i18n: I18n::default(),
             shortcuts: Shortcuts::default(),
+            claude: ClaudeOptions::default(),
         }
     }
 }

@@ -970,6 +970,29 @@ async fn dispatch(
             let _ = app.emit("feed:item-added", &item);
             show_toast(&title, &summary);
 
+            // Phase 17: auto-summarize on Stop hook. The Claude Code
+            // Stop hook arrives here as a feed.push with `subkind ==
+            // "stop"` (passive). We fire-and-forget the summary task
+            // — it reads settings, opens its own SSH exec channel,
+            // saves a Note. Failures land in debug.log so the user
+            // can diagnose without the hook itself failing.
+            if subkind == "stop" {
+                if let Some(ws) = item.workspace_id.clone() {
+                    let pane = item.pane_id.clone();
+                    let state_clone: crate::AppState = state.clone();
+                    let app_clone = app.clone();
+                    tokio::spawn(async move {
+                        crate::claude_summary::auto_summarize_on_stop(
+                            &state_clone,
+                            &app_clone,
+                            &ws,
+                            pane.as_deref(),
+                        )
+                        .await;
+                    });
+                }
+            }
+
             if let Some(rx) = oneshot_rx {
                 let wait =
                     tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await;

@@ -80,6 +80,45 @@ function App() {
   const [updateBanner, setUpdateBanner] = createSignal<UpdateInfo | null>(null);
   // Phase 14.A: server provisioning wizard.
   const [showProvision, setShowProvision] = createSignal(false);
+  // Phase 17: ephemeral toast for "Summary saved as note" + the
+  // ad-hoc errors that can come back from `claude_summarize`. Auto-
+  // dismisses after 4s.
+  const [summaryToast, setSummaryToast] = createSignal<
+    | { kind: "ok"; text: string }
+    | { kind: "err"; text: string }
+    | null
+  >(null);
+  let summaryToastTimer: number | null = null;
+  const flashSummaryToast = (kind: "ok" | "err", text: string) => {
+    if (summaryToastTimer) clearTimeout(summaryToastTimer);
+    setSummaryToast({ kind, text });
+    summaryToastTimer = window.setTimeout(() => setSummaryToast(null), 4500);
+  };
+  const summarizeActivePane = async () => {
+    const ws = activeWs();
+    if (!ws) {
+      flashSummaryToast("err", t("claude.summary.no_workspace"));
+      return;
+    }
+    try {
+      const r: any = await invoke("claude_summarize", {
+        workspaceId: ws.id,
+        paneId: activePaneId() ?? null,
+        sessionId: null,
+        historyCount: null,
+        promptOverride: null,
+      });
+      flashSummaryToast(
+        "ok",
+        t("claude.summary.toast", { count: r.messages_count ?? "" }),
+      );
+      // Refresh notes so the new summary note is visible in the
+      // Notes modal next time it opens.
+      void refreshNotes();
+    } catch (e) {
+      flashSummaryToast("err", String(e));
+    }
+  };
   // Phase 16: parsed shortcut accelerators, rebuilt on every settings
   // load + settings:changed event. Backfilled with DEFAULT_SHORTCUTS
   // when the field is missing (pre-16 settings.json).
@@ -603,6 +642,12 @@ function App() {
       }).catch((err) => console.warn("paste failed", err));
       return;
     }
+    // Phase 17: Claude session summary.
+    if (matches(e, sc.summarize_claude)) {
+      e.preventDefault();
+      void summarizeActivePane();
+      return;
+    }
     // Pane-relative legacy shortcuts (split / close) still on
     // Ctrl+Shift+D/E/W until we expand the table.
     if (!e.ctrlKey || !e.shiftKey) return;
@@ -1067,6 +1112,17 @@ function App() {
             </Show>
             <button class="update-banner-x" onClick={() => setUpdateBanner(null)}>×</button>
           </div>
+        </div>
+      </Show>
+
+      <Show when={summaryToast()}>
+        <div
+          class={`summary-toast ${summaryToast()!.kind}`}
+          onClick={() => setSummaryToast(null)}
+          role="status"
+        >
+          <span class="summary-toast-icon">{summaryToast()!.kind === "ok" ? "✓" : "⚠"}</span>
+          <span class="summary-toast-text">{summaryToast()!.text}</span>
         </div>
       </Show>
 

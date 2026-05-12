@@ -291,5 +291,17 @@
   "editor.unsaved_confirm": "Отказаться от несохранённых изменений?",
   "editor.binary_warning": "Бинарный файл — используйте «Открыть» вместо этого.",
   "editor.large_file_warning": "Большой файл ({size}). Редактирование может быть медленным.",
-  "editor.dirty": "не сохранено"
+  "editor.dirty": "не сохранено",
+
+  "settings.tab.claude": "claude",
+  "settings.claude.title": "Сводка сессии Claude",
+  "settings.claude.hint": "Пропускает последние N сообщений сессии Claude Code через `claude -p` на удалённом сервере, сохраняет результат как заметку winmux с тегом `summary`. Ручной запуск — горячая клавиша; автоматический — флажок ниже.",
+  "settings.claude.auto_on_stop": "Автосводка по завершении сессии Claude Code (Stop hook)",
+  "settings.claude.history_count": "Количество сообщений",
+  "settings.claude.summary_prompt": "Промпт для сводки",
+  "settings.claude.prompt_hint": "Используйте {N} как плейсхолдер для количества сообщений (подставляется в runtime).",
+  "settings.shortcuts.summarize_claude": "Сводка сессии Claude",
+  "claude.summary.toast": "Сводка сохранена как заметка ({count} сообщений)",
+  "claude.summary.no_workspace": "Нет активного рабочего пространства.",
+  "claude.summary.empty": "Сообщений в сессии не найдено."
 }

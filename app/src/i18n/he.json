@@ -291,5 +291,17 @@
   "editor.unsaved_confirm": "לבטל שינויים שלא נשמרו?",
   "editor.binary_warning": "קובץ בינארי — השתמש ב-Open במקום.",
   "editor.large_file_warning": "הקובץ גדול ({size}). העריכה עלולה להיות איטית.",
-  "editor.dirty": "לא נשמר"
+  "editor.dirty": "לא נשמר",
+
+  "settings.tab.claude": "claude",
+  "settings.claude.title": "סיכום שיחת Claude",
+  "settings.claude.hint": "שולח את ה-N החילופים האחרונים של שיחת Claude Code דרך `claude -p` בשרת, שומר את התוצאה כהערת winmux עם תיוג `summary`. הפעלה ידנית דרך קיצור מקלדת; אוטומטית — סמן למטה.",
+  "settings.claude.auto_on_stop": "סכם אוטומטית כש-Claude Code מסיים סשן (Stop hook)",
+  "settings.claude.history_count": "מספר חילופים לסיכום",
+  "settings.claude.summary_prompt": "פרומפט הסיכום",
+  "settings.claude.prompt_hint": "השתמש ב-{N} כ-placeholder למספר ההחלפות (יוחלף בזמן ריצה).",
+  "settings.shortcuts.summarize_claude": "סכם סשן Claude",
+  "claude.summary.toast": "הסיכום נשמר כהערה ({count} הודעות)",
+  "claude.summary.no_workspace": "אין סביבת עבודה פעילה.",
+  "claude.summary.empty": "לא נמצאו הודעות בסשן."
 }

@@ -409,6 +409,7 @@ export function ProvisioningWizard(p: Props) {
                       id === "InstallClaudeCode" ? "provisioning.step.install_claude.label"
                       : id === "InstallCodex" ? "provisioning.step.install_codex.label"
                       : id === "InstallGemini" ? "provisioning.step.install_gemini.label"
+                      : id === "AddWinmuxToPath" ? "provisioning.step.add_winmux_to_path.label"
                       : null;
                     const display = i18nKey ? t(i18nKey) : label;
                     return (

@@ -254,6 +254,8 @@
   "provisioning.step.install_claude.auth_hint": "شغّل `claude` على الخادم للمصادقة (متصفح)، أو عيّن ANTHROPIC_API_KEY للوضع headless.",
   "provisioning.step.install_codex.auth_hint": "شغّل `codex login --device-auth` على الخادم للمصادقة headless (أو `codex login` إذا كان لديك متصفح).",
   "provisioning.step.install_gemini.auth_hint": "شغّل `gemini` لتسجيل الدخول بـ Google، أو عيّن GEMINI_API_KEY للوضع headless.",
+  "provisioning.step.add_winmux_to_path.label": "إضافة winmux إلى PATH",
+  "provisioning.step.add_winmux_to_path.description": "إلحاق ~/.winmux/bin بملف rc الخاص بـ shell المستخدم (bash / zsh / fish). متكرر-آمن.",
 
   "provisioning.field.workspace_name": "اسم بيئة العمل",
   "provisioning.field.workspace_name.placeholder": "(يُشتق تلقائيًا من المضيف)",

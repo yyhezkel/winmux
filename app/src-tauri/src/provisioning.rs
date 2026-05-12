@@ -56,6 +56,13 @@ pub(crate) enum StepKind {
     /// New in Phase 14.A.2: Gemini CLI (`npm i -g @google/gemini-cli@latest`).
     /// Same Node.js dependency as Codex.
     InstallGemini,
+    /// Phase 18: append `~/.winmux/bin` to the new user's shell rc
+    /// file. Runs as the new user via `sudo -u`. Idempotent — the
+    /// bootstrap auto-fires the same snippet on every connect, so
+    /// running this step after a fresh provisioning typically
+    /// reports "already configured" (no-op). The point is to make
+    /// the action visible + checkable in the wizard UI.
+    AddWinmuxToPath,
     SetupWinmuxHooks,
 }
 
@@ -76,6 +83,7 @@ impl StepKind {
             StepKind::InstallClaudeCode => "Install Claude Code (Anthropic, curl installer)",
             StepKind::InstallCodex => "Install Codex CLI (OpenAI, npm)",
             StepKind::InstallGemini => "Install Gemini CLI (Google, npm)",
+            StepKind::AddWinmuxToPath => "Add winmux to PATH (~/.bashrc or equivalent)",
             StepKind::SetupWinmuxHooks => "Run winmux setup-hooks",
         }
     }
@@ -120,6 +128,7 @@ pub(crate) fn default_profiles() -> Vec<ProvisioningProfile> {
                 StepKind::DeployPubkey,
                 StepKind::TestNewKey,
                 StepKind::InstallClaudeCode,
+                StepKind::AddWinmuxToPath,
                 StepKind::SetupWinmuxHooks,
             ],
         },
@@ -136,6 +145,7 @@ pub(crate) fn default_profiles() -> Vec<ProvisioningProfile> {
                 StepKind::DisableRootSsh,
                 StepKind::DisablePasswordSsh,
                 StepKind::InstallClaudeCode,
+                StepKind::AddWinmuxToPath,
                 StepKind::SetupWinmuxHooks,
             ],
         },
@@ -167,6 +177,7 @@ pub(crate) fn default_profiles() -> Vec<ProvisioningProfile> {
                 StepKind::InstallClaudeCode,
                 StepKind::InstallCodex,
                 StepKind::InstallGemini,
+                StepKind::AddWinmuxToPath,
                 StepKind::SetupWinmuxHooks,
             ],
         },
@@ -752,6 +763,54 @@ async fn run_provisioning(
                 );
                 run_step(&mut handle, &app, &run_id, idx, kind, &cmd).await
             }
+            StepKind::AddWinmuxToPath => {
+                // Phase 18: append `~/.winmux/bin` to the new user's
+                // shell rc. Runs the bootstrap's PATH_RC_SNIPPET
+                // under `sudo -u <new_user>` so the rc that gets
+                // touched is the runner's, not root's.
+                //
+                // The snippet outputs ADDED <rc> / EXISTS <rc> /
+                // ERROR <msg>. We pretty-print it so the wizard
+                // log shows "PATH configured in /home/runner/.bashrc"
+                // or "already configured" rather than the raw token.
+                let u = shell_escape(&input.new_user);
+                let snippet = crate::remote_bootstrap::PATH_RC_SNIPPET;
+                // -H sets HOME to the target user's home so $HOME
+                // expansions inside the snippet point at the
+                // runner's directory. The single-quoted heredoc tag
+                // (`<<'WINMUX_PATH_EOF'`) means bash doesn't expand
+                // anything while READING the body — the inner bash
+                // does the expansion when it executes.
+                let cmd = format!(
+                    "sudo -Hu {u} bash <<'WINMUX_PATH_EOF'\n{snippet}\nWINMUX_PATH_EOF\n\
+                     # Translate the snippet's machine-readable output to a\n\
+                     # user-friendly status line. Last line is what the\n\
+                     # wizard log surfaces.\n\
+                     :"
+                );
+                // Run + post-process the captured output.
+                let r = match exec_capture(&mut handle, &cmd).await {
+                    Ok(raw) => {
+                        let line = raw.trim().lines().last().unwrap_or("").trim().to_string();
+                        let pretty = if let Some(rc) = line.strip_prefix("ADDED ") {
+                            format!("✓ PATH configured in {rc}")
+                        } else if let Some(rc) = line.strip_prefix("EXISTS ") {
+                            format!("✓ already configured in {rc}")
+                        } else if let Some(msg) = line.strip_prefix("ERROR ") {
+                            format!("✗ {msg}")
+                        } else {
+                            raw.trim().to_string()
+                        };
+                        emit(&app, &run_id, idx, kind, "done", pretty, None);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        emit(&app, &run_id, idx, kind, "failed", String::new(), Some(e));
+                        Err(())
+                    }
+                };
+                r
+            }
             StepKind::SetupWinmuxHooks => {
                 // Best-effort — winmux CLI on remote is bootstrapped on
                 // first SSH connection from the desktop app, so it may
@@ -1189,6 +1248,7 @@ pub(crate) fn provisioning_step_catalog() -> Vec<(String, String)> {
         StepKind::InstallClaudeCode,
         StepKind::InstallCodex,
         StepKind::InstallGemini,
+        StepKind::AddWinmuxToPath,
         StepKind::SetupWinmuxHooks,
     ];
     all.into_iter()

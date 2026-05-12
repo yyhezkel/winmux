@@ -254,6 +254,8 @@
   "provisioning.step.install_claude.auth_hint": "Запустите `claude` на сервере для авторизации (браузер), или установите ANTHROPIC_API_KEY для headless-режима.",
   "provisioning.step.install_codex.auth_hint": "Запустите `codex login --device-auth` на сервере для headless-авторизации (или `codex login`, если есть браузер).",
   "provisioning.step.install_gemini.auth_hint": "Запустите `gemini` для входа через Google, или установите GEMINI_API_KEY для headless.",
+  "provisioning.step.add_winmux_to_path.label": "Добавить winmux в PATH",
+  "provisioning.step.add_winmux_to_path.description": "Добавляет ~/.winmux/bin в shell-rc пользователя (bash / zsh / fish). Идемпотентно.",
 
   "provisioning.field.workspace_name": "Имя рабочего пространства",
   "provisioning.field.workspace_name.placeholder": "(автоматически из host)",

@@ -254,6 +254,8 @@
   "provisioning.step.install_claude.auth_hint": "Run `claude` on the server to authenticate (browser), or set ANTHROPIC_API_KEY for headless mode.",
   "provisioning.step.install_codex.auth_hint": "Run `codex login --device-auth` on the server for headless auth (or `codex login` if you have a desktop browser).",
   "provisioning.step.install_gemini.auth_hint": "Run `gemini` to sign in with Google, or set GEMINI_API_KEY for headless mode.",
+  "provisioning.step.add_winmux_to_path.label": "Add winmux to PATH",
+  "provisioning.step.add_winmux_to_path.description": "Append ~/.winmux/bin to the user's shell rc file (bash / zsh / fish). Idempotent.",
 
   "provisioning.field.workspace_name": "Workspace name",
   "provisioning.field.workspace_name.placeholder": "(auto-derived from host)",

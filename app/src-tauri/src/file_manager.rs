@@ -408,3 +408,109 @@ pub(crate) async fn file_download(
     let _ = sftp.close().await;
     Ok(buf.len() as u64)
 }
+
+// ─── Phase 17: Open with OS default app ────────────────────────────────────
+
+/// Spawn the Windows shell `start` to launch a file with whatever app
+/// is registered as the default handler for the file's extension.
+/// Equivalent of the user double-clicking the file in Explorer.
+///
+/// We deliberately use `cmd /C start "" "<path>"` rather than
+/// `tauri::api::shell::open` so the call doesn't require the user's
+/// Tauri shell-allowlist scope to cover every path under
+/// `%USERPROFILE%`. `start` with an empty title argument (the `""` after
+/// `start`) is the historic Windows incantation for "open this path
+/// via shell association" — it handles paths with spaces and the
+/// `\\?\` long-path prefix.
+fn shell_open(path: &std::path::Path) -> Result<(), String> {
+    let path_str = path.to_string_lossy().to_string();
+    #[cfg(target_os = "windows")]
+    {
+        // /C → run command then exit. Empty quotes are the START
+        // "title" argument — required when the path is quoted so
+        // start doesn't interpret it as the title.
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "start", "", path_str.as_str()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .status()
+            .map_err(|e| format!("spawn cmd: {e}"))?;
+        if !status.success() {
+            return Err(format!("cmd /C start exited {status}"));
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg(&path_str)
+            .status()
+            .map_err(|e| format!("spawn open: {e}"))?;
+        Ok(())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&path_str)
+            .status()
+            .map_err(|e| format!("spawn xdg-open: {e}"))?;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub(crate) fn file_open_local(path: String) -> Result<(), String> {
+    let p = PathBuf::from(expand_path(&path));
+    if !p.exists() {
+        return Err(format!("file not found: {path}"));
+    }
+    shell_open(&p)
+}
+
+/// Build a stable temp path for a downloaded remote file. We bucket
+/// by workspace_id so multiple servers don't clobber each other's
+/// `package.json`, and reuse the same path on repeated opens so the
+/// user keeps editing the same staging file.
+fn remote_temp_path(workspace_id: &str, remote_path: &str) -> PathBuf {
+    let basename = std::path::Path::new(remote_path)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| "winmux-download".to_string());
+    let mut p = std::env::temp_dir();
+    p.push("winmux");
+    p.push(workspace_id);
+    p.push(basename);
+    p
+}
+
+#[tauri::command]
+pub(crate) async fn file_open_remote(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    remote_path: String,
+) -> Result<String, String> {
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| "no active SSH session".to_string())?;
+    let dest = remote_temp_path(&workspace_id, &remote_path);
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("mkdir temp parent {parent:?}: {e}"))?;
+    }
+    // SFTP download — same as file_download, but the destination is
+    // resolved internally.
+    let sftp = open_sftp(&handle).await?;
+    let mut file = sftp
+        .open(&remote_path)
+        .await
+        .map_err(|e| format!("sftp open {remote_path}: {e}"))?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)
+        .await
+        .map_err(|e| format!("read: {e}"))?;
+    drop(file);
+    let _ = sftp.close().await;
+    std::fs::write(&dest, &buf).map_err(|e| format!("write {dest:?}: {e}"))?;
+    shell_open(&dest)?;
+    Ok(dest.to_string_lossy().to_string())
+}

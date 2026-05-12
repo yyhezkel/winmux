@@ -204,8 +204,8 @@
   "fm.label.pane": "🗂 מנהל קבצים",
   "fm.empty.no_ssh": "צד מרוחק לא זמין — חבר תחילה פאנל SSH ב-workspace הזה.",
   "fm.empty.empty": "(ריק)",
-  "fm.action.prompt_local": "{name} — הזן:\n  o = פתח (היכנס לתיקייה / פתח ב-OS)\n  u = העלה לשרת\n  r = שנה שם\n  d = מחק",
-  "fm.action.prompt_remote": "{name} — הזן:\n  o = פתח (היכנס לתיקייה)\n  d = הורד למקומי\n  r = שנה שם\n  x = מחק",
+  "fm.action.prompt_local": "{name} — הזן:\n  o = פתח (היכנס לתיקייה / פתח קובץ עם אפליקציית ברירת מחדל)\n  u = העלה לשרת\n  r = שנה שם\n  d = מחק",
+  "fm.action.prompt_remote": "{name} — הזן:\n  o = פתח (היכנס לתיקייה / הורד ל-temp ופתח קובץ)\n  d = הורד למקומי\n  r = שנה שם\n  x = מחק",
   "fm.action.confirm_delete": "למחוק את {name}? לא ניתן לבטל.",
   "fm.action.rename_prompt": "שנה את \"{name}\" ל:",
   "fm.action.mkdir_prompt": "שם התיקייה החדשה:",
@@ -276,5 +276,8 @@
   "settings.shortcuts.recording": "הקש צירוף מקשים…",
 
   "fm.checkbox.show_local": "הצג מקומי",
-  "fm.empty.connect_terminal_first": "חבר פאנל טרמינל ב-workspace הזה כדי לטעון קבצים מהשרת."
+  "fm.empty.connect_terminal_first": "חבר פאנל טרמינל ב-workspace הזה כדי לטעון קבצים מהשרת.",
+  "fm.action.open": "פתח",
+  "fm.toast.opened_local": "נפתח: {file}",
+  "fm.toast.opened_remote": "הורד ל-temp ונפתח: {file} (שינויים לא יסתנכרנו חזרה לשרת)"
 }

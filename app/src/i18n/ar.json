@@ -204,8 +204,8 @@
   "fm.label.pane": "🗂 مدير الملفات",
   "fm.empty.no_ssh": "البعيد غير متوفر — قم أولاً بتوصيل لوحة SSH في بيئة العمل هذه.",
   "fm.empty.empty": "(فارغ)",
-  "fm.action.prompt_local": "{name} — اكتب:\n  o = فتح (الدخول / فتح في OS)\n  u = رفع إلى البعيد\n  r = إعادة تسمية\n  d = حذف",
-  "fm.action.prompt_remote": "{name} — اكتب:\n  o = فتح (الدخول)\n  d = تنزيل إلى المحلي\n  r = إعادة تسمية\n  x = حذف",
+  "fm.action.prompt_local": "{name} — اكتب:\n  o = فتح (الدخول إلى المجلد / فتح ملف بالتطبيق الافتراضي)\n  u = رفع إلى البعيد\n  r = إعادة تسمية\n  d = حذف",
+  "fm.action.prompt_remote": "{name} — اكتب:\n  o = فتح (الدخول إلى المجلد / تنزيل إلى temp وفتح الملف)\n  d = تنزيل إلى المحلي\n  r = إعادة تسمية\n  x = حذف",
   "fm.action.confirm_delete": "حذف {name}؟ لا يمكن التراجع.",
   "fm.action.rename_prompt": "إعادة تسمية \"{name}\" إلى:",
   "fm.action.mkdir_prompt": "اسم المجلد الجديد:",
@@ -276,5 +276,8 @@
   "settings.shortcuts.recording": "اضغط تركيبة مفاتيح…",
 
   "fm.checkbox.show_local": "إظهار المحلي",
-  "fm.empty.connect_terminal_first": "وصل لوحة طرفية في بيئة العمل هذه لتحميل ملفات الخادم."
+  "fm.empty.connect_terminal_first": "وصل لوحة طرفية في بيئة العمل هذه لتحميل ملفات الخادم.",
+  "fm.action.open": "فتح",
+  "fm.toast.opened_local": "تم فتح: {file}",
+  "fm.toast.opened_remote": "تم تنزيله إلى temp وفتحه: {file} (التغييرات لن تُزامن للخادم)"
 }

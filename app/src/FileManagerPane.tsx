@@ -151,6 +151,38 @@ export function FileManagerPane(p: Props) {
     return cur === "" ? `/${name}` : `${cur}/${name}`;
   };
 
+  // Phase 17: "Open" handlers. For directories we keep the
+  // existing navigation behavior (cd into); for files we ask the OS
+  // to open with the default app. Remote files are downloaded to a
+  // stable temp path first; the backend returns the temp location
+  // which we surface in the status line so the user knows where the
+  // copy lives.
+  const openLocal = async (e: FileEntry) => {
+    if (e.is_dir) {
+      navIntoLocal(e);
+      return;
+    }
+    const path = fullLocal(e.name);
+    await wrap(`open ${e.name}`, async () => {
+      await invoke("file_open_local", { path });
+      setStatus(t("fm.toast.opened_local", { file: e.name }));
+    });
+  };
+  const openRemote = async (e: FileEntry) => {
+    if (e.is_dir) {
+      navIntoRemote(e);
+      return;
+    }
+    const path = fullRemote(e.name);
+    await wrap(`open ${e.name}`, async () => {
+      const tempPath = await invoke<string>("file_open_remote", {
+        workspaceId: p.workspaceId,
+        remotePath: path,
+      });
+      setStatus(t("fm.toast.opened_remote", { file: e.name, temp: tempPath }));
+    });
+  };
+
   const wrap = async <T,>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     setBusy(true);
     setStatus(label);
@@ -331,15 +363,15 @@ export function FileManagerPane(p: Props) {
                   <div
                     class={`fm-row ${localSel() === e.name ? "selected" : ""}`}
                     onClick={() => setLocalSel(e.name)}
-                    onDblClick={() => navIntoLocal(e)}
+                    onDblClick={() => void openLocal(e)}
                     onContextMenu={(ev) => {
                       ev.preventDefault();
                       setLocalSel(e.name);
                       const action = window.prompt(
                         t("fm.action.prompt_local", { name: e.name }),
-                        e.is_dir ? "o" : "u"
+                        "o"
                       );
-                      if (action === "o" && e.is_dir) navIntoLocal(e);
+                      if (action === "o") void openLocal(e);
                       else if (action === "u" && p.hasSsh) void uploadSel();
                       else if (action === "r") void renameSel("local");
                       else if (action === "d") void deleteSel("local");
@@ -382,15 +414,15 @@ export function FileManagerPane(p: Props) {
                     <div
                       class={`fm-row ${remoteSel() === e.name ? "selected" : ""}`}
                       onClick={() => setRemoteSel(e.name)}
-                      onDblClick={() => navIntoRemote(e)}
+                      onDblClick={() => void openRemote(e)}
                       onContextMenu={(ev) => {
                         ev.preventDefault();
                         setRemoteSel(e.name);
                         const action = window.prompt(
                           t("fm.action.prompt_remote", { name: e.name }),
-                          e.is_dir ? "o" : "d"
+                          "o"
                         );
-                        if (action === "o" && e.is_dir) navIntoRemote(e);
+                        if (action === "o") void openRemote(e);
                         else if (action === "d") void downloadSel();
                         else if (action === "r") void renameSel("remote");
                         else if (action === "x") void deleteSel("remote");

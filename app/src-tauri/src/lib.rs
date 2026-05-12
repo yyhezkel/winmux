@@ -3887,6 +3887,8 @@ pub fn run() {
             file_manager::file_mkdir_remote,
             file_manager::file_upload,
             file_manager::file_download,
+            file_manager::file_open_local,
+            file_manager::file_open_remote,
             local_wizard::detect_local_shells,
             local_wizard::list_recent_paths,
             local_wizard::record_recent_path,

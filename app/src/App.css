@@ -1794,6 +1794,25 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   border-radius: var(--w-r-md);
   padding: 10px 12px;
 }
+.provisioning-section-header {
+  margin-top: 10px;
+  padding: 6px 4px 4px 4px;
+  border-top: 1px solid var(--w-border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.provisioning-section-header strong {
+  color: var(--w-accent);
+  font-size: var(--w-fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.provisioning-section-header span {
+  color: var(--w-text-dim);
+  font-size: var(--w-fs-xs);
+}
+
 .provisioning-step-row {
   display: flex !important;
   gap: 8px !important;

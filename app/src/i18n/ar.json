@@ -244,5 +244,14 @@
   "ws.create.cwd.recent": "الأخيرة",
   "ws.create.cwd.defaults": "مواقع شائعة",
   "ws.create.custom_cmd.label": "الأمر",
-  "ws.create.custom_cmd.placeholder": "مثل: pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd"
+  "ws.create.custom_cmd.placeholder": "مثل: pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd",
+
+  "provisioning.agents.section_title": "وكلاء البرمجة بالذكاء الاصطناعي",
+  "provisioning.agents.help": "كل العوامل اختيارية. Codex و Gemini يحتاجان Node.js (فعّل تلك الخطوة أيضًا).",
+  "provisioning.step.install_claude.label": "Claude Code (Anthropic) — مثبّت curl",
+  "provisioning.step.install_codex.label": "Codex CLI (OpenAI) — npm",
+  "provisioning.step.install_gemini.label": "Gemini CLI (Google) — npm",
+  "provisioning.step.install_claude.auth_hint": "شغّل `claude` على الخادم للمصادقة (متصفح)، أو عيّن ANTHROPIC_API_KEY للوضع headless.",
+  "provisioning.step.install_codex.auth_hint": "شغّل `codex login --device-auth` على الخادم للمصادقة headless (أو `codex login` إذا كان لديك متصفح).",
+  "provisioning.step.install_gemini.auth_hint": "شغّل `gemini` لتسجيل الدخول بـ Google، أو عيّن GEMINI_API_KEY للوضع headless."
 }

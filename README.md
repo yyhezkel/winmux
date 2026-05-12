@@ -231,7 +231,9 @@ Coming next:
 - [Protocols](docs/PROTOCOLS.md) — JSON-RPC catalog, framing, HMAC handshake, agent-hook contract
 - [Config](docs/CONFIG.md) — `workspaces.json` / `settings.json` / `known_hosts.json` schemas; env vars
 - [CLI reference](docs/CLI.md) — every `winmux` subcommand with examples and exit codes
+- [Installing AI agents](docs/INSTALL_AGENTS.md) — Claude Code, Codex, Gemini install + auth flows on Linux / Windows / macOS
 - [Build](docs/BUILD.md) — prerequisites, dev / debug builds, Linux cross-compile, common gotchas
+- [Releasing](docs/RELEASING.md) — six-step runbook for cutting a tag + updating the manifest
 - [Contributing](docs/CONTRIBUTING.md) — adding RPC methods, agent hooks, pane types; logging + commit conventions
 - [Security](SECURITY.md) — vulnerability disclosure policy
 

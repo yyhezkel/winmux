@@ -244,5 +244,14 @@
   "ws.create.cwd.recent": "Недавние",
   "ws.create.cwd.defaults": "Частые папки",
   "ws.create.custom_cmd.label": "Команда",
-  "ws.create.custom_cmd.placeholder": "например: pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd"
+  "ws.create.custom_cmd.placeholder": "например: pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd",
+
+  "provisioning.agents.section_title": "AI-агенты кодирования",
+  "provisioning.agents.help": "Все опциональны. Codex и Gemini требуют Node.js (включите этот шаг тоже).",
+  "provisioning.step.install_claude.label": "Claude Code (Anthropic) — curl-установщик",
+  "provisioning.step.install_codex.label": "Codex CLI (OpenAI) — npm",
+  "provisioning.step.install_gemini.label": "Gemini CLI (Google) — npm",
+  "provisioning.step.install_claude.auth_hint": "Запустите `claude` на сервере для авторизации (браузер), или установите ANTHROPIC_API_KEY для headless-режима.",
+  "provisioning.step.install_codex.auth_hint": "Запустите `codex login --device-auth` на сервере для headless-авторизации (или `codex login`, если есть браузер).",
+  "provisioning.step.install_gemini.auth_hint": "Запустите `gemini` для входа через Google, или установите GEMINI_API_KEY для headless."
 }

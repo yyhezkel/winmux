@@ -43,7 +43,19 @@ pub(crate) enum StepKind {
     InstallNodejs,
     InstallPython,
     InstallDocker,
+    /// Install Claude Code via Anthropic's official curl installer.
+    /// Previously this step ran `npm install -g @anthropic-ai/claude-code`,
+    /// which forced an npm + Node.js dep tree. The official installer
+    /// (`curl … | bash`) is npm-agnostic — Anthropic ships a static
+    /// binary launcher — and it's the version they want users on.
     InstallClaudeCode,
+    /// New in Phase 14.A.2: Codex CLI (`npm i -g @openai/codex`).
+    /// Needs Node.js — the step will fail with a clear hint if
+    /// `npm` isn't on PATH yet.
+    InstallCodex,
+    /// New in Phase 14.A.2: Gemini CLI (`npm i -g @google/gemini-cli@latest`).
+    /// Same Node.js dependency as Codex.
+    InstallGemini,
     SetupWinmuxHooks,
 }
 
@@ -61,7 +73,9 @@ impl StepKind {
             StepKind::InstallNodejs => "Install Node.js LTS",
             StepKind::InstallPython => "Install Python 3 + pip + venv",
             StepKind::InstallDocker => "Install Docker (official repo)",
-            StepKind::InstallClaudeCode => "Install Claude Code (npm -g)",
+            StepKind::InstallClaudeCode => "Install Claude Code (Anthropic, curl installer)",
+            StepKind::InstallCodex => "Install Codex CLI (OpenAI, npm)",
+            StepKind::InstallGemini => "Install Gemini CLI (Google, npm)",
             StepKind::SetupWinmuxHooks => "Run winmux setup-hooks",
         }
     }
@@ -89,6 +103,11 @@ fn default_version() -> u32 {
 }
 
 pub(crate) fn default_profiles() -> Vec<ProvisioningProfile> {
+    // Note: the Claude Code installer doesn't need npm (its `curl
+    // install.sh | bash` ships a self-contained launcher), so we
+    // drop the previous `InstallNodejs` prerequisite from the default
+    // profile. Profiles that include Codex / Gemini DO list
+    // InstallNodejs explicitly first since both still install via npm.
     vec![
         ProvisioningProfile {
             id: "default".into(),
@@ -100,7 +119,6 @@ pub(crate) fn default_profiles() -> Vec<ProvisioningProfile> {
                 StepKind::GenerateKeypair,
                 StepKind::DeployPubkey,
                 StepKind::TestNewKey,
-                StepKind::InstallNodejs,
                 StepKind::InstallClaudeCode,
                 StepKind::SetupWinmuxHooks,
             ],
@@ -117,7 +135,6 @@ pub(crate) fn default_profiles() -> Vec<ProvisioningProfile> {
                 StepKind::TestNewKey,
                 StepKind::DisableRootSsh,
                 StepKind::DisablePasswordSsh,
-                StepKind::InstallNodejs,
                 StepKind::InstallClaudeCode,
                 StepKind::SetupWinmuxHooks,
             ],
@@ -132,6 +149,25 @@ pub(crate) fn default_profiles() -> Vec<ProvisioningProfile> {
                 StepKind::GenerateKeypair,
                 StepKind::DeployPubkey,
                 StepKind::TestNewKey,
+            ],
+        },
+        ProvisioningProfile {
+            id: "all-agents".into(),
+            label: "All agents — Claude Code + Codex + Gemini".into(),
+            steps: vec![
+                StepKind::UpdatePackages,
+                StepKind::InstallBasics,
+                StepKind::CreateUser,
+                StepKind::GenerateKeypair,
+                StepKind::DeployPubkey,
+                StepKind::TestNewKey,
+                // Codex + Gemini both ship via npm; Node.js must be on
+                // PATH first.
+                StepKind::InstallNodejs,
+                StepKind::InstallClaudeCode,
+                StepKind::InstallCodex,
+                StepKind::InstallGemini,
+                StepKind::SetupWinmuxHooks,
             ],
         },
     ]
@@ -645,10 +681,41 @@ async fn run_provisioning(
                 run_step(&mut handle, &app, &run_id, idx, kind, cmd).await
             }
             StepKind::InstallClaudeCode => {
+                // Official Anthropic installer (https://claude.ai/install.sh).
+                // Self-contained — no npm prerequisite. Runs as the new
+                // user so `~/.claude` lands in the right home directory.
+                // `su -l` would re-evaluate the shell rc files (which the
+                // installer relies on for PATH bumps) but isn't available
+                // in all minimal images; we fall back to `sudo -u … bash
+                // -lc` which has the same effect.
                 let u = shell_escape(&input.new_user);
                 let cmd = format!(
-                    "sudo npm install -g @anthropic-ai/claude-code && \
-                     sudo chown -R {u}:{u} /home/{u}/.npm 2>/dev/null || true"
+                    "sudo -u {u} bash -lc 'curl -fsSL https://claude.ai/install.sh | bash' && \
+                     echo '✓ Claude Code installed. Run `claude` on the server to authenticate (browser-based) \
+                     or set ANTHROPIC_API_KEY for headless mode.'"
+                );
+                run_step(&mut handle, &app, &run_id, idx, kind, &cmd).await
+            }
+            StepKind::InstallCodex => {
+                // Codex ships through npm — fail fast with a clear hint
+                // if Node isn't on PATH yet rather than letting npm's
+                // error spill into the log.
+                let u = shell_escape(&input.new_user);
+                let cmd = format!(
+                    "if ! command -v npm >/dev/null; then echo 'ERROR: npm not found. Enable the \"Install Node.js LTS\" step first, or install Node manually.' && exit 1; fi; \
+                     sudo npm install -g @openai/codex && \
+                     sudo chown -R {u}:{u} /home/{u}/.npm /home/{u}/.codex 2>/dev/null || true; \
+                     echo '✓ Codex installed. Run `codex login --device-auth` on the server for headless auth, or `codex login` if you have a desktop browser.'"
+                );
+                run_step(&mut handle, &app, &run_id, idx, kind, &cmd).await
+            }
+            StepKind::InstallGemini => {
+                let u = shell_escape(&input.new_user);
+                let cmd = format!(
+                    "if ! command -v npm >/dev/null; then echo 'ERROR: npm not found. Enable the \"Install Node.js LTS\" step first, or install Node manually.' && exit 1; fi; \
+                     sudo npm install -g @google/gemini-cli@latest && \
+                     sudo chown -R {u}:{u} /home/{u}/.npm /home/{u}/.gemini 2>/dev/null || true; \
+                     echo '✓ Gemini CLI installed. Run `gemini` to sign in with Google, or set GEMINI_API_KEY for headless mode.'"
                 );
                 run_step(&mut handle, &app, &run_id, idx, kind, &cmd).await
             }
@@ -887,6 +954,8 @@ pub(crate) fn provisioning_step_catalog() -> Vec<(String, String)> {
         StepKind::InstallPython,
         StepKind::InstallDocker,
         StepKind::InstallClaudeCode,
+        StepKind::InstallCodex,
+        StepKind::InstallGemini,
         StepKind::SetupWinmuxHooks,
     ];
     all.into_iter()

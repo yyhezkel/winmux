@@ -244,5 +244,14 @@
   "ws.create.cwd.recent": "אחרונים",
   "ws.create.cwd.defaults": "מיקומים נפוצים",
   "ws.create.custom_cmd.label": "פקודה",
-  "ws.create.custom_cmd.placeholder": "למשל: pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd"
+  "ws.create.custom_cmd.placeholder": "למשל: pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd",
+
+  "provisioning.agents.section_title": "סוכני קוד AI",
+  "provisioning.agents.help": "כולם אופציונליים. Codex ו-Gemini דורשים Node.js (הפעל גם את הצעד הזה).",
+  "provisioning.step.install_claude.label": "Claude Code (Anthropic) — התקנת curl",
+  "provisioning.step.install_codex.label": "Codex CLI (OpenAI) — npm",
+  "provisioning.step.install_gemini.label": "Gemini CLI (Google) — npm",
+  "provisioning.step.install_claude.auth_hint": "הרץ `claude` בשרת לאימות (דפדפן), או הגדר ANTHROPIC_API_KEY למצב headless.",
+  "provisioning.step.install_codex.auth_hint": "הרץ `codex login --device-auth` בשרת לאימות headless (או `codex login` אם יש לך דפדפן).",
+  "provisioning.step.install_gemini.auth_hint": "הרץ `gemini` כדי להתחבר עם Google, או הגדר GEMINI_API_KEY למצב headless."
 }

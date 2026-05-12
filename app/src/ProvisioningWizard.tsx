@@ -329,16 +329,44 @@ export function ProvisioningWizard(p: Props) {
               <h4 class="provisioning-h4">{t("provisioning.steps.title")}</h4>
               <div class="provisioning-steps">
                 <For each={stepCatalog()}>
-                  {([id, label]) => (
-                    <label class="provisioning-step-row">
-                      <input
-                        type="checkbox"
-                        checked={effectiveSteps().includes(id)}
-                        onChange={() => toggleStep(id)}
-                      />
-                      <span>{label}</span>
-                    </label>
-                  )}
+                  {([id, label], idx) => {
+                    // Phase 14.A.2: visually separate AI-agent install
+                    // steps from the rest, since they're an opt-in
+                    // group that usually moves together. The dividing
+                    // header appears right before the first
+                    // InstallClaudeCode entry.
+                    const isFirstAgent = id === "InstallClaudeCode" &&
+                      !stepCatalog().slice(0, idx()).some(([s]) =>
+                        s === "InstallClaudeCode"
+                      );
+                    // Use i18n labels where we have one; fall back to
+                    // the backend's English label (which itself is the
+                    // source of truth for unknown step ids).
+                    const i18nKey =
+                      id === "InstallClaudeCode" ? "provisioning.step.install_claude.label"
+                      : id === "InstallCodex" ? "provisioning.step.install_codex.label"
+                      : id === "InstallGemini" ? "provisioning.step.install_gemini.label"
+                      : null;
+                    const display = i18nKey ? t(i18nKey) : label;
+                    return (
+                      <>
+                        {isFirstAgent && (
+                          <div class="provisioning-section-header">
+                            <strong>{t("provisioning.agents.section_title")}</strong>
+                            <span>{t("provisioning.agents.help")}</span>
+                          </div>
+                        )}
+                        <label class="provisioning-step-row">
+                          <input
+                            type="checkbox"
+                            checked={effectiveSteps().includes(id)}
+                            onChange={() => toggleStep(id)}
+                          />
+                          <span>{display}</span>
+                        </label>
+                      </>
+                    );
+                  }}
                 </For>
               </div>
               <div class="modal-buttons">

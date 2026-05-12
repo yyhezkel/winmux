@@ -204,8 +204,8 @@
   "fm.label.pane": "🗂 مدير الملفات",
   "fm.empty.no_ssh": "البعيد غير متوفر — قم أولاً بتوصيل لوحة SSH في بيئة العمل هذه.",
   "fm.empty.empty": "(فارغ)",
-  "fm.action.prompt_local": "{name} — اكتب:\n  o = فتح (الدخول إلى المجلد / فتح ملف بالتطبيق الافتراضي)\n  u = رفع إلى البعيد\n  r = إعادة تسمية\n  d = حذف",
-  "fm.action.prompt_remote": "{name} — اكتب:\n  o = فتح (الدخول إلى المجلد / تنزيل إلى temp وفتح الملف)\n  d = تنزيل إلى المحلي\n  r = إعادة تسمية\n  x = حذف",
+  "fm.action.prompt_local": "{name} — اكتب:\n  o = فتح (الدخول إلى المجلد / فتح ملف بالتطبيق الافتراضي)\n  e = تحرير (محرر مدمج)\n  u = رفع إلى البعيد\n  r = إعادة تسمية\n  d = حذف",
+  "fm.action.prompt_remote": "{name} — اكتب:\n  o = فتح (الدخول إلى المجلد / تنزيل إلى temp وفتح الملف)\n  e = تحرير (محرر مدمج)\n  d = تنزيل إلى المحلي\n  r = إعادة تسمية\n  x = حذف",
   "fm.action.confirm_delete": "حذف {name}؟ لا يمكن التراجع.",
   "fm.action.rename_prompt": "إعادة تسمية \"{name}\" إلى:",
   "fm.action.mkdir_prompt": "اسم المجلد الجديد:",
@@ -278,6 +278,18 @@
   "fm.checkbox.show_local": "إظهار المحلي",
   "fm.empty.connect_terminal_first": "وصل لوحة طرفية في بيئة العمل هذه لتحميل ملفات الخادم.",
   "fm.action.open": "فتح",
+  "fm.action.edit": "تحرير",
   "fm.toast.opened_local": "تم فتح: {file}",
-  "fm.toast.opened_remote": "تم تنزيله إلى temp وفتحه: {file} (التغييرات لن تُزامن للخادم)"
+  "fm.toast.opened_remote": "تم تنزيله إلى temp وفتحه: {file} (التغييرات لن تُزامن للخادم)",
+
+  "common.loading": "جارٍ التحميل…",
+  "common.saving": "جارٍ الحفظ…",
+  "editor.title": "{filename} — محرر",
+  "editor.btn.save": "حفظ",
+  "editor.btn.cancel": "إلغاء",
+  "editor.btn.reload": "إعادة تحميل من القرص",
+  "editor.unsaved_confirm": "إلغاء التغييرات غير المحفوظة؟",
+  "editor.binary_warning": "ملف بنائي — استخدم فتح بدلاً من ذلك.",
+  "editor.large_file_warning": "الملف كبير ({size}). قد يكون التحرير بطيئًا.",
+  "editor.dirty": "غير محفوظ"
 }

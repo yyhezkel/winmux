@@ -484,6 +484,176 @@ fn remote_temp_path(workspace_id: &str, remote_path: &str) -> PathBuf {
     p
 }
 
+// ─── Phase 17.B: Read / write (built-in editor) ────────────────────────────
+
+#[derive(Clone, Serialize)]
+pub(crate) struct FileContents {
+    pub text: String,
+    pub encoding: &'static str,
+    pub is_binary: bool,
+    pub size: u64,
+    /// True when our text-vs-binary heuristic ruled the file binary
+    /// but we'd already populated `text` with the lossy-UTF-8 read
+    /// for previewing. The frontend uses this to gray out Save.
+    pub truncated: bool,
+}
+
+/// Heuristic: is this a text file we can safely edit?
+/// 1. Extension whitelist (covers the common cases that the user
+///    actually wants to edit — code, config, scripts, plain text).
+/// 2. First 8 KB byte check: if the slice has any NUL bytes OR more
+///    than 5% of bytes lie outside the printable / common-whitespace
+///    range, treat as binary.
+fn is_text_file(path: &str, head: &[u8]) -> bool {
+    let lower = path.to_lowercase();
+    const TEXT_EXTS: &[&str] = &[
+        ".txt", ".md", ".markdown", ".rst", ".log",
+        ".json", ".yaml", ".yml", ".toml", ".xml", ".ini", ".conf", ".cfg",
+        ".env", ".gitignore", ".gitattributes", ".editorconfig", ".dockerignore",
+        ".py", ".pyw", ".rb", ".pl", ".lua", ".php",
+        ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+        ".html", ".htm", ".css", ".scss", ".sass", ".less", ".svg",
+        ".rs", ".go", ".java", ".kt", ".swift", ".scala", ".cs", ".vb", ".fs",
+        ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx",
+        ".sh", ".bash", ".zsh", ".fish", ".ps1", ".psm1", ".bat", ".cmd",
+        ".sql", ".prisma", ".graphql", ".proto",
+        ".dockerfile", ".makefile", ".cmake",
+        ".lock", ".gradle", ".sbt",
+        ".tex", ".bib",
+    ];
+    if TEXT_EXTS.iter().any(|e| lower.ends_with(e)) {
+        return true;
+    }
+    // Some text files have no extension at all (Dockerfile, Makefile,
+    // README). Check magic-bytes style: if the byte sample is mostly
+    // printable, treat as text.
+    if head.is_empty() {
+        // Empty file — assume text.
+        return true;
+    }
+    let mut bad = 0usize;
+    let mut nul = false;
+    for &b in head {
+        if b == 0 {
+            nul = true;
+            break;
+        }
+        let printable = b == 0x09 || b == 0x0a || b == 0x0d || (0x20..=0x7e).contains(&b);
+        if !printable && b < 0x80 {
+            bad += 1;
+        }
+    }
+    if nul {
+        return false;
+    }
+    // < 5% non-printable ASCII → text.
+    bad * 20 < head.len()
+}
+
+const LARGE_FILE_THRESHOLD: u64 = 1 * 1024 * 1024;
+
+fn classify_bytes(path: &str, bytes: &[u8], size: u64) -> FileContents {
+    let head_len = bytes.len().min(8 * 1024);
+    let head = &bytes[..head_len];
+    let text_ish = is_text_file(path, head);
+    if !text_ish {
+        return FileContents {
+            text: String::new(),
+            encoding: "binary",
+            is_binary: true,
+            size,
+            truncated: true,
+        };
+    }
+    // Try strict UTF-8 first; fall back to lossy if the file is
+    // mostly text but contains some non-UTF-8 bytes (windows-1252
+    // configs, etc.).
+    let (text, encoding) = match std::str::from_utf8(bytes) {
+        Ok(s) => (s.to_string(), "utf-8"),
+        Err(_) => (String::from_utf8_lossy(bytes).into_owned(), "lossy-utf-8"),
+    };
+    FileContents {
+        text,
+        encoding,
+        is_binary: false,
+        size,
+        truncated: false,
+    }
+}
+
+#[tauri::command]
+pub(crate) fn file_read_local(path: String) -> Result<FileContents, String> {
+    let p = PathBuf::from(expand_path(&path));
+    let bytes = std::fs::read(&p).map_err(|e| format!("read {p:?}: {e}"))?;
+    let size = bytes.len() as u64;
+    Ok(classify_bytes(&path, &bytes, size))
+}
+
+#[tauri::command]
+pub(crate) fn file_write_local(path: String, text: String) -> Result<(), String> {
+    let p = PathBuf::from(expand_path(&path));
+    if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("mkdir parent: {e}"))?;
+        }
+    }
+    std::fs::write(&p, text).map_err(|e| format!("write {p:?}: {e}"))
+}
+
+#[tauri::command]
+pub(crate) async fn file_read_remote(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+) -> Result<FileContents, String> {
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| "no active SSH session".to_string())?;
+    let sftp = open_sftp(&handle).await?;
+    let mut file = sftp
+        .open(&path)
+        .await
+        .map_err(|e| format!("sftp open {path}: {e}"))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .await
+        .map_err(|e| format!("read: {e}"))?;
+    drop(file);
+    let _ = sftp.close().await;
+    let size = bytes.len() as u64;
+    Ok(classify_bytes(&path, &bytes, size))
+}
+
+#[tauri::command]
+pub(crate) async fn file_write_remote(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+    text: String,
+) -> Result<u64, String> {
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| "no active SSH session".to_string())?;
+    let bytes = text.into_bytes();
+    let sftp = open_sftp(&handle).await?;
+    let mut file = sftp
+        .create(&path)
+        .await
+        .map_err(|e| format!("sftp create {path}: {e}"))?;
+    file.write_all(&bytes).await.map_err(|e| format!("write: {e}"))?;
+    file.flush().await.ok();
+    file.shutdown().await.ok();
+    let n = bytes.len() as u64;
+    drop(file);
+    let _ = sftp.close().await;
+    Ok(n)
+}
+
+/// Surface the large-file threshold so the frontend can warn before
+/// kicking off a read. Keeps the constant in one place.
+#[tauri::command]
+pub(crate) fn file_large_threshold() -> u64 {
+    LARGE_FILE_THRESHOLD
+}
+
 #[tauri::command]
 pub(crate) async fn file_open_remote(
     state: State<'_, AppState>,

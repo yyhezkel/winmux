@@ -204,8 +204,8 @@
   "fm.label.pane": "🗂 file manager",
   "fm.empty.no_ssh": "Remote unavailable — connect an SSH terminal pane in this workspace first.",
   "fm.empty.empty": "(empty)",
-  "fm.action.prompt_local": "{name} — type:\n  o = open (cd into directory / open file with default app)\n  u = upload to remote\n  r = rename\n  d = delete",
-  "fm.action.prompt_remote": "{name} — type:\n  o = open (cd into directory / download to temp and open file)\n  d = download to local\n  r = rename\n  x = delete",
+  "fm.action.prompt_local": "{name} — type:\n  o = open (cd into directory / open file with default app)\n  e = edit (built-in editor)\n  u = upload to remote\n  r = rename\n  d = delete",
+  "fm.action.prompt_remote": "{name} — type:\n  o = open (cd into directory / download to temp and open file)\n  e = edit (built-in editor)\n  d = download to local\n  r = rename\n  x = delete",
   "fm.action.confirm_delete": "Delete {name}? This cannot be undone.",
   "fm.action.rename_prompt": "Rename \"{name}\" to:",
   "fm.action.mkdir_prompt": "New folder name:",
@@ -278,6 +278,18 @@
   "fm.checkbox.show_local": "Show local",
   "fm.empty.connect_terminal_first": "Connect a terminal pane in this workspace to load remote files.",
   "fm.action.open": "Open",
+  "fm.action.edit": "Edit",
   "fm.toast.opened_local": "Opened {file}",
-  "fm.toast.opened_remote": "Downloaded to temp and opened: {file} (changes won't sync back)"
+  "fm.toast.opened_remote": "Downloaded to temp and opened: {file} (changes won't sync back)",
+
+  "common.loading": "Loading…",
+  "common.saving": "Saving…",
+  "editor.title": "{filename} — Editor",
+  "editor.btn.save": "Save",
+  "editor.btn.cancel": "Cancel",
+  "editor.btn.reload": "Reload from disk",
+  "editor.unsaved_confirm": "Discard unsaved changes?",
+  "editor.binary_warning": "Binary file — use Open instead.",
+  "editor.large_file_warning": "File is large ({size}). Editing may be slow.",
+  "editor.dirty": "unsaved"
 }

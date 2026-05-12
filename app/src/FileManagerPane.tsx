@@ -1,6 +1,7 @@
 import { createSignal, For, Show, onMount, createMemo } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { FileEditor } from "./FileEditor";
 
 // Phase 15.B: dual-column file manager (local + remote SFTP).
 //
@@ -48,6 +49,42 @@ export function FileManagerPane(p: Props) {
   // show both columns; users who want a wider remote pane flip
   // this off.
   const [showLocal, setShowLocal] = createSignal(true);
+
+  // Phase 17.B: built-in editor modal state. When the user clicks
+  // Edit on a file row we open the modal targeting that side / path.
+  const [editorOpen, setEditorOpen] = createSignal(false);
+  const [editorTarget, setEditorTarget] = createSignal<{
+    side: Side;
+    path: string;
+    filename: string;
+  } | null>(null);
+  const openEditor = (side: Side, name: string) => {
+    const path = side === "local" ? fullLocal(name) : fullRemote(name);
+    setEditorTarget({ side, path, filename: name });
+    setEditorOpen(true);
+  };
+
+  // Phase 17.B: convenience accessors for the toolbar's "Selected"
+  // group. Returns the currently-selected entry on whichever side
+  // last received a click, or null when nothing is selected.
+  const [focusedSide, setFocusedSide] = createSignal<Side>("local");
+  const selectedEntry = createMemo<{ side: Side; entry: FileEntry } | null>(() => {
+    const lname = localSel();
+    const rname = remoteSel();
+    if (focusedSide() === "remote" && rname) {
+      const ent = remoteEntries().find((e) => e.name === rname);
+      if (ent) return { side: "remote", entry: ent };
+    }
+    if (lname) {
+      const ent = localEntries().find((e) => e.name === lname);
+      if (ent) return { side: "local", entry: ent };
+    }
+    if (rname) {
+      const ent = remoteEntries().find((e) => e.name === rname);
+      if (ent) return { side: "remote", entry: ent };
+    }
+    return null;
+  });
 
   const refreshLocal = async () => {
     try {
@@ -335,8 +372,6 @@ export function FileManagerPane(p: Props) {
           <span>{t("fm.checkbox.hidden")}</span>
         </label>
         <Show when={p.hasSsh}>
-          <button class="fm-action" disabled={!localSel() || busy()} onClick={() => void uploadSel()}>{t("fm.btn.upload")}</button>
-          <button class="fm-action" disabled={!remoteSel() || busy()} onClick={() => void downloadSel()}>{t("fm.btn.download")}</button>
           <label class="fm-checkbox">
             <input
               type="checkbox"
@@ -345,6 +380,69 @@ export function FileManagerPane(p: Props) {
             />
             <span>{t("fm.checkbox.show_local")}</span>
           </label>
+        </Show>
+        {/* Phase 17.B: a "Selected" action group that lights up the
+             moment any row is selected — gives the user a clear,
+             visible menu instead of relying on the right-click prompt.
+             Buttons fire the same actions as the context-menu entries. */}
+        <Show when={selectedEntry()}>
+          <span class="fm-sep">|</span>
+          <span class="fm-selected-label" title={selectedEntry()!.entry.name}>
+            {selectedEntry()!.entry.name}
+          </span>
+          <button
+            class="fm-action"
+            disabled={busy()}
+            onClick={() => {
+              const s = selectedEntry()!;
+              if (s.side === "local") void openLocal(s.entry);
+              else void openRemote(s.entry);
+            }}
+          >
+            {t("fm.action.open")}
+          </button>
+          <button
+            class="fm-action"
+            disabled={busy() || selectedEntry()!.entry.is_dir}
+            onClick={() => {
+              const s = selectedEntry()!;
+              openEditor(s.side, s.entry.name);
+            }}
+          >
+            {t("fm.action.edit")}
+          </button>
+          <Show when={p.hasSsh && selectedEntry()!.side === "local"}>
+            <button
+              class="fm-action"
+              disabled={busy() || selectedEntry()!.entry.is_dir}
+              onClick={() => void uploadSel()}
+            >
+              {t("fm.btn.upload")}
+            </button>
+          </Show>
+          <Show when={p.hasSsh && selectedEntry()!.side === "remote"}>
+            <button
+              class="fm-action"
+              disabled={busy() || selectedEntry()!.entry.is_dir}
+              onClick={() => void downloadSel()}
+            >
+              {t("fm.btn.download")}
+            </button>
+          </Show>
+          <button
+            class="fm-action"
+            disabled={busy()}
+            onClick={() => void renameSel(selectedEntry()!.side)}
+          >
+            {t("common.rename")}
+          </button>
+          <button
+            class="fm-action fm-action-danger"
+            disabled={busy()}
+            onClick={() => void deleteSel(selectedEntry()!.side)}
+          >
+            {t("common.delete")}
+          </button>
         </Show>
         <span class="fm-status">{busy() ? "…" : status()}</span>
         <Show when={err()}>
@@ -362,16 +460,21 @@ export function FileManagerPane(p: Props) {
                 {(e) => (
                   <div
                     class={`fm-row ${localSel() === e.name ? "selected" : ""}`}
-                    onClick={() => setLocalSel(e.name)}
+                    onClick={() => {
+                      setLocalSel(e.name);
+                      setFocusedSide("local");
+                    }}
                     onDblClick={() => void openLocal(e)}
                     onContextMenu={(ev) => {
                       ev.preventDefault();
                       setLocalSel(e.name);
+                      setFocusedSide("local");
                       const action = window.prompt(
                         t("fm.action.prompt_local", { name: e.name }),
                         "o"
                       );
                       if (action === "o") void openLocal(e);
+                      else if (action === "e" && !e.is_dir) openEditor("local", e.name);
                       else if (action === "u" && p.hasSsh) void uploadSel();
                       else if (action === "r") void renameSel("local");
                       else if (action === "d") void deleteSel("local");
@@ -413,16 +516,21 @@ export function FileManagerPane(p: Props) {
                   {(e) => (
                     <div
                       class={`fm-row ${remoteSel() === e.name ? "selected" : ""}`}
-                      onClick={() => setRemoteSel(e.name)}
+                      onClick={() => {
+                        setRemoteSel(e.name);
+                        setFocusedSide("remote");
+                      }}
                       onDblClick={() => void openRemote(e)}
                       onContextMenu={(ev) => {
                         ev.preventDefault();
                         setRemoteSel(e.name);
+                        setFocusedSide("remote");
                         const action = window.prompt(
                           t("fm.action.prompt_remote", { name: e.name }),
                           "o"
                         );
                         if (action === "o") void openRemote(e);
+                        else if (action === "e" && !e.is_dir) openEditor("remote", e.name);
                         else if (action === "d") void downloadSel();
                         else if (action === "r") void renameSel("remote");
                         else if (action === "x") void deleteSel("remote");
@@ -440,6 +548,22 @@ export function FileManagerPane(p: Props) {
           </div>
         </Show>
       </div>
+      <Show when={editorOpen() && editorTarget()}>
+        <FileEditor
+          open
+          filename={editorTarget()!.filename}
+          path={editorTarget()!.path}
+          side={editorTarget()!.side}
+          workspaceId={p.workspaceId}
+          onClose={() => setEditorOpen(false)}
+          onSaved={() => {
+            // After a successful save, refresh the corresponding column
+            // so the new size / mtime show up in the listing.
+            if (editorTarget()?.side === "local") void refreshLocal();
+            else void refreshRemote();
+          }}
+        />
+      </Show>
     </div>
   );
 }

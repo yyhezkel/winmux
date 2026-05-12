@@ -1,8 +1,32 @@
 {
-  "winmux_hooks_version": "1.0.0",
+  "winmux_hooks_version": "1.1.0",
   "agent": "claude-code",
   "min_winmux_version": "0.1.0",
   "settings_file": "~/.claude/settings.json",
+  "_notes": [
+    "v1.1.0 (2026-05): no event changes — bump tracks the CLI side adding",
+    "  `matcher_mode` (restrictive|all|custom) + comprehensive debug logging",
+    "  for diagnosing permission_mode + matcher coverage issues.",
+    "PreToolUse: fires BEFORE Claude Code invokes a tool. Returning",
+    "  permissionDecision=allow/deny/ask is the only way to gate a tool.",
+    "  Claude Code only blocks on the hook when permission_mode is the",
+    "  default 'plan'/'default' mode; if the user has flipped to",
+    "  acceptEdits / bypassPermissions / skip, the tool runs regardless,",
+    "  so winmux's `pre-tool-use` short-circuits with allow in those modes",
+    "  (otherwise the user would see a dead card they can't act on).",
+    "Notification: fires for Claude Code's UI toasts (waiting on input,",
+    "  permission-pending, etc.). Passive — we just log it; no decision.",
+    "SessionStart/SessionEnd: lifecycle hooks for session create / teardown.",
+    "  Passive — useful for analytics, banner injection, etc.",
+    "Stop: fires when the assistant finishes a turn. winmux uses it to",
+    "  trigger the optional Claude auto-summary feature (Phase 17).",
+    "Matcher of `*` matches every invocation of that event. The PreToolUse",
+    "  matcher is intentionally narrower — restricting which tools surface",
+    "  a winmux card. Override with `--matcher-mode all` (or the Settings",
+    "  → Hooks → 'Match all tools' toggle) to route EVERY tool through",
+    "  winmux. Use `custom` if you've hand-edited ~/.claude/settings.json",
+    "  and don't want setup-hooks to overwrite the matchers."
+  ],
   "events": {
     "PreToolUse": {
       "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Task",

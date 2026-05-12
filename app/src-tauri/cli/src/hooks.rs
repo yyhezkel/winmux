@@ -42,7 +42,28 @@ pub enum AgentStatus {
 
 pub trait HookAdapter {
     fn label(&self) -> &'static str;
-    fn run(&self, dry: bool, force: bool, source: &str) -> AgentStatus;
+    fn run(&self, dry: bool, force: bool, source: &str, matcher_mode: &str) -> AgentStatus;
+}
+
+/// Phase 18.1: rewrite the loaded spec's matchers based on the user's
+/// `matcher_mode` choice. `restrictive` is a passthrough (whatever the
+/// hook spec already says, typically the narrow risky-tool regex);
+/// `all` rewrites every event's matcher to `.*` so EVERY tool call
+/// surfaces a winmux card — useful for debugging missing-card issues;
+/// `custom` is a passthrough too (the caller is hand-managing
+/// settings.json and we should leave the spec intact). We only ever
+/// override matchers on events the spec actually declared — we don't
+/// invent new events.
+pub fn apply_matcher_mode(spec: &mut HookSpec, matcher_mode: &str) {
+    match matcher_mode {
+        "all" => {
+            for (_, ev) in spec.events.iter_mut() {
+                ev.matcher = ".*".into();
+            }
+        }
+        // "restrictive" / "custom" / unknown → leave spec untouched.
+        _ => {}
+    }
 }
 
 // ─── Hook spec (the shape of hooks/<agent>.json) ───────────────────────────
@@ -67,7 +88,7 @@ pub struct HookEvent {
 /// `source=bundled` AND as the version recorded when no fetched spec
 /// was applied. Bump whenever you ship a new hook in a release with a
 /// matching `hooks/claude-code.json` change.
-const BUNDLED_CLAUDE_VERSION: &str = "1.0.0";
+const BUNDLED_CLAUDE_VERSION: &str = "1.1.0";
 
 /// The bundled fallback spec for Claude Code. Mirrors what
 /// `hooks/claude-code.json` carries at the same `winmux_hooks_version`
@@ -247,7 +268,7 @@ impl HookAdapter for Claude {
         "Claude Code"
     }
 
-    fn run(&self, dry: bool, force: bool, source: &str) -> AgentStatus {
+    fn run(&self, dry: bool, force: bool, source: &str, matcher_mode: &str) -> AgentStatus {
         let home = match std::env::var_os("HOME") {
             Some(h) => h,
             None => return AgentStatus::Error("$HOME not set".into()),
@@ -262,10 +283,11 @@ impl HookAdapter for Claude {
             None => return AgentStatus::Error("non-UTF-8 $HOME".into()),
         };
 
-        let spec = match load_spec(source, "claude-code") {
+        let mut spec = match load_spec(source, "claude-code") {
             Ok(s) => s,
             Err(e) => return AgentStatus::Error(format!("load spec: {e}")),
         };
+        apply_matcher_mode(&mut spec, matcher_mode);
 
         // Phase setup-hooks-fix: current Claude Code reads hooks from
         // `~/.claude/settings.json` under a top-level `"hooks"` key — NOT
@@ -525,14 +547,20 @@ impl HookAdapter for Stub {
     fn label(&self) -> &'static str {
         self.label
     }
-    fn run(&self, _dry: bool, _force: bool, _source: &str) -> AgentStatus {
+    fn run(&self, _dry: bool, _force: bool, _source: &str, _matcher_mode: &str) -> AgentStatus {
         AgentStatus::Stub("not yet implemented".into())
     }
 }
 
-pub fn run_all(adapters: &[Box<dyn HookAdapter>], dry: bool, force: bool, source: &str) {
+pub fn run_all(
+    adapters: &[Box<dyn HookAdapter>],
+    dry: bool,
+    force: bool,
+    source: &str,
+    matcher_mode: &str,
+) {
     for a in adapters {
-        let s = a.run(dry, force, source);
+        let s = a.run(dry, force, source, matcher_mode);
         print_status(a.label(), &s);
     }
     if dry {

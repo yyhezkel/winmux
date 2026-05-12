@@ -191,6 +191,19 @@ pub(crate) struct Hooks {
     pub enabled: bool,
     pub agents: Vec<String>,
     pub policy_preset: String,
+    /// Phase 18.1: which PreToolUse matcher to install in the agent's
+    /// settings.json. `"restrictive"` (default) only matches risky tools
+    /// (`Bash|Write|Edit|MultiEdit|NotebookEdit|Task`); `"all"` matches
+    /// every tool (`.*`) so EVERY action surfaces a winmux card; `"custom"`
+    /// keeps whatever the user hand-edited locally and is never overwritten
+    /// by `winmux setup-hooks`. The setting is consumed by the desktop's
+    /// remote-side setup-hooks call (Phase 18 wraps `agent.setup_hooks`).
+    #[serde(default = "default_matcher_mode")]
+    pub matcher_mode: String,
+}
+
+fn default_matcher_mode() -> String {
+    "restrictive".to_string()
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -393,6 +406,7 @@ impl Default for Hooks {
             enabled: true,
             agents: vec!["claude".into()],
             policy_preset: "default".into(),
+            matcher_mode: default_matcher_mode(),
         }
     }
 }

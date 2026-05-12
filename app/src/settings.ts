@@ -60,6 +60,11 @@ export interface HooksSettings {
   enabled: boolean;
   agents: string[];
   policy_preset: string;
+  /** Phase 18.1: which PreToolUse matcher to install when setup-hooks
+   *  runs. "restrictive" (default) only catches risky tools; "all"
+   *  matches `.*` (every tool surfaces a winmux card); "custom" leaves
+   *  whatever the user hand-edited and never overwrites. */
+  matcher_mode?: "restrictive" | "all" | "custom";
 }
 
 export interface NotificationSettings {

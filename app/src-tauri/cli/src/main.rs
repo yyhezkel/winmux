@@ -16,6 +16,36 @@ use std::io::Read;
 use std::process::ExitCode;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
+/// Phase 18.1: append a single-line trace entry to
+/// `~/.winmux/hook-debug.log` (remote-side debug file). Used by the
+/// claude-hook subcommand to record every invocation + branch
+/// decision so user-reported permission-mode / matcher issues can
+/// be diagnosed by looking at the log instead of reproducing live.
+/// Best-effort: any I/O failure is silently swallowed so the hook
+/// never aborts due to logging.
+fn hook_dlog(msg: &str) {
+    use std::io::Write as _;
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"));
+    let Some(home) = home else { return };
+    let dir = std::path::PathBuf::from(home).join(".winmux");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("hook-debug.log");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "{} {}", ts, msg);
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "winmux",
@@ -398,6 +428,13 @@ enum Cmd {
         /// outdated-check can compare to manifest.
         #[arg(long, default_value = "latest")]
         hooks_version: String,
+        /// Phase 18.1: which PreToolUse matcher to install. `restrictive`
+        /// (default) keeps whatever the loaded spec uses — currently
+        /// `Bash|Write|Edit|MultiEdit|NotebookEdit|Task`; `all` overrides
+        /// it to `.*` so every tool routes through winmux's card;
+        /// `custom` is a no-op — caller is hand-managing the matcher.
+        #[arg(long, default_value = "restrictive")]
+        matcher_mode: String,
     },
 
     /// Phase 9.A: read or modify persisted app settings.
@@ -1552,6 +1589,46 @@ async fn real_main() -> ExitCode {
                 serde_json::from_str(buf.trim()).unwrap_or_else(|_| json!({ "raw": buf.trim() }))
             };
 
+            // Phase 18.1: comprehensive diagnostic log of every hook
+            // invocation. The file lives at `~/.winmux/hook-debug.log`
+            // (server-side, where this CLI runs). Used to debug
+            // permission_mode mismatches, matcher coverage gaps, and
+            // post-action card surprises. Best-effort — silent on any
+            // I/O error so the hook never fails due to logging.
+            //
+            // The payload Claude Code sends varies by event:
+            //   PreToolUse: { tool_name, tool_input, permission_mode,
+            //                 session_id, transcript_path, cwd, … }
+            //   Notification: { message, … }
+            //   SessionStart/End: { session_id, … }
+            //   Stop: { session_id, stop_hook_active, … }
+            // We dump the keys + selected values rather than the whole
+            // body so secrets / large prompts don't leak to disk.
+            let pane_id_log = std::env::var("WINMUX_PANE_ID")
+                .unwrap_or_else(|_| "(unset)".into());
+            let tool_name_log = payload
+                .get("tool_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(absent)");
+            let perm_mode_log = payload
+                .get("permission_mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(absent)");
+            let session_id_log = payload
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(absent)");
+            let payload_keys: Vec<&str> = payload
+                .as_object()
+                .map(|m| m.keys().map(|s| s.as_str()).collect())
+                .unwrap_or_default();
+            hook_dlog(&format!(
+                "claude-hook BEGIN subcommand={subcommand} \
+                 pane_id={pane_id_log} tool_name={tool_name_log} \
+                 permission_mode={perm_mode_log} session_id={session_id_log} \
+                 payload_keys={payload_keys:?}"
+            ));
+
             // Phase setup-hooks-fix v4: env-gate. The hooks are written to
             // ~/.claude/settings.json which is global — they fire for EVERY
             // Claude Code invocation on this machine, not just the ones
@@ -1562,6 +1639,10 @@ async fn real_main() -> ExitCode {
             // not running under us and we should immediately defer to its
             // built-in UI for pre-tool-use, or silently no-op for lifecycle.
             if std::env::var("WINMUX_PANE_ID").is_err() {
+                hook_dlog(&format!(
+                    "claude-hook BRANCH=env-gate (WINMUX_PANE_ID unset) \
+                     decision=ask-or-noop subcommand={subcommand}"
+                ));
                 match subcommand.as_str() {
                     "pre-tool-use" => {
                         let out = json!({
@@ -1598,6 +1679,11 @@ async fn real_main() -> ExitCode {
                     permission_mode,
                     "acceptEdits" | "bypassPermissions" | "skip"
                 ) {
+                    hook_dlog(&format!(
+                        "claude-hook BRANCH=permission_mode-shortcircuit \
+                         permission_mode={permission_mode} \
+                         decision=allow tool_name={tool_name_log}"
+                    ));
                     let out = json!({
                         "hookSpecificOutput": {
                             "hookEventName": "PreToolUse",
@@ -1609,6 +1695,12 @@ async fn real_main() -> ExitCode {
                     });
                     println!("{}", serde_json::to_string(&out).unwrap_or_default());
                     return ExitCode::SUCCESS;
+                } else {
+                    hook_dlog(&format!(
+                        "claude-hook BRANCH=permission_mode-passthrough \
+                         permission_mode={permission_mode} tool_name={tool_name_log} \
+                         (will dispatch to winmux card)"
+                    ));
                 }
             }
 
@@ -1638,6 +1730,12 @@ async fn real_main() -> ExitCode {
             // The same data is already captured server-side via the feed.push
             // RPC and shows up in `winmux dev debug-log-tail`.
 
+            hook_dlog(&format!(
+                "claude-hook BRANCH=dispatch kind={kind} blocking={blocking} \
+                 subcommand={subcommand} request_id={request_id} \
+                 timeout_secs={timeout_secs}"
+            ));
+
             let result = rpc_call(
                 "feed.push",
                 json!({
@@ -1659,6 +1757,10 @@ async fn real_main() -> ExitCode {
                         .get("decision")
                         .and_then(|x| x.as_str())
                         .unwrap_or("unknown");
+                    hook_dlog(&format!(
+                        "claude-hook BRANCH=rpc-ok decision={decision} \
+                         subcommand={subcommand} request_id={request_id}"
+                    ));
                     // Phase setup-hooks-fix v2: emit Claude Code v2.1+ hook
                     // output format. Per https://docs.claude.com/en/docs/claude-code/hooks
                     //   { "hookSpecificOutput": { "hookEventName": ..., "permissionDecision": "allow"|"deny"|"ask", "permissionDecisionReason"? } }
@@ -1731,6 +1833,11 @@ async fn real_main() -> ExitCode {
                     // (better than a hard error). Lifecycle hooks stay
                     // silent (they don't need a response anyway). Legacy
                     // subcommands keep the old exit-code shape.
+                    hook_dlog(&format!(
+                        "claude-hook BRANCH=rpc-error-fallback error={e} \
+                         subcommand={subcommand} request_id={request_id} \
+                         (Claude Code's built-in UI will be shown)"
+                    ));
                     eprintln!(
                         "winmux claude-hook: pipe error: {} (falling back to Claude Code UI)",
                         e
@@ -1763,6 +1870,7 @@ async fn real_main() -> ExitCode {
             force,
             source,
             hooks_version,
+            matcher_mode,
         } => {
             // hooks_version is informational for now; we surface it
             // in the log so a user explicitly pinning to a version
@@ -1774,6 +1882,13 @@ async fn real_main() -> ExitCode {
                     "setup-hooks: --hooks-version={hooks_version} requested; \
                      note that the github source always tracks `main` for now"
                 );
+            }
+            if !matches!(matcher_mode.as_str(), "restrictive" | "all" | "custom") {
+                eprintln!(
+                    "error: unknown --matcher-mode {:?} (use 'restrictive', 'all', or 'custom')",
+                    matcher_mode
+                );
+                return ExitCode::from(2);
             }
             let mut adapters: Vec<Box<dyn hooks::HookAdapter>> = Vec::new();
             match agent.as_str() {
@@ -1791,7 +1906,7 @@ async fn real_main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             }
-            hooks::run_all(&adapters, *dry_run, *force, source);
+            hooks::run_all(&adapters, *dry_run, *force, source, matcher_mode);
             return ExitCode::SUCCESS;
         }
         Cmd::PaneDisconnect { pane, kill } => {

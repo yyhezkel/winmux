@@ -239,6 +239,11 @@ pub async fn bootstrap(
                 &format!("ln -sf {remote_bin_abs} {remote_symlink_abs}"),
             )
             .await;
+            // Even when the binary is up to date, re-check the rc file
+            // — the user may have wiped their shell config since the
+            // last bootstrap, or this is a fresh machine that has the
+            // binary cached but no PATH entry.
+            ensure_path_in_rc(handle, &remote_dir_abs).await;
             return Ok(BootstrapStatus::AlreadyOk);
         }
         dlog(&format!(
@@ -278,8 +283,84 @@ pub async fn bootstrap(
     }
     dlog("bootstrap: COMPLETE — upload verified");
 
+    // Phase 18: add `~/.winmux/bin` to the user's shell rc file so a
+    // fresh non-winmux SSH session also gets `winmux` on PATH.
+    // Best-effort — never fails the bootstrap.
+    ensure_path_in_rc(handle, &remote_dir_abs).await;
+
     Ok(BootstrapStatus::Uploaded {
         bytes: bytes.len(),
         sha256: entry.sha256.clone(),
     })
+}
+
+/// Add `$HOME/.winmux/bin` to the user's PATH by appending one line
+/// to their shell rc file. Idempotent — greps for "winmux/bin" first
+/// and skips if any line already matches. Detects bash / zsh / fish
+/// from `$SHELL`; falls back to `.bashrc` for unknown shells.
+///
+/// Best-effort: failures (no rc file writable, exotic shell, $SHELL
+/// unset) log to debug.log but don't abort the bootstrap. The next
+/// SHELL the user opens picks up the change; the current pane's
+/// shell needs `source ~/.bashrc` (or a reconnect).
+///
+/// For winmux-managed SSH panes the WINMUX_SOCKET_ADDR / TUNNEL_TOKEN
+/// env vars + the `last.env` file already let the CLI find the
+/// tunnel — this rc-file edit is purely for users who SSH in
+/// directly (outside winmux) and want to run `winmux ...` from a
+/// raw prompt.
+async fn ensure_path_in_rc(
+    handle: &mut Handle<SshClient>,
+    remote_dir_abs: &str,
+) {
+    // One shell snippet does it all: pick rc per $SHELL basename,
+    // mkdir parent (fish's `~/.config/fish/` may not exist),
+    // touch the rc file so grep doesn't trip, grep for an existing
+    // entry, append the right line if missing. Output:
+    //   "ADDED <rc>"  — we just appended
+    //   "EXISTS <rc>" — already present
+    //   "ERROR <msg>" — anything else
+    let _ = remote_dir_abs; // currently unused; reserved for a future
+                            // form of the helper that emits the
+                            // absolute path into the rc file rather
+                            // than `$HOME/.winmux/bin`.
+    let snippet = r#"
+set -e
+SH="$(basename "${SHELL:-/bin/bash}")"
+case "$SH" in
+  zsh)  RC="$HOME/.zshrc";    LINE='export PATH="$HOME/.winmux/bin:$PATH"' ;;
+  fish) RC="$HOME/.config/fish/config.fish"; LINE='set -gx PATH $HOME/.winmux/bin $PATH' ;;
+  *)    RC="$HOME/.bashrc";   LINE='export PATH="$HOME/.winmux/bin:$PATH"' ;;
+esac
+mkdir -p "$(dirname "$RC")" 2>/dev/null || true
+touch "$RC" 2>/dev/null || { echo "ERROR cannot touch $RC"; exit 0; }
+if grep -q 'winmux/bin' "$RC" 2>/dev/null; then
+  echo "EXISTS $RC"
+else
+  printf '\n# Added by winmux bootstrap — keep `winmux` on PATH\n%s\n' "$LINE" >> "$RC" || {
+    echo "ERROR cannot write to $RC"; exit 0;
+  }
+  echo "ADDED $RC"
+fi
+"#;
+    let result = ssh_exec(handle, snippet).await;
+    match result {
+        Ok((out, _exit)) => {
+            let line = out.trim();
+            if line.starts_with("ADDED ") {
+                dlog(&format!(
+                    "bootstrap: added PATH entry to {}",
+                    line.trim_start_matches("ADDED ").trim()
+                ));
+            } else if line.starts_with("EXISTS ") {
+                dlog(&format!(
+                    "bootstrap: PATH already configured in {}",
+                    line.trim_start_matches("EXISTS ").trim()
+                ));
+            } else {
+                dlog(&format!("bootstrap: ensure_path_in_rc: {line}"));
+            }
+        }
+        Err(e) => dlog(&format!("bootstrap: ensure_path_in_rc failed: {e}")),
+    }
 }

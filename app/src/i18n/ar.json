@@ -253,5 +253,12 @@
   "provisioning.step.install_gemini.label": "Gemini CLI (Google) — npm",
   "provisioning.step.install_claude.auth_hint": "شغّل `claude` على الخادم للمصادقة (متصفح)، أو عيّن ANTHROPIC_API_KEY للوضع headless.",
   "provisioning.step.install_codex.auth_hint": "شغّل `codex login --device-auth` على الخادم للمصادقة headless (أو `codex login` إذا كان لديك متصفح).",
-  "provisioning.step.install_gemini.auth_hint": "شغّل `gemini` لتسجيل الدخول بـ Google، أو عيّن GEMINI_API_KEY للوضع headless."
+  "provisioning.step.install_gemini.auth_hint": "شغّل `gemini` لتسجيل الدخول بـ Google، أو عيّن GEMINI_API_KEY للوضع headless.",
+
+  "provisioning.field.workspace_name": "اسم بيئة العمل",
+  "provisioning.field.workspace_name.placeholder": "(يُشتق تلقائيًا من المضيف)",
+  "provisioning.done.workspace_created": "✓ تم إنشاء بيئة العمل \"{name}\" وهي جاهزة.",
+  "provisioning.done.workspace_skipped": "انتهى الإعداد دون تسجيل دخول ناجح بالمفتاح — لم يتم إنشاء بيئة عمل. شغّل المعالج مرة أخرى أو أنشئ يدويًا.",
+  "provisioning.done.btn.open_now": "افتح الآن",
+  "provisioning.done.btn.open_with_claude": "افتح مع Claude Code"
 }

@@ -253,5 +253,12 @@
   "provisioning.step.install_gemini.label": "Gemini CLI (Google) — npm",
   "provisioning.step.install_claude.auth_hint": "Запустите `claude` на сервере для авторизации (браузер), или установите ANTHROPIC_API_KEY для headless-режима.",
   "provisioning.step.install_codex.auth_hint": "Запустите `codex login --device-auth` на сервере для headless-авторизации (или `codex login`, если есть браузер).",
-  "provisioning.step.install_gemini.auth_hint": "Запустите `gemini` для входа через Google, или установите GEMINI_API_KEY для headless."
+  "provisioning.step.install_gemini.auth_hint": "Запустите `gemini` для входа через Google, или установите GEMINI_API_KEY для headless.",
+
+  "provisioning.field.workspace_name": "Имя рабочего пространства",
+  "provisioning.field.workspace_name.placeholder": "(автоматически из host)",
+  "provisioning.done.workspace_created": "✓ Рабочее пространство \"{name}\" создано и готово.",
+  "provisioning.done.workspace_skipped": "Подготовка завершилась без успешного входа по ключу — пространство не создано. Запустите мастер снова или создайте вручную.",
+  "provisioning.done.btn.open_now": "Открыть сейчас",
+  "provisioning.done.btn.open_with_claude": "Открыть с Claude Code"
 }

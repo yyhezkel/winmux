@@ -939,6 +939,28 @@ function App() {
       <ProvisioningWizard
         open={showProvision()}
         onClose={() => setShowProvision(false)}
+        onOpenWorkspace={async (wsId, mode) => {
+          // Phase 14.A.2: the wizard's backend already emitted
+          // `workspaces:changed` when it created/updated the
+          // workspace, so by the time we land here our local state
+          // already shows the new entry. Switch to it + auto-connect
+          // the first pane.
+          try {
+            await handleSetActive(wsId);
+            const ws = file().workspaces.find((w) => w.id === wsId);
+            const firstPane =
+              ws?.layout ? collectPanes(ws.layout)[0] : null;
+            if (firstPane) {
+              setActivePaneId(firstPane);
+              connectPane(firstPane, {
+                persistent: true,
+                ...(mode === "claude" ? { mode: "claude" } : {}),
+              });
+            }
+          } catch (e) {
+            console.error("open created workspace failed", e);
+          }
+        }}
       />
 
       <Show when={settings()}>

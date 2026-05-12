@@ -253,5 +253,12 @@
   "provisioning.step.install_gemini.label": "Gemini CLI (Google) — npm",
   "provisioning.step.install_claude.auth_hint": "הרץ `claude` בשרת לאימות (דפדפן), או הגדר ANTHROPIC_API_KEY למצב headless.",
   "provisioning.step.install_codex.auth_hint": "הרץ `codex login --device-auth` בשרת לאימות headless (או `codex login` אם יש לך דפדפן).",
-  "provisioning.step.install_gemini.auth_hint": "הרץ `gemini` כדי להתחבר עם Google, או הגדר GEMINI_API_KEY למצב headless."
+  "provisioning.step.install_gemini.auth_hint": "הרץ `gemini` כדי להתחבר עם Google, או הגדר GEMINI_API_KEY למצב headless.",
+
+  "provisioning.field.workspace_name": "שם סביבת עבודה",
+  "provisioning.field.workspace_name.placeholder": "(נגזר אוטומטית מה-host)",
+  "provisioning.done.workspace_created": "✓ סביבת העבודה \"{name}\" נוצרה ומוכנה.",
+  "provisioning.done.workspace_skipped": "ההקמה הסתיימה ללא כניסה מוצלחת עם המפתח — לא נוצרה סביבת עבודה. הרץ את האשף שוב או צור ידנית.",
+  "provisioning.done.btn.open_now": "פתח עכשיו",
+  "provisioning.done.btn.open_with_claude": "פתח עם Claude Code"
 }

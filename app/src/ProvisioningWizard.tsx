@@ -41,11 +41,23 @@ interface RunHandle {
   run_id: string;
 }
 
+interface ProvisionResult {
+  run_id: string;
+  workspace_id?: string | null;
+  workspace_name?: string | null;
+  claude_installed: boolean;
+  host: string;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
   /** workspace id to associate the provisioning run with (for secret store). */
   workspaceId?: string;
+  /** Phase 14.A.2: called when the wizard reaches Done with a created
+   *  workspace and the user clicks "Open it now". `claude` = open in
+   *  Claude Code mode (Smart Connect's claude option). */
+  onOpenWorkspace?: (workspaceId: string, mode: "default" | "claude") => void;
 }
 
 export function ProvisioningWizard(p: Props) {
@@ -68,6 +80,26 @@ export function ProvisioningWizard(p: Props) {
   const [stepCatalog, setStepCatalog] = createSignal<[string, string][]>([]);
   const [newUser, setNewUser] = createSignal("runner");
   const [customSteps, setCustomSteps] = createSignal<string[]>([]);
+  // Phase 14.A.2: editable workspace name. Defaults to a host-derived
+  // label like "myserver" from "myserver.com" — recomputed whenever
+  // the host changes (only if the user hasn't manually typed
+  // something).
+  const [workspaceName, setWorkspaceName] = createSignal("");
+  const [workspaceNameTouched, setWorkspaceNameTouched] = createSignal(false);
+  const deriveWorkspaceName = (h: string): string => {
+    const trimmed = h.trim();
+    if (!trimmed) return "";
+    const head = trimmed.split(".")[0];
+    if (/^[0-9.]+$/.test(trimmed)) return trimmed;
+    return head;
+  };
+  // Auto-fill when the host changes (Connect step input) — only if the
+  // user hasn't typed their own name yet.
+  createMemo(() => {
+    if (!workspaceNameTouched()) {
+      setWorkspaceName(deriveWorkspaceName(host()));
+    }
+  });
 
   // Execute-step state.
   const [runId, setRunId] = createSignal<string | null>(null);
@@ -76,8 +108,13 @@ export function ProvisioningWizard(p: Props) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_logLines, setLogLines] = createSignal<StepProgress[]>([]);
   const [stepStates, setStepStates] = createSignal<Record<number, StepProgress>>({});
+  // Phase 14.A.2 — completion payload from the backend's
+  // `provisioning:complete` event. When this carries a workspace_id
+  // the Done step renders the "Open it now" buttons.
+  const [result, setResult] = createSignal<ProvisionResult | null>(null);
 
   let unlisten: UnlistenFn | null = null;
+  let unlistenComplete: UnlistenFn | null = null;
   onMount(async () => {
     try {
       const pf = await invoke<ProfilesFile>("provisioning_profiles_list");
@@ -95,9 +132,17 @@ export function ProvisioningWizard(p: Props) {
       setLogLines((prev) => [...prev, e.payload]);
       setStepStates((prev) => ({ ...prev, [e.payload.step_index]: e.payload }));
     });
+    // Phase 14.A.2: the backend fires this once after the per-step
+    // loop finishes. We snapshot the payload and auto-advance to the
+    // Done step so the user immediately sees the CTAs.
+    unlistenComplete = await listen<ProvisionResult>("provisioning:complete", (e) => {
+      setResult(e.payload);
+      setWizStep("done");
+    });
   });
   onCleanup(() => {
     if (unlisten) unlisten();
+    if (unlistenComplete) unlistenComplete();
   });
 
   const activeProfile = createMemo<ProvisioningProfile | null>(() =>
@@ -137,6 +182,7 @@ export function ProvisioningWizard(p: Props) {
     setWizStep("execute");
     setLogLines([]);
     setStepStates({});
+    setResult(null);
     try {
       const handle = await invoke<RunHandle>("provisioning_start", {
         input: {
@@ -150,6 +196,12 @@ export function ProvisioningWizard(p: Props) {
           new_user: newUser().trim() || "runner",
           local_key_path: null,
           profile_id: profileId(),
+          workspace_name: workspaceName().trim() || null,
+          // When the wizard was launched against an existing workspace
+          // (right-click → Run provisioning, future), the caller
+          // passes its id through `p.workspaceId`. Backend will rewrite
+          // that workspace's connection rather than creating a new one.
+          existing_workspace_id: p.workspaceId ?? null,
         },
       });
       setRunId(handle.run_id);
@@ -326,6 +378,17 @@ export function ProvisioningWizard(p: Props) {
                   onInput={(e) => setNewUser(e.currentTarget.value)}
                 />
               </label>
+              <label>
+                <span>{t("provisioning.field.workspace_name")}</span>
+                <input
+                  value={workspaceName()}
+                  placeholder={t("provisioning.field.workspace_name.placeholder")}
+                  onInput={(e) => {
+                    setWorkspaceName(e.currentTarget.value);
+                    setWorkspaceNameTouched(true);
+                  }}
+                />
+              </label>
               <h4 class="provisioning-h4">{t("provisioning.steps.title")}</h4>
               <div class="provisioning-steps">
                 <For each={stepCatalog()}>
@@ -415,8 +478,51 @@ export function ProvisioningWizard(p: Props) {
 
             <Show when={wizStep() === "done"}>
               <p>{t("provisioning.done.message")}</p>
+              <Show
+                when={result() && result()!.workspace_id}
+                fallback={
+                  <Show when={result() && !result()!.workspace_id}>
+                    <div class="wizard-test-result err">
+                      <div class="wizard-test-line">
+                        {t("provisioning.done.workspace_skipped")}
+                      </div>
+                    </div>
+                  </Show>
+                }
+              >
+                <div class="wizard-test-result ok">
+                  <div class="wizard-test-line">
+                    {t("provisioning.done.workspace_created", {
+                      name: result()!.workspace_name ?? "",
+                    })}
+                  </div>
+                </div>
+              </Show>
               <div class="modal-buttons">
-                <button class="primary" onClick={p.onClose}>{t("common.close")}</button>
+                <Show when={result()?.workspace_id}>
+                  <Show when={result()?.claude_installed}>
+                    <button
+                      onClick={() => {
+                        p.onOpenWorkspace?.(result()!.workspace_id!, "claude");
+                        p.onClose();
+                      }}
+                    >
+                      {t("provisioning.done.btn.open_with_claude")}
+                    </button>
+                  </Show>
+                  <button
+                    class="primary"
+                    onClick={() => {
+                      p.onOpenWorkspace?.(result()!.workspace_id!, "default");
+                      p.onClose();
+                    }}
+                  >
+                    {t("provisioning.done.btn.open_now")}
+                  </button>
+                </Show>
+                <Show when={!result()?.workspace_id}>
+                  <button class="primary" onClick={p.onClose}>{t("common.close")}</button>
+                </Show>
               </div>
             </Show>
           </div>

@@ -401,6 +401,11 @@ fn parse_os_release(text: &str) -> (Option<String>, Option<String>, Option<Strin
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ProvisionInput {
+    /// Stable id for the provisioning *run* — separate from the
+    /// workspace it creates. Used to key the secret store and
+    /// (optionally) re-use a sandbox id if the wizard was launched
+    /// from a pre-existing workspace (right-click → "Run provisioning
+    /// on this server", future).
     pub workspace_id: String,
     pub host: String,
     pub port: u16,
@@ -417,6 +422,19 @@ pub(crate) struct ProvisionInput {
     #[serde(default)]
     pub local_key_path: Option<String>,
     pub profile_id: String,
+    /// Phase 14.A.2: name to give the auto-created workspace once the
+    /// new key is verified to work. Defaults (frontend-side) to a
+    /// host-derived label like "myserver" from "myserver.com". If
+    /// blank we fall back to the host string as-is.
+    #[serde(default)]
+    pub workspace_name: Option<String>,
+    /// Phase 14.A.2: when set, we attach the run to an existing
+    /// workspace and *replace* its connection on success rather than
+    /// creating a new one. Lets a right-click → "Run provisioning"
+    /// flow upgrade root+password to runner+key in place. None means
+    /// "create a fresh workspace".
+    #[serde(default)]
+    pub existing_workspace_id: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -478,8 +496,12 @@ pub(crate) async fn provisioning_start(
 
     let app_for_task = app.clone();
     let run_id_clone = run_id.clone();
+    // Clone AppState into the task so the workspace-creation step at
+    // the end of the run can persist directly through the same
+    // workspaces.json + locks as the rest of the app.
+    let state_for_task: AppState = (*state).clone();
     tauri::async_runtime::spawn(async move {
-        run_provisioning(app_for_task, run_id_clone, input, profile).await;
+        run_provisioning(app_for_task, state_for_task, run_id_clone, input, profile).await;
     });
 
     Ok(RunHandle { run_id })
@@ -487,6 +509,7 @@ pub(crate) async fn provisioning_start(
 
 async fn run_provisioning(
     app: AppHandle,
+    state: AppState,
     run_id: String,
     input: ProvisionInput,
     profile: ProvisioningProfile,
@@ -536,6 +559,16 @@ async fn run_provisioning(
             .unwrap_or_default();
         format!("{home}\\.ssh\\winmux-{}-{}", input.workspace_id, input.new_user)
     });
+
+    // Phase 14.A.2 outcome tracking. Three milestones must all hit OK
+    // for the auto-workspace path to fire at the end. Anything else is
+    // just informational — the workspace can still be created even if,
+    // say, the Docker install failed, because that doesn't affect
+    // whether `runner@host` can SSH in with the new key.
+    let mut keypair_ok = false;
+    let mut deploy_ok = false;
+    let mut test_ok = false;
+    let mut claude_installed = false;
 
     for (idx, kind) in profile.steps.iter().enumerate() {
         emit(&app, &run_id, idx, kind, "running", String::new(), None);
@@ -727,7 +760,18 @@ async fn run_provisioning(
                 run_step(&mut handle, &app, &run_id, idx, kind, cmd).await
             }
         };
-        if result.is_err() {
+        // Track outcomes for the auto-workspace step at the end of
+        // the run. We only flip flags when a step *succeeded* —
+        // `result` is Err on any non-zero exit / pipe failure.
+        if result.is_ok() {
+            match kind {
+                StepKind::GenerateKeypair => keypair_ok = true,
+                StepKind::DeployPubkey => deploy_ok = true,
+                StepKind::TestNewKey => test_ok = true,
+                StepKind::InstallClaudeCode => claude_installed = true,
+                _ => {}
+            }
+        } else {
             dlog(&format!(
                 "provisioning {run_id}: step {idx} {kind:?} failed — leaving run paused for retry"
             ));
@@ -735,6 +779,33 @@ async fn run_provisioning(
             // We continue here to mirror the spec ("retry OR skip").
         }
     }
+
+    // Phase 14.A.2: auto-create / upgrade the workspace when the key
+    // pipeline succeeded end-to-end.
+    let mut created_workspace_id: Option<String> = None;
+    let mut created_workspace_name: Option<String> = None;
+    if keypair_ok && deploy_ok && test_ok {
+        match finalize_workspace(&state, &app, &input, &local_key_path) {
+            Ok((id, name)) => {
+                created_workspace_id = Some(id);
+                created_workspace_name = Some(name);
+            }
+            Err(e) => {
+                dlog(&format!(
+                    "provisioning {run_id}: workspace creation failed: {e}"
+                ));
+            }
+        }
+    } else {
+        dlog(&format!(
+            "provisioning {run_id}: skipping workspace creation (keypair_ok={keypair_ok} deploy_ok={deploy_ok} test_ok={test_ok})"
+        ));
+    }
+
+    // Final progress event marks the run as fully done. The frontend
+    // listens for `state == "done"` with `step_kind == "Complete"` to
+    // pick up the created workspace id and offer the "Open it now"
+    // buttons.
     emit(
         &app,
         &run_id,
@@ -744,6 +815,168 @@ async fn run_provisioning(
         String::new(),
         Some("provisioning complete".into()),
     );
+    let _ = app.emit(
+        "provisioning:complete",
+        ProvisionResult {
+            run_id: run_id.clone(),
+            workspace_id: created_workspace_id,
+            workspace_name: created_workspace_name,
+            claude_installed,
+            host: input.host.clone(),
+        },
+    );
+}
+
+/// Payload emitted to the frontend right after the per-step loop ends.
+/// `workspace_id` is None when the key pipeline didn't complete — the
+/// UI uses that to decide whether to show the "Open it now" CTAs.
+#[derive(Clone, Serialize)]
+pub(crate) struct ProvisionResult {
+    pub run_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_name: Option<String>,
+    pub claude_installed: bool,
+    pub host: String,
+}
+
+/// Build the SSH connection out of the freshly-deployed credentials
+/// and either (a) replace the connection on the existing workspace
+/// the wizard was attached to, or (b) create a brand new workspace.
+/// Returns (workspace_id, display_name) on success.
+fn finalize_workspace(
+    state: &AppState,
+    app: &AppHandle,
+    input: &ProvisionInput,
+    local_key_path: &str,
+) -> Result<(String, String), String> {
+    use crate::{
+        new_pane_id, new_workspace_id, persist, Connection, LayoutNode, PaneKind, Workspace,
+    };
+
+    let new_conn = Connection::Ssh {
+        host: input.host.clone(),
+        user: input.new_user.clone(),
+        port: input.port,
+        key_path: Some(local_key_path.to_string()),
+    };
+
+    // Branch 1: caller pointed us at an existing workspace — upgrade
+    // its connection in place. We rewrite the FIRST pane's connection
+    // so existing splits, browser panes, file-manager panes etc. all
+    // pick up the new auth on next connect.
+    if let Some(existing_id) = input.existing_workspace_id.as_ref() {
+        let mut file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| &w.id == existing_id)
+            .ok_or_else(|| format!("existing workspace {existing_id} not found"))?;
+        // Rewrite the top-level connection legacy field + the first
+        // pane's connection — both are kept in sync on load.
+        ws.connection = Some(new_conn.clone());
+        if let Some(layout) = ws.layout.as_mut() {
+            rewrite_first_terminal_conn(layout, &new_conn);
+        }
+        let display_name = ws.name.clone();
+        let id_out = ws.id.clone();
+        drop(file);
+        persist(state)?;
+        let _ = app.emit("workspaces:changed", ());
+        return Ok((id_out, display_name));
+    }
+
+    // Branch 2: fresh workspace. Name = either the user's chosen
+    // workspace_name, or a host-derived label fallback.
+    let display_name = input
+        .workspace_name
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| derive_workspace_name(&input.host));
+
+    let pane_id = new_pane_id();
+    let layout = LayoutNode::Pane {
+        pane_id,
+        pane_kind: PaneKind::Terminal,
+        connection: Some(new_conn.clone()),
+        browser: None,
+        title: None,
+        annotation: None,
+    };
+    let ws = Workspace {
+        id: new_workspace_id(),
+        name: display_name.clone(),
+        // Cycle through a small accent palette so each newly-provisioned
+        // workspace gets a distinct sidebar dot rather than all sharing
+        // the same colour. Choice is deterministic by host so the same
+        // server gets the same colour across re-provisions.
+        color: Some(workspace_color_for_host(&input.host)),
+        cwd: None,
+        connection: Some(new_conn),
+        layout: Some(layout),
+        setup_command: None,
+        teardown_command: None,
+        env: Vec::new(),
+    };
+    let id_out = ws.id.clone();
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        file.active_workspace_id = Some(id_out.clone());
+        file.workspaces.push(ws);
+    }
+    persist(state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok((id_out, display_name))
+}
+
+/// Walk a layout tree and rewrite the connection on the first terminal
+/// pane we encounter. Used by the in-place upgrade path so existing
+/// splits inherit the new key without losing their layout.
+fn rewrite_first_terminal_conn(node: &mut crate::LayoutNode, new_conn: &crate::Connection) {
+    use crate::{LayoutNode, PaneKind};
+    match node {
+        LayoutNode::Pane {
+            pane_kind,
+            connection,
+            ..
+        } => {
+            if matches!(pane_kind, PaneKind::Terminal) {
+                *connection = Some(new_conn.clone());
+            }
+        }
+        LayoutNode::Split { first, second, .. } => {
+            rewrite_first_terminal_conn(first, new_conn);
+            rewrite_first_terminal_conn(second, new_conn);
+        }
+    }
+}
+
+fn derive_workspace_name(host: &str) -> String {
+    // "myserver.example.com" → "myserver"
+    // "203.0.113.5" → "203.0.113.5" (no useful slicing on IPs)
+    let trimmed = host.trim();
+    let first_label = trimmed.split('.').next().unwrap_or(trimmed);
+    if first_label.chars().all(|c| c.is_ascii_digit()) {
+        trimmed.to_string()
+    } else {
+        first_label.to_string()
+    }
+}
+
+fn workspace_color_for_host(host: &str) -> String {
+    const PALETTE: &[&str] = &[
+        "#7aa2f7", // accent blue
+        "#4ec9b0", // success teal
+        "#bb9af7", // purple
+        "#e0af68", // warning amber
+        "#f7768e", // error pink
+        "#9ece6a", // green
+        "#7dcfff", // cyan
+    ];
+    let h = host.bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+    PALETTE[(h as usize) % PALETTE.len()].to_string()
 }
 
 async fn local_step_generate_keypair(local_path: &str, comment: &str) -> Result<String, String> {

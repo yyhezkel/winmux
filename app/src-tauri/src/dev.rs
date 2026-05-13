@@ -75,6 +75,7 @@ pub(crate) fn build_state_value(
                     crate::PaneKind::Terminal => "terminal",
                     crate::PaneKind::Browser => "browser",
                     crate::PaneKind::FileManager => "file_manager",
+                    crate::PaneKind::ClaudeChat => "claude_chat",
                 };
                 *breakdown.entry(key).or_insert(0) += 1;
             });

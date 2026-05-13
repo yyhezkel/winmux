@@ -224,8 +224,21 @@
 
   "ws_header.add_browser": "🌐 + browser",
   "ws_header.add_filemanager": "🗂 + files",
+  "ws_header.add_chat": "💬 + chat",
   "ws_header.split_browser_title": "Split into browser pane",
   "ws_header.split_filemanager_title": "Split into file manager pane (local + SFTP)",
+  "ws_header.split_chat_title": "Split into Claude Chat pane",
+
+  "chat.header_prefix": "💬 claude chat",
+  "chat.placeholder": "Message Claude…",
+  "chat.send_button": "Send",
+  "chat.attach_button": "Attach file",
+  "chat.clear": "Clear",
+  "chat.empty.title": "Start a conversation",
+  "chat.empty.subtitle": "Type a message below to begin.",
+  "chat.error.no_claude": "Claude CLI not installed. Install via Provisioning Wizard or manually.",
+  "chat.error.timeout": "Claude did not respond in time.",
+  "chat.error.network": "Connection to Claude failed.",
 
   "sidebar.provision_server": "☁ Provision server",
   "sidebar.provision_server_tooltip": "Bootstrap a fresh server with users, keys, and tools",

@@ -961,6 +961,7 @@ fn finalize_workspace(
         pane_kind: PaneKind::Terminal,
         connection: Some(new_conn.clone()),
         browser: None,
+        chat: None,
         title: None,
         annotation: None,
     };

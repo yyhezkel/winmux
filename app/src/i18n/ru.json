@@ -224,8 +224,21 @@
 
   "ws_header.add_browser": "🌐 + браузер",
   "ws_header.add_filemanager": "🗂 + файлы",
+  "ws_header.add_chat": "💬 + чат",
   "ws_header.split_browser_title": "Разделить на панель браузера",
   "ws_header.split_filemanager_title": "Разделить на панель файлового менеджера (локальный + SFTP)",
+  "ws_header.split_chat_title": "Разделить на панель чата Claude",
+
+  "chat.header_prefix": "💬 чат claude",
+  "chat.placeholder": "Сообщение для Claude…",
+  "chat.send_button": "Отправить",
+  "chat.attach_button": "Прикрепить файл",
+  "chat.clear": "Очистить",
+  "chat.empty.title": "Начните разговор",
+  "chat.empty.subtitle": "Введите сообщение ниже, чтобы начать.",
+  "chat.error.no_claude": "Claude CLI не установлен. Установите через мастер настройки или вручную.",
+  "chat.error.timeout": "Claude не ответил вовремя.",
+  "chat.error.network": "Не удалось подключиться к Claude.",
 
   "sidebar.provision_server": "☁ Подготовить сервер",
   "sidebar.provision_server_tooltip": "Подготовка нового сервера: пользователи, ключи, утилиты",

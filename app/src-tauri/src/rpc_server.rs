@@ -179,6 +179,7 @@ async fn dispatch(
                     pane_kind: PaneKind::Terminal,
                     connection: Some(input.connection),
                     browser: None,
+                    chat: None,
                     title: None,
                     annotation: None,
                 }),
@@ -1431,6 +1432,7 @@ async fn dispatch(
                     pane_kind: PaneKind::Terminal,
                     connection: Some(inferred),
                     browser: None,
+                    chat: None,
                     title: None,
                     annotation: None,
                 });

@@ -5,7 +5,8 @@ export type Connection =
 export type SplitDirection = "horizontal" | "vertical";
 
 // Phase 8.A: pane kind. Default = terminal for legacy panes (server omits the field).
-export type PaneKind = "terminal" | "browser" | "filemanager";
+// Phase 22 adds "claudechat".
+export type PaneKind = "terminal" | "browser" | "filemanager" | "claudechat";
 
 export type BrowserState = {
   url: string;
@@ -17,6 +18,24 @@ export type BrowserState = {
   forward_localhost?: boolean;
 };
 
+// Phase 22: chat state persisted per pane.
+export type ChatRole = "user" | "assistant" | "system";
+export type MessageStatus = "sending" | "done" | "error";
+
+export type ChatMessage = {
+  id: string;
+  role: ChatRole;
+  content: string;
+  timestamp: string;
+  status?: MessageStatus;
+};
+
+export type ClaudeChatState = {
+  session_id?: string;
+  model?: string;
+  messages: ChatMessage[];
+};
+
 export type LayoutNode =
   | {
       kind: "pane";
@@ -26,6 +45,8 @@ export type LayoutNode =
       // Required for terminal panes; absent for browser panes.
       connection?: Connection;
       browser?: BrowserState;
+      // Phase 22: only set on ClaudeChat panes.
+      chat?: ClaudeChatState;
       title?: string;
       annotation?: string;
     }

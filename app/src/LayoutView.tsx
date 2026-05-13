@@ -2,13 +2,19 @@ import { Match, Show, Switch } from "solid-js";
 import { Divider } from "./Divider";
 import { BrowserPane } from "./BrowserPane";
 import { FileManagerPane } from "./FileManagerPane";
+import { ClaudeChatPane } from "./ClaudeChatPane";
 import {
   PaneView,
   type ConnectOpts,
   type HostTrustPending,
   type PassphrasePending,
 } from "./PaneView";
-import { paneKindOf, type LayoutNode, type SplitDirection } from "./types";
+import {
+  paneKindOf,
+  type LayoutNode,
+  type SplitDirection,
+  type WorkspacesFile,
+} from "./types";
 import type { TerminalInstance } from "./terminalInstance";
 
 interface Props {
@@ -46,6 +52,9 @@ interface Props {
   // tells it explicitly. True iff the workspace has at least one
   // pane with an SSH connection.
   workspaceIsSsh: boolean;
+  /** Phase 22: chat panes need to flush an updated WorkspacesFile back
+   *  to the parent App so the new message bubbles render. */
+  onWorkspacesFileUpdate: (f: WorkspacesFile) => void;
 }
 
 export function LayoutView(p: Props) {
@@ -144,6 +153,18 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
             />
           </div>
         </div>
+      </Match>
+      <Match when={kind() === "claudechat"}>
+        <ClaudeChatPane
+          workspaceId={props.all.workspaceId}
+          pane={props.pane}
+          isActive={isActive()}
+          onFocus={props.all.onFocus}
+          onClose={props.all.onClose}
+          onSetTitle={props.all.onSetTitle}
+          onSetAnnotation={props.all.onSetAnnotation}
+          onFileUpdate={props.all.onWorkspacesFileUpdate}
+        />
       </Match>
     </Switch>
   );

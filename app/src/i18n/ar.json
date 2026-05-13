@@ -224,8 +224,21 @@
 
   "ws_header.add_browser": "🌐 + متصفح",
   "ws_header.add_filemanager": "🗂 + ملفات",
+  "ws_header.add_chat": "💬 + محادثة",
   "ws_header.split_browser_title": "تقسيم إلى لوحة متصفح",
   "ws_header.split_filemanager_title": "تقسيم إلى لوحة مدير الملفات (محلي + SFTP)",
+  "ws_header.split_chat_title": "تقسيم إلى لوحة محادثة Claude",
+
+  "chat.header_prefix": "💬 محادثة claude",
+  "chat.placeholder": "اكتب رسالة إلى Claude…",
+  "chat.send_button": "إرسال",
+  "chat.attach_button": "إرفاق ملف",
+  "chat.clear": "مسح",
+  "chat.empty.title": "ابدأ محادثة",
+  "chat.empty.subtitle": "اكتب رسالة أدناه للبدء.",
+  "chat.error.no_claude": "Claude CLI غير مثبت. ثبته عبر معالج الإعداد أو يدويًا.",
+  "chat.error.timeout": "لم يستجب Claude في الوقت المناسب.",
+  "chat.error.network": "فشل الاتصال بـ Claude.",
 
   "sidebar.provision_server": "☁ إعداد خادم",
   "sidebar.provision_server_tooltip": "إعداد خادم جديد بمستخدمين ومفاتيح وأدوات",

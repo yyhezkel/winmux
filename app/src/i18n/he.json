@@ -224,8 +224,21 @@
 
   "ws_header.add_browser": "🌐 + דפדפן",
   "ws_header.add_filemanager": "🗂 + קבצים",
+  "ws_header.add_chat": "💬 + צ׳אט",
   "ws_header.split_browser_title": "פצל לפאנל דפדפן",
   "ws_header.split_filemanager_title": "פצל לפאנל מנהל קבצים (מקומי + SFTP)",
+  "ws_header.split_chat_title": "פצל לפאנל שיחה עם Claude",
+
+  "chat.header_prefix": "💬 שיחה עם claude",
+  "chat.placeholder": "כתוב הודעה ל-Claude…",
+  "chat.send_button": "שלח",
+  "chat.attach_button": "צרף קובץ",
+  "chat.clear": "נקה",
+  "chat.empty.title": "התחל שיחה",
+  "chat.empty.subtitle": "הקלד הודעה למטה כדי להתחיל.",
+  "chat.error.no_claude": "ה-CLI של Claude לא מותקן. התקן דרך אשף ההתקנה או ידנית.",
+  "chat.error.timeout": "Claude לא הגיב בזמן.",
+  "chat.error.network": "החיבור ל-Claude נכשל.",
 
   "sidebar.provision_server": "☁ הקם שרת",
   "sidebar.provision_server_tooltip": "הקמת שרת חדש עם משתמשים, מפתחות וכלים",

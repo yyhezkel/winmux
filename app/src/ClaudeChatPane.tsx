@@ -1,5 +1,6 @@
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { t } from "./i18n";
 import type {
   ChatMessage,
@@ -7,6 +8,29 @@ import type {
   LayoutNode,
   WorkspacesFile,
 } from "./types";
+
+// Phase 22.B: backend streaming events. delta is one chunk; the
+// frontend appends locally so we don't trigger a full workspace
+// re-render on every token.
+type TokenEvent = {
+  workspace_id: string;
+  pane_id: string;
+  message_id: string;
+  delta: string;
+  session_id?: string | null;
+};
+type DoneEvent = {
+  workspace_id: string;
+  pane_id: string;
+  message_id: string;
+  session_id?: string | null;
+};
+type ErrorEvent = {
+  workspace_id: string;
+  pane_id: string;
+  message_id: string;
+  error: string;
+};
 
 interface Props {
   workspaceId: string;
@@ -34,7 +58,33 @@ function fmtTime(iso: string): string {
 }
 
 export function ClaudeChatPane(p: Props) {
-  const chat = createMemo<ClaudeChatState>(() => p.pane.chat ?? DEFAULT_STATE);
+  const persistedChat = createMemo<ClaudeChatState>(
+    () => p.pane.chat ?? DEFAULT_STATE
+  );
+  // Phase 22.B: in-flight token deltas overlay the persisted state.
+  // Map of message_id → { extraContent, status }. When a token event
+  // fires we accumulate the delta here; when claude:chat:done fires
+  // we leave it in place until the next workspaces:changed flush
+  // brings in the persisted content (which already includes all the
+  // deltas, so the override becomes a no-op).
+  const [overrides, setOverrides] = createSignal<
+    Record<string, { extra: string; status: "sending" | "done" | "error" }>
+  >({});
+  const chat = createMemo<ClaudeChatState>(() => {
+    const base = persistedChat();
+    const ov = overrides();
+    // Apply overrides on top of persisted messages.
+    const merged = base.messages.map((m) => {
+      const o = ov[m.id];
+      if (!o) return m;
+      return {
+        ...m,
+        content: m.content + o.extra,
+        status: o.status,
+      };
+    });
+    return { ...base, messages: merged };
+  });
   const [draft, setDraft] = createSignal("");
   const [sending, setSending] = createSignal(false);
   const [err, setErr] = createSignal<string | null>(null);
@@ -42,13 +92,101 @@ export function ClaudeChatPane(p: Props) {
   let messagesRef: HTMLDivElement | undefined;
   let inputRef: HTMLTextAreaElement | undefined;
 
-  // Autoscroll to bottom whenever the message list grows.
+  // Autoscroll to bottom whenever the message list grows or content streams in.
   createEffect(() => {
     const count = chat().messages.length;
+    const lastContent =
+      chat().messages.length > 0
+        ? chat().messages[chat().messages.length - 1].content
+        : "";
     void count;
-    // queueMicrotask so the DOM has flushed before we scroll.
+    void lastContent;
     queueMicrotask(() => {
       if (messagesRef) messagesRef.scrollTop = messagesRef.scrollHeight;
+    });
+  });
+
+  // Phase 22.B: subscribe to streaming events from the backend.
+  const unlistens: UnlistenFn[] = [];
+  onMount(async () => {
+    unlistens.push(
+      await listen<TokenEvent>("claude:chat:token", (e) => {
+        const ev = e.payload;
+        if (ev.pane_id !== p.pane.pane_id) return;
+        setOverrides((prev) => {
+          const cur = prev[ev.message_id] ?? { extra: "", status: "sending" };
+          return {
+            ...prev,
+            [ev.message_id]: {
+              extra: cur.extra + ev.delta,
+              status: "sending",
+            },
+          };
+        });
+      })
+    );
+    unlistens.push(
+      await listen<DoneEvent>("claude:chat:done", (e) => {
+        const ev = e.payload;
+        if (ev.pane_id !== p.pane.pane_id) return;
+        // Mark complete and let the workspaces:changed re-sync drop the override.
+        setOverrides((prev) => {
+          const cur = prev[ev.message_id];
+          if (!cur) return prev;
+          return {
+            ...prev,
+            [ev.message_id]: { ...cur, status: "done" },
+          };
+        });
+        setSending(false);
+      })
+    );
+    unlistens.push(
+      await listen<ErrorEvent>("claude:chat:error", (e) => {
+        const ev = e.payload;
+        if (ev.pane_id !== p.pane.pane_id) return;
+        setOverrides((prev) => {
+          const cur = prev[ev.message_id] ?? { extra: "", status: "error" };
+          return {
+            ...prev,
+            [ev.message_id]: { ...cur, status: "error" },
+          };
+        });
+        setErr(ev.error);
+        setSending(false);
+      })
+    );
+  });
+  onCleanup(() => {
+    for (const u of unlistens) {
+      try {
+        u();
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  // Drop stale overrides whenever the persisted state changes — the
+  // backend already merged the deltas into msg.content before
+  // emitting workspaces:changed, so the override becomes redundant
+  // and would otherwise double-render.
+  createEffect(() => {
+    const persisted = persistedChat().messages;
+    setOverrides((prev) => {
+      const next: Record<string, { extra: string; status: "sending" | "done" | "error" }> = {};
+      for (const [id, ov] of Object.entries(prev)) {
+        const msg = persisted.find((m) => m.id === id);
+        if (!msg) {
+          next[id] = ov;
+          continue;
+        }
+        // If the persisted content already contains the override
+        // delta (i.e. the backend finalized), drop it.
+        if (msg.status !== "sending") continue;
+        next[id] = ov;
+      }
+      return next;
     });
   });
 
@@ -104,18 +242,14 @@ export function ClaudeChatPane(p: Props) {
 
   const modelLabel = () => {
     const m = chat().model;
-    // Phase 22.A: no real model yet — show a placeholder badge so the UI
-    // looks "live". 22.B replaces this with whatever `claude` actually
-    // ran, captured from the first stream event.
     if (m && m.length > 0) return m;
-    return "Claude Sonnet 4.6";
+    return "Claude (default)";
   };
 
   const sessionHint = () => {
     const sid = chat().session_id;
     if (sid) return `· session ${sid.slice(0, 8)}`;
-    // Stub indicator until 22.B lands.
-    return `· echo stub`;
+    return sending() ? `· streaming…` : `· new session`;
   };
 
   return (

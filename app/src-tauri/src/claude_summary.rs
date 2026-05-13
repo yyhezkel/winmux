@@ -98,9 +98,9 @@ fn bash_squote(s: &str) -> String {
 async fn pick_latest_session(
     handle: &SshHandle<SshClient>,
 ) -> Result<(String, String), String> {
-    let cmd = "find \"$HOME/.claude/projects\" -maxdepth 4 -name '*.jsonl' \
-               -printf '%T@\\t%p\\n' 2>/dev/null | sort -rn | head -1";
-    let raw = ssh_exec(handle, cmd, 8).await?;
+    let inner = "find \"$HOME/.claude/projects\" -maxdepth 4 -name '*.jsonl' \
+                 -printf '%T@\\t%p\\n' 2>/dev/null | sort -rn | head -1";
+    let raw = ssh_exec(handle, &wrap_login(inner), 8).await?;
     let line = raw.lines().next().unwrap_or("").trim();
     let parts: Vec<&str> = line.splitn(2, '\t').collect();
     if parts.len() < 2 {
@@ -115,29 +115,106 @@ async fn pick_latest_session(
     Ok((path, session_id))
 }
 
+const CLAUDE_DETECT_SCRIPT: &str = "\
+command -v claude 2>/dev/null && exit 0; \
+for p in \
+  $HOME/.claude/local/claude \
+  $HOME/.local/bin/claude \
+  /usr/local/bin/claude \
+  /opt/homebrew/bin/claude \
+  $HOME/.nvm/versions/node/*/bin/claude \
+  $HOME/.fnm/aliases/default/bin/claude; do \
+  if [ -x \"$p\" ]; then echo \"$p\"; exit 0; fi; \
+done; \
+exit 127";
+
+fn cache_key(workspace_id: &str) -> String {
+    format!("{workspace_id}:ssh")
+}
+
+async fn resolve_claude_path(
+    state: &AppState,
+    workspace_id: &str,
+    handle: &SshHandle<SshClient>,
+) -> String {
+    // Share the same cache `claude_chat` populates — once detected on
+    // a chat-send the summarize hits the cache too.
+    if let Ok(map) = state.claude_paths.lock() {
+        if let Some(p) = map.get(&cache_key(workspace_id)) {
+            return p.clone();
+        }
+    }
+    let out = match ssh_exec(handle, &wrap_login(CLAUDE_DETECT_SCRIPT), 8).await {
+        Ok(s) => s,
+        Err(_) => return "claude".to_string(),
+    };
+    let path = out
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| l.trim().to_string());
+    match path {
+        Some(p) if !p.is_empty() && !p.starts_with("ERROR") => {
+            dlog(&format!(
+                "claude_summary: detected claude at {p} (ws={workspace_id})"
+            ));
+            if let Ok(mut map) = state.claude_paths.lock() {
+                map.insert(cache_key(workspace_id), p.clone());
+            }
+            p
+        }
+        _ => {
+            dlog(&format!(
+                "claude_summary: claude path detection failed for ws={workspace_id} — falling back to bare `claude`"
+            ));
+            "claude".to_string()
+        }
+    }
+}
+
+/// Wrap a script in `bash -lc '<script>'` so the remote shell sources
+/// the user's `~/.bash_profile` / `~/.bashrc`. SSH execs run a
+/// non-interactive non-login shell by default, which leaves any
+/// rc-file-extended PATH (claude installed via npm-global, fnm,
+/// nvm, $HOME/.claude/local, …) invisible. `bash -lc` flips both
+/// flags so `command -v claude` and `command -v jq` actually find
+/// them. Mirrors claude_chat::wrap_login.
+fn wrap_login(script: &str) -> String {
+    format!("bash -lc {}", bash_squote(script))
+}
+
 /// Build the bash pipeline that pulls the last N user+assistant
 /// messages from a session file and pipes them through `claude -p
 /// "<prompt>"`. The text content is extracted via `jq` (preferred)
 /// with a `grep`-based fallback for boxes that don't have jq.
-fn summary_pipeline(jsonl_path: &str, history: u32, prompt: &str) -> String {
+///
+/// `claude_path` is the absolute path to claude (resolved + cached
+/// per workspace). When detection failed we fall back to bare
+/// `claude` and let the login-shell PATH catch it.
+fn summary_pipeline(
+    claude_path: &str,
+    jsonl_path: &str,
+    history: u32,
+    prompt: &str,
+) -> String {
     let path_q = bash_squote(jsonl_path);
     let prompt_q = bash_squote(prompt);
-    // tail by character count is a poor proxy for "last N exchanges"
-    // when assistant turns are long; we use a two-pass approach via
-    // jq: select user+assistant lines, take the last N, render each
-    // as "<role>: <text>" then pipe to claude.
+    let claude_q = bash_squote(claude_path);
     let jq_program = "select(.type == \"user\" or .type == \"assistant\") | \
                       \"\\(.type | ascii_upcase): \\(.message.content[0].text // .message.content // \"\")\"";
-    format!(
-        "if command -v claude >/dev/null 2>&1; then \
+    // Note: this script is the INNER body that wrap_login wraps in
+    // `bash -lc '…'`. So `command -v claude` here sees the user's
+    // full rc-extended PATH.
+    let inner = format!(
+        "if command -v {claude} >/dev/null 2>&1 || [ -x {claude} ]; then \
            if command -v jq >/dev/null 2>&1; then \
-             jq -r {jq} < {path} 2>/dev/null | tail -n {n} | claude -p {prompt}; \
+             jq -r {jq} < {path} 2>/dev/null | tail -n {n} | {claude} -p {prompt}; \
            else \
-             tail -n {n2} {path} | claude -p {prompt}; \
+             tail -n {n2} {path} | {claude} -p {prompt}; \
            fi; \
          else \
            echo 'ERROR: claude CLI not found on remote (PATH issue or not installed)' >&2; exit 127; \
          fi",
+        claude = claude_q,
         jq = bash_squote(jq_program),
         path = path_q,
         n = history,
@@ -146,7 +223,8 @@ fn summary_pipeline(jsonl_path: &str, history: u32, prompt: &str) -> String {
         // works — claude itself parses the structure well.
         n2 = history.saturating_mul(4),
         prompt = prompt_q,
-    )
+    );
+    wrap_login(&inner)
 }
 
 /// The core. Pass workspace_id + optional session_id; we look up the
@@ -191,11 +269,14 @@ pub(crate) async fn summarize_session_inner(
     let (jsonl_path, session_id) = if let Some(sid) = explicit_session_id {
         // We trust the caller for the session_id — but we still
         // need the file path. Walk projects/* to find it.
-        let cmd = format!(
+        let inner = format!(
             "find \"$HOME/.claude/projects\" -maxdepth 4 -name {q}.jsonl 2>/dev/null | head -1",
             q = bash_squote(sid)
         );
-        let path = ssh_exec(&handle, &cmd, 6).await?.trim().to_string();
+        let path = ssh_exec(&handle, &wrap_login(&inner), 6)
+            .await?
+            .trim()
+            .to_string();
         if path.is_empty() {
             return Err(format!("session {sid} not found under ~/.claude/projects/"));
         }
@@ -204,7 +285,8 @@ pub(crate) async fn summarize_session_inner(
         pick_latest_session(&handle).await?
     };
 
-    let pipeline = summary_pipeline(&jsonl_path, history, &prompt);
+    let claude_path = resolve_claude_path(state, workspace_id, &handle).await;
+    let pipeline = summary_pipeline(&claude_path, &jsonl_path, history, &prompt);
     let text = ssh_exec(&handle, &pipeline, 45).await?.trim().to_string();
     if text.is_empty() {
         return Err("claude -p returned empty output".into());

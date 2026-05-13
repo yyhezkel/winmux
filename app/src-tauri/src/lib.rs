@@ -179,6 +179,14 @@ pub(crate) struct AppState {
     pub(crate) console_buffer: dev::ConsoleBuffer,
     // Phase 8.F.1: iframe-bridge pending requests.
     pub(crate) iframe_pending: IframePending,
+    /// Phase 22.B-fix: cached absolute path to the `claude` binary,
+    /// keyed by `<workspace_id>:<scope>` where scope is "ssh" or
+    /// "local". Detection runs on first chat-send and the result
+    /// sticks for the rest of the session — saves a roundtrip per
+    /// message and survives the non-interactive-shell PATH gotcha
+    /// (SSH execs do NOT source ~/.bashrc, so a `claude` only on
+    /// the user's interactive PATH is otherwise invisible).
+    pub(crate) claude_paths: Arc<Mutex<HashMap<String, String>>>,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);

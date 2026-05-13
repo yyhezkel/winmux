@@ -143,15 +143,33 @@ fn bash_squote(s: &str) -> String {
     format!("'{escaped}'")
 }
 
-/// Build the bash one-liner that runs `claude -p` with the right
-/// flags. We force `--output-format=stream-json --verbose` (the
-/// claude CLI requires --verbose alongside stream-json for non-
-/// interactive sessions) and slot in `--resume <id>` + `--model <m>`
-/// when the pane has captured them.
-fn build_claude_cmd(prompt: &str, session_id: Option<&str>, model: Option<&str>) -> String {
-    let mut flags = String::from(
-        "claude -p --output-format=stream-json --verbose --dangerously-skip-permissions",
-    );
+/// Phase 22.B-fix: wrap a script in `bash -lc '<script>'` so the
+/// remote/local shell sources the user's `~/.bash_profile` /
+/// `~/.profile` / `~/.bashrc`. SSH execs run a non-interactive
+/// non-login shell by default — that DOES NOT load rc files and so
+/// any PATH extension users put there (e.g. `export PATH=$HOME/.claude/local:$PATH`)
+/// is invisible to us. `bash -lc` flips both flags on.
+fn wrap_login(script: &str) -> String {
+    format!("bash -lc {}", bash_squote(script))
+}
+
+/// Build the bare bash pipeline (no `bash -lc` wrapper) that runs
+/// `claude -p` with the right flags. The caller wraps for SSH /
+/// local-unix as appropriate; on Windows local we run it through
+/// PowerShell directly (claude.exe lives on the global Windows PATH
+/// when installed via npm-global, so login-shell sourcing is moot).
+///
+/// `claude_path` is the absolute path discovered by
+/// `detect_claude_path` (cached per workspace). When detection
+/// failed we fall back to bare `claude` and let login-shell PATH
+/// catch it — better than refusing to try.
+fn build_claude_pipeline(
+    claude_path: &str,
+    prompt: &str,
+    session_id: Option<&str>,
+    model: Option<&str>,
+) -> String {
+    let mut flags = String::from(" -p --output-format=stream-json --verbose --dangerously-skip-permissions");
     if let Some(sid) = session_id {
         if !sid.is_empty() {
             flags.push_str(&format!(" --resume {}", bash_squote(sid)));
@@ -163,14 +181,152 @@ fn build_claude_cmd(prompt: &str, session_id: Option<&str>, model: Option<&str>)
         }
     }
     format!(
-        "if command -v claude >/dev/null 2>&1; then \
-           printf %s {prompt} | {flags}; \
-         else \
-           echo 'ERROR: claude CLI not found in PATH on remote' >&2; exit 127; \
-         fi",
+        "printf %s {prompt} | {bin}{flags}",
         prompt = bash_squote(prompt),
+        bin = bash_squote(claude_path),
         flags = flags,
     )
+}
+
+const CLAUDE_DETECT_SCRIPT: &str = "\
+command -v claude 2>/dev/null && exit 0; \
+for p in \
+  $HOME/.claude/local/claude \
+  $HOME/.local/bin/claude \
+  /usr/local/bin/claude \
+  /opt/homebrew/bin/claude \
+  $HOME/.nvm/versions/node/*/bin/claude \
+  $HOME/.fnm/aliases/default/bin/claude; do \
+  if [ -x \"$p\" ]; then echo \"$p\"; exit 0; fi; \
+done; \
+exit 127";
+
+fn cache_key(workspace_id: &str, scope: &str) -> String {
+    format!("{workspace_id}:{scope}")
+}
+
+fn cached_claude_path(state: &AppState, workspace_id: &str, scope: &str) -> Option<String> {
+    let map = state.claude_paths.lock().ok()?;
+    map.get(&cache_key(workspace_id, scope)).cloned()
+}
+
+fn remember_claude_path(state: &AppState, workspace_id: &str, scope: &str, path: &str) {
+    if let Ok(mut map) = state.claude_paths.lock() {
+        map.insert(cache_key(workspace_id, scope), path.to_string());
+    }
+}
+
+/// One-shot SSH exec that captures stdout. Mirrors
+/// `claude_summary::ssh_exec` so the two stay parallel.
+async fn ssh_exec_capture(
+    handle: &SshHandle<SshClient>,
+    cmd: &str,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let mut ch = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("channel_open: {e}"))?;
+    ch.exec(true, cmd).await.map_err(|e| format!("exec: {e}"))?;
+    let mut stdout = Vec::new();
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                ChannelMsg::Data { ref data } => stdout.extend_from_slice(data),
+                ChannelMsg::Eof | ChannelMsg::Close | ChannelMsg::ExitStatus { .. } => break,
+                _ => {}
+            }
+        }
+    })
+    .await;
+    let _ = ch.close().await;
+    Ok(String::from_utf8_lossy(&stdout).to_string())
+}
+
+async fn detect_claude_path_ssh(
+    handle: &SshHandle<SshClient>,
+) -> Option<String> {
+    let out = ssh_exec_capture(handle, &wrap_login(CLAUDE_DETECT_SCRIPT), 8)
+        .await
+        .ok()?;
+    let path = out.lines().find(|l| !l.trim().is_empty())?.trim().to_string();
+    if path.is_empty() || path.starts_with("ERROR") {
+        None
+    } else {
+        Some(path)
+    }
+}
+
+async fn detect_claude_path_local() -> Option<String> {
+    use tokio::process::Command;
+    let output = if cfg!(target_os = "windows") {
+        // On Windows there's no `bash -lc` (unless WSL); rely on
+        // standard `where claude` which checks PATH (including
+        // npm-global bin if it's there).
+        Command::new("where").arg("claude").output().await.ok()?
+    } else {
+        Command::new("bash")
+            .args(["-lc", CLAUDE_DETECT_SCRIPT])
+            .output()
+            .await
+            .ok()?
+    };
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let path = text.lines().find(|l| !l.trim().is_empty())?.trim().to_string();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path)
+    }
+}
+
+async fn resolve_claude_path_ssh(
+    state: &AppState,
+    workspace_id: &str,
+    handle: &SshHandle<SshClient>,
+) -> String {
+    if let Some(cached) = cached_claude_path(state, workspace_id, "ssh") {
+        return cached;
+    }
+    match detect_claude_path_ssh(handle).await {
+        Some(p) => {
+            dlog(&format!(
+                "claude_chat: detected claude at {p} (ws={workspace_id} ssh)"
+            ));
+            remember_claude_path(state, workspace_id, "ssh", &p);
+            p
+        }
+        None => {
+            dlog(&format!(
+                "claude_chat: claude path detection failed for ws={workspace_id} ssh — falling back to bare `claude`"
+            ));
+            "claude".to_string()
+        }
+    }
+}
+
+async fn resolve_claude_path_local(state: &AppState, workspace_id: &str) -> String {
+    if let Some(cached) = cached_claude_path(state, workspace_id, "local") {
+        return cached;
+    }
+    match detect_claude_path_local().await {
+        Some(p) => {
+            dlog(&format!(
+                "claude_chat: detected claude at {p} (ws={workspace_id} local)"
+            ));
+            remember_claude_path(state, workspace_id, "local", &p);
+            p
+        }
+        None => {
+            dlog(&format!(
+                "claude_chat: claude path detection failed for ws={workspace_id} local — falling back to bare `claude`"
+            ));
+            "claude".to_string()
+        }
+    }
 }
 
 /// Try to pull a text delta and session_id out of one stream-json
@@ -325,8 +481,17 @@ async fn stream_over_ssh(
 
 /// Local-workspace fallback: spawn `claude` via tokio Command and
 /// stream stdout the same way.
+///
+/// `pipeline` is the bare `printf %s 'msg' | <path> -p …` script.
+/// On non-Windows we run it via `bash -lc` so the user's
+/// `~/.bash_profile` / `~/.bashrc` is sourced (claude installed
+/// only on the interactive PATH would otherwise be invisible).
+/// On Windows we hand it to PowerShell directly — the Windows PATH
+/// is set in registry, not shell rc, so login-shell sourcing is
+/// moot. (PowerShell needs `printf` not to mean its alias; we use
+/// `&` and call ops cautiously.)
 async fn stream_locally(
-    cmd_str: &str,
+    pipeline: &str,
     workspace_id: &str,
     pane_id: &str,
     message_id: &str,
@@ -337,24 +502,24 @@ async fn stream_locally(
     use tokio::process::Command;
 
     let mut child = if cfg!(target_os = "windows") {
-        Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                cmd_str,
-            ])
+        // PowerShell doesn't have `printf %s …`; rewrite to use
+        // Set-Content + cat-like pipe. For now, use cmd.exe so we
+        // can write a sh-style pipe verbatim — claude on Windows
+        // typically lives at %APPDATA%\npm\claude.cmd or via
+        // Node's bin shim, both of which work from cmd.exe.
+        Command::new("cmd")
+            .args(["/c", pipeline])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .map_err(|e| format!("spawn powershell: {e}"))?
+            .map_err(|e| format!("spawn cmd: {e}"))?
     } else {
         Command::new("bash")
-            .args(["-c", cmd_str])
+            .args(["-lc", pipeline])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .map_err(|e| format!("spawn bash: {e}"))?
+            .map_err(|e| format!("spawn bash -lc: {e}"))?
     };
     let stdout = child
         .stdout
@@ -492,10 +657,17 @@ async fn run_stream_task(
 ) {
     let state = app.state::<AppState>();
     let (resume_id, model) = pane_session_and_model(&state, &workspace_id, &pane_id);
-    let cmd = build_claude_cmd(&prompt, resume_id.as_deref(), model.as_deref());
 
     let result: Result<(Option<String>, bool), String> =
         if let Some(handle) = pick_ssh_handle(&state, &workspace_id) {
+            // Detect (or use cached) absolute claude path for this workspace.
+            let claude_path = resolve_claude_path_ssh(&state, &workspace_id, &handle).await;
+            let pipeline =
+                build_claude_pipeline(&claude_path, &prompt, resume_id.as_deref(), model.as_deref());
+            // Wrap once in `bash -lc` so the remote shell loads
+            // ~/.bash_profile / ~/.bashrc — claude itself may shell
+            // out to node / helpers that expect the user's full PATH.
+            let cmd = wrap_login(&pipeline);
             stream_over_ssh(
                 &handle,
                 &cmd,
@@ -507,7 +679,10 @@ async fn run_stream_task(
             )
             .await
         } else if workspace_is_local(&state, &workspace_id) {
-            stream_locally(&cmd, &workspace_id, &pane_id, &message_id, &state, &app).await
+            let claude_path = resolve_claude_path_local(&state, &workspace_id).await;
+            let pipeline =
+                build_claude_pipeline(&claude_path, &prompt, resume_id.as_deref(), model.as_deref());
+            stream_locally(&pipeline, &workspace_id, &pane_id, &message_id, &state, &app).await
         } else {
             Err("no active SSH session for this workspace — connect a terminal pane first".into())
         };

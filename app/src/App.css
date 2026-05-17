@@ -2373,7 +2373,9 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .pane-disc-caret {
   padding: 0 3px !important;
   font-size: 9px !important;
-  margin-left: -2px;
+  /* Phase RTL-fix: logical inline-start so the caret hugs the
+     primary disc button regardless of writing direction. */
+  margin-inline-start: -2px;
 }
 .pane-disc-menu {
   position: absolute;
@@ -2471,15 +2473,20 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .connect-split .primary {
   border-radius: var(--w-r-sm);
 }
+/* Phase RTL-fix: use LOGICAL border-radius properties (`*-end-end`,
+   `*-start-start`, etc.) instead of physical (left/right). The
+   browser flips them automatically based on `dir`, so the main
+   button always loses its outer-end corners and the caret loses
+   its outer-start corners — regardless of writing direction. */
 .connect-split .primary:first-child {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
 }
 .connect-caret {
-  border-top-left-radius: 0 !important;
-  border-bottom-left-radius: 0 !important;
+  border-start-start-radius: 0 !important;
+  border-end-start-radius: 0 !important;
   padding: 10px 10px !important;
-  margin-left: 1px;
+  margin-inline-start: 1px;
   font-size: 11px !important;
 }
 .connect-menu {

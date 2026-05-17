@@ -17,10 +17,22 @@ export function Divider(p: Props) {
     if (!parent) return;
     const rect = parent.getBoundingClientRect();
 
+    // Phase RTL-fix: in horizontal splits, flexbox row direction
+    // flips under `dir="rtl"` so the "first" pane visually sits on
+    // the RIGHT. (clientX - rect.left) / rect.width measures from
+    // the physical left edge, which corresponds to the SECOND pane
+    // in RTL — meaning a raw computation makes dragging right
+    // shrink whatever the user thinks they're growing. Flip the
+    // ratio in RTL so it always tracks the first (start-side) pane.
+    const isRtl = document.documentElement.dir === "rtl";
     const computeRatio = (ev: MouseEvent): number => {
       if (p.direction === "horizontal") {
-        return Math.min(0.95, Math.max(0.05, (ev.clientX - rect.left) / rect.width));
+        const raw = (ev.clientX - rect.left) / rect.width;
+        const r = isRtl ? 1 - raw : raw;
+        return Math.min(0.95, Math.max(0.05, r));
       }
+      // Vertical splits stack top-to-bottom regardless of writing
+      // direction — no RTL flip needed.
       return Math.min(0.95, Math.max(0.05, (ev.clientY - rect.top) / rect.height));
     };
 

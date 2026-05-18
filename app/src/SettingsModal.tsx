@@ -355,6 +355,17 @@ export function SettingsModal(p: Props) {
                     />
                     <span>Allow xterm.js proposed API (needed for WebGL)</span>
                   </label>
+                  <label class="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={p.settings.terminal.use_winmux_tmux_config ?? true}
+                      onChange={(e) => update("terminal", { ...p.settings.terminal, use_winmux_tmux_config: e.currentTarget.checked })}
+                    />
+                    <span>{t("settings.terminal.use_winmux_tmux_config.label")}</span>
+                  </label>
+                  <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
+                    {t("settings.terminal.use_winmux_tmux_config.hint")}
+                  </p>
                 </section>
                 <section>
                   <h4>{t("settings.terminal.rtl.title")}</h4>

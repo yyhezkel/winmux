@@ -180,6 +180,15 @@ pub(crate) struct TerminalSettings {
     /// affect the reorder pipeline on currently-open panes.
     #[serde(default = "default_rtl_mode")]
     pub rtl_mode: String,
+    /// Phase tmux-conf: when true (default), tmux is launched with
+    /// `-f ~/.winmux/tmux.conf` so the bundled scrollback-friendly
+    /// config applies (wheel scrolls the scrollback ring instead of
+    /// shell history, 50k-line buffer, mouse on, sane truecolour).
+    /// Set false to fall back to the user's own `~/.tmux.conf`. The
+    /// conf file is uploaded by the bootstrap regardless, so the
+    /// toggle takes effect on the NEXT pane connect.
+    #[serde(default = "default_true")]
+    pub use_winmux_tmux_config: bool,
 }
 
 fn default_rtl_mode() -> String {
@@ -396,6 +405,7 @@ impl Default for TerminalSettings {
             bidi_enabled: true,
             allow_proposed_api: true,
             rtl_mode: default_rtl_mode(),
+            use_winmux_tmux_config: true,
         }
     }
 }

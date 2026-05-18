@@ -221,6 +221,8 @@
   "settings.terminal.rtl.bidi.desc": "WebGL renderer + bidi-js logical→visual reorder. Faster paint, but rewrites the byte stream — editable lines may surprise.",
   "settings.terminal.rtl.off.label": "Off",
   "settings.terminal.rtl.off.desc": "WebGL renderer, no reorder. Hebrew bytes render left-to-right as written.",
+  "settings.terminal.use_winmux_tmux_config.label": "Use winmux tmux config (recommended)",
+  "settings.terminal.use_winmux_tmux_config.hint": "Bundles a tmux.conf at ~/.winmux/tmux.conf so wheel scrolls the scrollback ring instead of shell history, 50k-line buffer, sane truecolour. Turn off to fall back to your own ~/.tmux.conf. Takes effect on next pane connect.",
 
   "ws_header.add_browser": "🌐 + browser",
   "ws_header.add_filemanager": "🗂 + files",

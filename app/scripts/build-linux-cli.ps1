@@ -52,14 +52,35 @@ $hash = (Get-FileHash $dst -Algorithm SHA256).Hash.ToLower()
 $size = (Get-Item $dst).Length
 $iso = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
+# winmux-tmux.conf — bundled scrollback-friendly tmux config. Read its
+# bytes + SHA so the bootstrap can detect drift and refresh without
+# touching the binary. The file is hand-written (not built), so it
+# lives in resources/ directly and we just hash it.
+$tmuxConfPath = Join-Path $resourcesDir "winmux-tmux.conf"
+$tmuxConfHash = (Get-FileHash $tmuxConfPath -Algorithm SHA256).Hash.ToLower()
+$tmuxConfSize = (Get-Item $tmuxConfPath).Length
+
 $manifestPath = Join-Path $resourcesDir "remote-manifest.json"
-$manifest = @{ "x86_64-linux" = @{ path = "winmux-linux-x64"; sha256 = $hash; size = $size; built_at = $iso } } |
-    ConvertTo-Json -Depth 10
+$manifest = @{
+    "x86_64-linux" = @{
+        path     = "winmux-linux-x64"
+        sha256   = $hash
+        size     = $size
+        built_at = $iso
+    }
+    "tmux-conf" = @{
+        path     = "winmux-tmux.conf"
+        sha256   = $tmuxConfHash
+        size     = $tmuxConfSize
+        built_at = $iso
+    }
+} | ConvertTo-Json -Depth 10
 # Write UTF-8 WITHOUT BOM (Windows PowerShell 5.1 `Set-Content -Encoding utf8` adds BOM,
 # which serde_json refuses with "expected value at line 1 column 1").
 [System.IO.File]::WriteAllText($manifestPath, $manifest, [System.Text.UTF8Encoding]::new($false))
 
 Write-Host "Built winmux-linux-x64: $size bytes, sha256=$hash"
+Write-Host "Staged winmux-tmux.conf: $tmuxConfSize bytes, sha256=$tmuxConfHash"
 
 # Also build the Windows release of the CLI and stage it for the MSI bundler.
 Push-Location $tauriDir

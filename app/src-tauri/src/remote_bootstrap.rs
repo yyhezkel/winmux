@@ -16,6 +16,11 @@ use crate::dlog;
 use crate::SshClient;
 
 const REMOTE_DIR: &str = ".winmux/bin";
+/// Phase tmux-conf: the per-arch-independent assets — currently just
+/// `winmux-tmux.conf` — live at `~/.winmux/<file>` (sibling of `bin/`).
+const REMOTE_BASE_DIR: &str = ".winmux";
+const TMUX_CONF_REMOTE: &str = "tmux.conf";
+const TMUX_CONF_MANIFEST_KEY: &str = "tmux-conf";
 
 #[derive(Deserialize, Debug)]
 pub struct ManifestEntry {
@@ -291,10 +296,76 @@ pub async fn bootstrap(
     // see ✓ in the live log when it runs.
     ensure_path_in_rc(handle).await;
 
+    // Phase tmux-conf: drop the bundled scrollback-friendly tmux
+    // config at `~/.winmux/tmux.conf`. Whether tmux actually loads
+    // it is decided per-pane at launch time (Settings →
+    // `terminal.use_winmux_tmux_config`); we always upload so the
+    // toggle works without re-bootstrapping.
+    ensure_tmux_conf(handle, app, home, &manifest, force).await;
+
     Ok(BootstrapStatus::Uploaded {
         bytes: bytes.len(),
         sha256: entry.sha256.clone(),
     })
+}
+
+/// Phase tmux-conf: upload `winmux-tmux.conf` to `~/.winmux/tmux.conf`
+/// if absent / hash drift / `force`. Best-effort — never fails the
+/// bootstrap. Hash-gated like the binary upload so re-bootstraps are
+/// no-ops when nothing changed.
+async fn ensure_tmux_conf(
+    handle: &mut Handle<SshClient>,
+    app: &AppHandle,
+    home: &str,
+    manifest: &HashMap<String, ManifestEntry>,
+    force: bool,
+) {
+    let entry = match manifest.get(TMUX_CONF_MANIFEST_KEY) {
+        Some(e) => e,
+        None => {
+            dlog("bootstrap: tmux-conf entry missing from manifest — skipping upload");
+            return;
+        }
+    };
+    let remote_base = format!("{}/{}", home, REMOTE_BASE_DIR);
+    let remote_conf = format!("{}/{}", remote_base, TMUX_CONF_REMOTE);
+
+    if !force {
+        let (sum_out, _) = match ssh_exec(
+            handle,
+            &format!("sha256sum {remote_conf} 2>/dev/null | awk '{{print $1}}'"),
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                dlog(&format!("bootstrap: tmux-conf hash check failed: {e}"));
+                return;
+            }
+        };
+        if sum_out.trim().to_lowercase() == entry.sha256.to_lowercase() {
+            dlog("bootstrap: tmux-conf hash matches — skipping upload");
+            return;
+        }
+    }
+
+    if let Err(e) = ssh_exec(handle, &format!("mkdir -p {remote_base}")).await {
+        dlog(&format!("bootstrap: mkdir for tmux-conf failed: {e}"));
+        return;
+    }
+    let bytes = match read_resource_bytes(app, &entry.path) {
+        Ok(b) => b,
+        Err(e) => {
+            dlog(&format!("bootstrap: read tmux-conf bundle failed: {e}"));
+            return;
+        }
+    };
+    if let Err(e) = upload_via_sftp(handle, &remote_conf, &bytes).await {
+        dlog(&format!("bootstrap: upload tmux-conf failed: {e}"));
+        return;
+    }
+    let _ = ssh_exec(handle, &format!("chmod 0644 {remote_conf}")).await;
+    dlog(&format!("bootstrap: tmux-conf uploaded ({} bytes)", bytes.len()));
 }
 
 /// Shell snippet that idempotently appends `~/.winmux/bin` to the

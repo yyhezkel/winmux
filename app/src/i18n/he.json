@@ -221,6 +221,8 @@
   "settings.terminal.rtl.bidi.desc": "WebGL renderer + bidi-js עם סידור logical→visual. ציור מהיר יותר, אבל משכתב את זרם הבייטים — שורות עריכה עלולות להפתיע.",
   "settings.terminal.rtl.off.label": "כבוי",
   "settings.terminal.rtl.off.desc": "WebGL renderer, ללא סידור. בייטי עברית מוצגים משמאל לימין כפי שנכתבו.",
+  "settings.terminal.use_winmux_tmux_config.label": "השתמש בקובץ ה-tmux של winmux (מומלץ)",
+  "settings.terminal.use_winmux_tmux_config.hint": "מעלה קובץ tmux.conf ל-~/.winmux/tmux.conf כך שגלגלת העכבר גוללת את ה-scrollback במקום בהיסטוריית פקודות, buffer של 50,000 שורות, תמיכת truecolour. כבה כדי לחזור ל-~/.tmux.conf שלך. ייכנס לתוקף בחיבור הבא של pane.",
 
   "ws_header.add_browser": "🌐 + דפדפן",
   "ws_header.add_filemanager": "🗂 + קבצים",

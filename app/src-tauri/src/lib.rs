@@ -2170,6 +2170,17 @@ async fn spawn_ssh(
         };
         let token_clone = token.as_str().to_string();
         let pane_for_exec = pane_id.clone();
+        // Phase tmux-conf: read the user's setting BEFORE we hand
+        // control to the spawned task (state.settings is not Send-
+        // safe to hold across await points). Default true so users
+        // who never touched Settings → Terminal get the bundled
+        // scrollback-friendly behaviour out of the box.
+        let use_winmux_tmux_conf = state
+            .settings
+            .lock()
+            .ok()
+            .map(|s| s.terminal.use_winmux_tmux_config)
+            .unwrap_or(true);
         tokio::spawn(async move {
             // Wait a touch longer than schedule_setup_injection (which fires
             // at 500ms) so our exec lands AFTER the env exports + setup_command.
@@ -2189,9 +2200,20 @@ async fn spawn_ssh(
                     shell_quote(&pane_for_exec)
                 ));
             }
+            // Phase tmux-conf: when enabled, point tmux at our bundled
+            // conf via `-f ~/.winmux/tmux.conf`. Falls through to the
+            // user's own ~/.tmux.conf if the file is absent (tmux
+            // logs a warning and uses defaults — non-fatal). When the
+            // setting is off, omit -f so the user's conf alone applies.
+            let tmux_flags = if use_winmux_tmux_conf {
+                "-f $HOME/.winmux/tmux.conf "
+            } else {
+                ""
+            };
             script.push_str(&format!(
-                "command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s {} || echo '[winmux] tmux not installed on remote — falling back to plain shell'\r\n",
-                shell_quote(&name_clone)
+                "command -v tmux >/dev/null 2>&1 && exec tmux {flags}new-session -A -s {name} || echo '[winmux] tmux not installed on remote — falling back to plain shell'\r\n",
+                flags = tmux_flags,
+                name = shell_quote(&name_clone)
             ));
             let mut sessions = sessions_clone.lock().unwrap();
             if let Some(Session::Ssh(ssh)) = sessions.get_mut(&id_clone) {

@@ -54,6 +54,10 @@ export interface TerminalSettings {
   allow_proposed_api: boolean;
   /** Phase 15.A: how to render Hebrew / Arabic. */
   rtl_mode?: "auto_per_line" | "bidi_reorder" | "off";
+  /** Phase tmux-conf: when true (default), winmux launches tmux with
+   *  `-f ~/.winmux/tmux.conf` for sane scrollback / mouse behaviour.
+   *  Set false to fall back to the user's own ~/.tmux.conf. */
+  use_winmux_tmux_config?: boolean;
 }
 
 export interface HooksSettings {

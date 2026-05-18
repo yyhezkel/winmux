@@ -35,7 +35,8 @@
     "resources": [
       "resources/winmux-linux-x64",
       "resources/remote-manifest.json",
-      "resources/winmux-cli.exe"
+      "resources/winmux-cli.exe",
+      "resources/winmux-tmux.conf"
     ]
   }
 }

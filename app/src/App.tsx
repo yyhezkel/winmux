@@ -391,7 +391,7 @@ function App() {
   const splitPane = async (
     paneId: string,
     direction: SplitDirection,
-    kind: "terminal" | "browser" | "filemanager" | "claudechat" = "terminal",
+    kind: "terminal" | "browser" | "filemanager" | "claudechat" | "claudelog" = "terminal",
     browserUrl?: string
   ) => {
     const ws = activeWs();
@@ -1011,6 +1011,16 @@ function App() {
                 }}
               >
                 {t("ws_header.add_chat")}
+              </button>
+              <button
+                class="ws-header-btn"
+                title={t("ws_header.split_claudelog_title")}
+                onClick={() => {
+                  const pid = activePaneId();
+                  if (pid) splitPane(pid, "horizontal", "claudelog");
+                }}
+              >
+                {t("ws_header.add_claudelog")}
               </button>
             </Show>
           </div>

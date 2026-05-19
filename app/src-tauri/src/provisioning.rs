@@ -962,6 +962,7 @@ fn finalize_workspace(
         connection: Some(new_conn.clone()),
         browser: None,
         chat: None,
+        claudelog: None,
         title: None,
         annotation: None,
     };

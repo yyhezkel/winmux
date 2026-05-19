@@ -3,6 +3,7 @@ import { Divider } from "./Divider";
 import { BrowserPane } from "./BrowserPane";
 import { FileManagerPane } from "./FileManagerPane";
 import { ClaudeChatPane } from "./ClaudeChatPane";
+import { ClaudeLogPane } from "./ClaudeLogPane";
 import {
   PaneView,
   type ConnectOpts,
@@ -172,6 +173,16 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           onClose={props.all.onClose}
           onSetTitle={props.all.onSetTitle}
           onSetAnnotation={props.all.onSetAnnotation}
+          onFileUpdate={props.all.onWorkspacesFileUpdate}
+        />
+      </Match>
+      <Match when={kind() === "claudelog"}>
+        <ClaudeLogPane
+          workspaceId={props.all.workspaceId}
+          pane={props.pane}
+          isActive={isActive()}
+          onFocus={props.all.onFocus}
+          onClose={props.all.onClose}
           onFileUpdate={props.all.onWorkspacesFileUpdate}
         />
       </Match>

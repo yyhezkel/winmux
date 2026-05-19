@@ -180,6 +180,7 @@ async fn dispatch(
                     connection: Some(input.connection),
                     browser: None,
                     chat: None,
+                    claudelog: None,
                     title: None,
                     annotation: None,
                 }),
@@ -1455,6 +1456,7 @@ async fn dispatch(
                     connection: Some(inferred),
                     browser: None,
                     chat: None,
+                    claudelog: None,
                     title: None,
                     annotation: None,
                 });

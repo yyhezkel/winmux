@@ -372,5 +372,18 @@
   "claude_picker.assistant_prefix": "Claude:",
 
   "tmux_picker.new_session_hint_v2": "צור session חדש עם שם ייחודי שנוצר אוטומטית",
-  "tmux_picker.label_secondary": "session: {name}"
+  "tmux_picker.label_secondary": "session: {name}",
+
+  "ws_header.add_claudelog": "🗒 + claude log",
+  "ws_header.split_claudelog_title": "פצל לפאנל תיעוד שיחת Claude",
+
+  "cl.title": "תיעוד שיחת Claude",
+  "cl.sync_now": "סנכרן עכשיו",
+  "cl.last_synced": "סונכרן לפני {age}",
+  "cl.never_synced": "מעולם לא סונכרן",
+  "cl.empty": "אין סשנים מסונכרנים. חבר טרמינל ולחץ סנכרן עכשיו.",
+  "cl.pick_session": "בחר סשן",
+  "cl.filter_placeholder": "סנן הודעות…",
+  "cl.tool_use": "🔧 {tool}",
+  "cl.tool_result": "↩ {tool}"
 }

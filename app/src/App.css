@@ -3002,3 +3002,162 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
    (user-on-right / assistant-on-left) follows chat-bubble convention
    and is intentionally NOT flipped for RTL languages. */
 
+/* ─── Phase 24.B: ClaudeLog pane (HTML bubbles over local jsonl) ─── */
+
+.cl-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--w-bg);
+  color: var(--w-text);
+}
+
+.cl-head {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--w-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--w-surface);
+}
+
+.cl-sync-info {
+  font-size: var(--w-fs-xs);
+  color: var(--w-text-dim);
+}
+
+.cl-filter {
+  flex: 1;
+  min-width: 120px;
+  background: var(--w-bg);
+  border: 1px solid var(--w-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: var(--w-text);
+  font-size: var(--w-fs-sm);
+  unicode-bidi: plaintext;
+}
+.cl-filter:focus {
+  outline: 1px solid var(--w-accent);
+  border-color: var(--w-accent);
+}
+
+.cl-error {
+  padding: 8px 14px;
+  background: rgba(247, 118, 142, 0.12);
+  color: var(--w-error);
+  border-bottom: 1px solid rgba(247, 118, 142, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--w-fs-sm);
+}
+.cl-error-x {
+  margin-inline-start: auto;
+  background: transparent;
+  border: none;
+  color: var(--w-error);
+  cursor: pointer;
+  font-size: var(--w-fs-md);
+  padding: 0 4px;
+}
+
+.cl-list-wrap {
+  overflow-y: auto;
+  padding: 14px;
+}
+.cl-section-title {
+  margin: 0 0 8px 0;
+  font-size: var(--w-fs-sm);
+  color: var(--w-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+}
+
+.cl-meta {
+  padding: 6px 14px;
+  font-size: var(--w-fs-xs);
+  color: var(--w-text-dim);
+  border-bottom: 1px solid var(--w-border);
+  font-family: var(--w-font-mono);
+}
+
+.cl-stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cl-bubble {
+  max-width: 75%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  unicode-bidi: plaintext;
+  font-size: var(--w-fs-md);
+  line-height: 1.45;
+}
+.cl-bubble-user {
+  background: rgba(122, 162, 247, 0.18);
+  color: var(--w-text);
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+.cl-bubble-assistant {
+  background: var(--w-surface-hi);
+  color: var(--w-text);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+.cl-tool {
+  font-family: var(--w-font-mono);
+  font-size: var(--w-fs-xs);
+  background: rgba(0, 0, 0, 0.18);
+  border-inline-start: 3px solid var(--w-purple, var(--w-accent));
+  padding: 6px 10px;
+  border-radius: 4px;
+  align-self: stretch;
+  color: var(--w-text);
+  unicode-bidi: plaintext;
+}
+.cl-tool-result {
+  border-inline-start-color: var(--w-success);
+}
+.cl-tool-args {
+  margin-top: 2px;
+  color: var(--w-text-dim);
+  font-size: var(--w-fs-xs);
+  white-space: pre-wrap;
+}
+
+.cl-summary {
+  align-self: center;
+  color: var(--w-text-dim);
+  font-style: italic;
+  font-size: var(--w-fs-xs);
+  text-align: center;
+  max-width: 80%;
+}
+
+.cl-timestamp {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--w-fs-xs);
+  color: var(--w-text-faint);
+  font-family: var(--w-font-mono);
+}
+
+.cl-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--w-text-dim);
+  font-size: var(--w-fs-sm);
+}

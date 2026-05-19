@@ -260,6 +260,15 @@ pub(crate) enum PaneKind {
     /// `LayoutNode::Pane.chat` so a chat history survives a restart.
     #[serde(rename = "claudechat", alias = "claude_chat", alias = "ClaudeChat")]
     ClaudeChat,
+    /// Phase 24.B: HTML-bubble view over locally-synced Claude
+    /// conversation transcripts (~/.claude/projects/**/*.jsonl mirrored
+    /// to %APPDATA%/winmux/claude-logs/). Sidesteps the xterm.js +
+    /// tmux scrollback reflow limitations entirely — the pane is
+    /// pure HTML and reflows on resize like a normal chat UI. Pane
+    /// state (currently-viewed session_id, filter input) lives in
+    /// `LayoutNode::Pane.claudelog`.
+    #[serde(rename = "claudelog", alias = "claude_log", alias = "ClaudeLog")]
+    ClaudeLog,
 }
 
 fn is_terminal_kind(k: &PaneKind) -> bool {
@@ -292,6 +301,24 @@ pub(crate) struct ChatMessage {
     pub(crate) timestamp: String,
     #[serde(default)]
     pub(crate) status: MessageStatus,
+}
+
+/// Phase 24.B: per-pane state for the ClaudeLog HTML bubble view.
+/// Persisted alongside the layout so the user's currently-viewed
+/// session + filter input survive an app restart. The actual log
+/// content is NOT stored here — it lives in the local jsonl files
+/// at %APPDATA%/winmux/claude-logs/, read on-demand via
+/// `claude_log_read`.
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub(crate) struct ClaudeLogState {
+    /// session_id of the jsonl currently being rendered. None = the
+    /// pane shows the session-picker UI instead of the bubble stream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) session_id: Option<String>,
+    /// Substring filter applied to entry text in the bubble stream.
+    /// None / empty = show all entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) filter: Option<String>,
 }
 
 /// Phase 22: per-pane chat state. Persisted alongside the layout so
@@ -371,6 +398,11 @@ pub(crate) enum LayoutNode {
         // first exists.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         chat: Option<ClaudeChatState>,
+        // Phase 24.B: session_id + filter for ClaudeLog panes. None
+        // for every other kind. Skipped when None so legacy on-disk
+        // workspaces round-trip unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        claudelog: Option<ClaudeLogState>,
         // Phase 7.A: optional human-readable annotations on each leaf. Both fields
         // serialize-skip when None so existing workspaces.json files round-trip
         // unchanged until the user edits one.
@@ -616,6 +648,7 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
                 connection: Some(conn),
                 browser: None,
                 chat: None,
+                claudelog: None,
                 title: None,
                 annotation: None,
             });
@@ -732,6 +765,7 @@ pub(crate) fn update_browser_pane(
             connection,
             mut browser,
             chat,
+            claudelog,
             title,
             annotation,
         } => {
@@ -746,6 +780,7 @@ pub(crate) fn update_browser_pane(
                 connection,
                 browser,
                 chat,
+                claudelog,
                 title,
                 annotation,
             }
@@ -780,6 +815,7 @@ pub(crate) fn update_chat_pane(
             connection,
             browser,
             mut chat,
+            claudelog,
             title,
             annotation,
         } => {
@@ -794,6 +830,7 @@ pub(crate) fn update_chat_pane(
                 connection,
                 browser,
                 chat,
+                claudelog,
                 title,
                 annotation,
             }
@@ -809,6 +846,62 @@ pub(crate) fn update_chat_pane(
             direction,
             first: Box::new(update_chat_pane(*first, target, f)),
             second: Box::new(update_chat_pane(*second, target, f)),
+            ratio,
+        },
+    }
+}
+
+/// Phase 24.B: mutate a ClaudeLog pane's state (no-op otherwise).
+/// Same shape as update_chat_pane / update_browser_pane.
+pub(crate) fn update_claudelog_pane(
+    node: LayoutNode,
+    target: &str,
+    f: &mut dyn FnMut(&mut ClaudeLogState),
+) -> LayoutNode {
+    match node {
+        LayoutNode::Pane {
+            pane_id,
+            pane_kind,
+            connection,
+            browser,
+            chat,
+            mut claudelog,
+            title,
+            annotation,
+        } => {
+            if pane_id == target && pane_kind == PaneKind::ClaudeLog {
+                // Lazily create the state on first mutation so a
+                // legacy on-disk pane that's missing the field still
+                // becomes mutable.
+                if claudelog.is_none() {
+                    claudelog = Some(ClaudeLogState::default());
+                }
+                if let Some(c) = claudelog.as_mut() {
+                    f(c);
+                }
+            }
+            LayoutNode::Pane {
+                pane_id,
+                pane_kind,
+                connection,
+                browser,
+                chat,
+                claudelog,
+                title,
+                annotation,
+            }
+        }
+        LayoutNode::Split {
+            split_id,
+            direction,
+            first,
+            second,
+            ratio,
+        } => LayoutNode::Split {
+            split_id,
+            direction,
+            first: Box::new(update_claudelog_pane(*first, target, f)),
+            second: Box::new(update_claudelog_pane(*second, target, f)),
             ratio,
         },
     }
@@ -860,63 +953,80 @@ pub(crate) fn split_pane_in(
             connection,
             browser,
             chat,
+            claudelog,
             title,
             annotation,
         } => {
             if pane_id == target {
-                let (new_kind_resolved, new_conn, new_browser, new_chat) = match new_kind {
-                    PaneKind::Terminal => {
-                        // Inherit chain: source pane's own connection →
-                        // workspace-level fallback (any terminal pane or
-                        // live SSH session) → Local. Splitting from a
-                        // FileManager/Browser pane in an SSH workspace
-                        // now correctly produces another SSH terminal,
-                        // not a stray local cmd.
-                        let conn = connection
-                            .clone()
-                            .or(workspace_terminal_fallback.clone())
-                            .unwrap_or(Connection::Local { shell: None });
-                        (PaneKind::Terminal, Some(conn), None, None)
-                    }
-                    PaneKind::Browser => {
-                        let url = new_browser_url
-                            .clone()
-                            .unwrap_or_else(|| "about:blank".to_string());
-                        let bs = BrowserState {
-                            url: url.clone(),
-                            home_url: Some(url),
-                            history: Vec::new(),
-                            forward_localhost: true,
-                            last_loaded_url: None,
-                        };
-                        (PaneKind::Browser, None, Some(bs), None)
-                    }
-                    PaneKind::FileManager => {
-                        // File-manager panes carry no per-pane state in
-                        // workspaces.json — local cwd / show_hidden live in
-                        // frontend signals; the right column uses whatever
-                        // SSH session the workspace currently has.
-                        (PaneKind::FileManager, None, None, None)
-                    }
-                    PaneKind::ClaudeChat => {
-                        // Phase 22: start with empty chat state. session_id
-                        // and model are filled in by claude_chat_send when
-                        // 22.B's real CLI integration lands; 22.A leaves them
-                        // None and the stub just echoes back.
-                        (
-                            PaneKind::ClaudeChat,
-                            None,
-                            None,
-                            Some(ClaudeChatState::default()),
-                        )
-                    }
-                };
+                let (new_kind_resolved, new_conn, new_browser, new_chat, new_claudelog) =
+                    match new_kind {
+                        PaneKind::Terminal => {
+                            // Inherit chain: source pane's own connection →
+                            // workspace-level fallback (any terminal pane or
+                            // live SSH session) → Local. Splitting from a
+                            // FileManager/Browser pane in an SSH workspace
+                            // now correctly produces another SSH terminal,
+                            // not a stray local cmd.
+                            let conn = connection
+                                .clone()
+                                .or(workspace_terminal_fallback.clone())
+                                .unwrap_or(Connection::Local { shell: None });
+                            (PaneKind::Terminal, Some(conn), None, None, None)
+                        }
+                        PaneKind::Browser => {
+                            let url = new_browser_url
+                                .clone()
+                                .unwrap_or_else(|| "about:blank".to_string());
+                            let bs = BrowserState {
+                                url: url.clone(),
+                                home_url: Some(url),
+                                history: Vec::new(),
+                                forward_localhost: true,
+                                last_loaded_url: None,
+                            };
+                            (PaneKind::Browser, None, Some(bs), None, None)
+                        }
+                        PaneKind::FileManager => {
+                            // File-manager panes carry no per-pane state in
+                            // workspaces.json — local cwd / show_hidden live in
+                            // frontend signals; the right column uses whatever
+                            // SSH session the workspace currently has.
+                            (PaneKind::FileManager, None, None, None, None)
+                        }
+                        PaneKind::ClaudeChat => {
+                            // Phase 22: start with empty chat state. session_id
+                            // and model are filled in by claude_chat_send when
+                            // 22.B's real CLI integration lands; 22.A leaves them
+                            // None and the stub just echoes back.
+                            (
+                                PaneKind::ClaudeChat,
+                                None,
+                                None,
+                                Some(ClaudeChatState::default()),
+                                None,
+                            )
+                        }
+                        PaneKind::ClaudeLog => {
+                            // Phase 24.B: start with no session_id so the
+                            // pane shows the picker; user selects a session
+                            // and that selection persists via
+                            // `claude_log_pane_set`.
+                            (
+                                PaneKind::ClaudeLog,
+                                None,
+                                None,
+                                None,
+                                Some(ClaudeLogState::default()),
+                            )
+                        }
+                    };
                 let new_pane = LayoutNode::Pane {
                     pane_id: new_pane_id(),
                     pane_kind: new_kind_resolved,
                     connection: new_conn,
                     browser: new_browser,
                     chat: new_chat,
+                    claudelog: new_claudelog,
                     title: None,
                     annotation: None,
                 };
@@ -926,6 +1036,7 @@ pub(crate) fn split_pane_in(
                     connection,
                     browser,
                     chat,
+                    claudelog,
                     title,
                     annotation,
                 };
@@ -947,6 +1058,7 @@ pub(crate) fn split_pane_in(
                         connection,
                         browser,
                         chat,
+                        claudelog,
                         title,
                         annotation,
                     },
@@ -1008,6 +1120,7 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
             connection,
             browser,
             chat,
+            claudelog,
             title,
             annotation,
         } => {
@@ -1020,6 +1133,7 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
                     connection,
                     browser,
                     chat,
+                    claudelog,
                     title,
                     annotation,
                 }),
@@ -1093,6 +1207,7 @@ pub(crate) fn update_pane_in(
             connection,
             browser,
             chat,
+            claudelog,
             title,
             annotation,
         } => {
@@ -1103,6 +1218,7 @@ pub(crate) fn update_pane_in(
                     connection,
                     browser,
                     chat,
+                    claudelog,
                     title: new_title.unwrap_or(title),
                     annotation: new_annotation.unwrap_or(annotation),
                 }
@@ -1113,6 +1229,7 @@ pub(crate) fn update_pane_in(
                     connection,
                     browser,
                     chat,
+                    claudelog,
                     title,
                     annotation,
                 }
@@ -2714,6 +2831,7 @@ fn workspace_create(
             connection: Some(conn),
             browser: None,
             chat: None,
+            claudelog: None,
             title: None,
             annotation: None,
         }),
@@ -2812,6 +2930,7 @@ fn workspace_reset_layout(
             connection: Some(inferred),
             browser: None,
             chat: None,
+            claudelog: None,
             title: None,
             annotation: None,
         });
@@ -4770,6 +4889,7 @@ pub fn run() {
             claude_log::claude_log_sync,
             claude_log::claude_log_list,
             claude_log::claude_log_read,
+            claude_log::claude_log_pane_set,
             claude_chat::claude_chat_send,
             claude_chat::claude_chat_clear,
             claude_chat::claude_chat_set_model,

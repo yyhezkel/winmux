@@ -354,5 +354,18 @@
   "claude_picker.assistant_prefix": "A:",
 
   "tmux_picker.new_session_hint_v2": "Create a fresh session with a unique auto-generated name",
-  "tmux_picker.label_secondary": "session: {name}"
+  "tmux_picker.label_secondary": "session: {name}",
+
+  "ws_header.add_claudelog": "🗒 + claude log",
+  "ws_header.split_claudelog_title": "Split into Claude conversation log pane",
+
+  "cl.title": "Claude conversation log",
+  "cl.sync_now": "Sync now",
+  "cl.last_synced": "Last synced {age} ago",
+  "cl.never_synced": "Never synced",
+  "cl.empty": "No synced sessions yet. Connect a terminal, then click Sync now.",
+  "cl.pick_session": "Pick a session",
+  "cl.filter_placeholder": "Filter messages…",
+  "cl.tool_use": "🔧 {tool}",
+  "cl.tool_result": "↩ {tool}"
 }

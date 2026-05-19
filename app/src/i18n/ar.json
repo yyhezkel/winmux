@@ -372,5 +372,18 @@
   "claude_picker.assistant_prefix": "Claude:",
 
   "tmux_picker.new_session_hint_v2": "أنشئ جلسة جديدة باسم فريد يتم توليده تلقائيًا",
-  "tmux_picker.label_secondary": "session: {name}"
+  "tmux_picker.label_secondary": "session: {name}",
+
+  "ws_header.add_claudelog": "🗒 + سجل claude",
+  "ws_header.split_claudelog_title": "تقسيم إلى لوحة سجل محادثة Claude",
+
+  "cl.title": "سجل محادثة Claude",
+  "cl.sync_now": "مزامنة الآن",
+  "cl.last_synced": "آخر مزامنة قبل {age}",
+  "cl.never_synced": "لم تتم مزامنته أبدًا",
+  "cl.empty": "لا توجد جلسات متزامنة. اتصل بطرفية ثم اضغط على مزامنة الآن.",
+  "cl.pick_session": "اختر جلسة",
+  "cl.filter_placeholder": "تصفية الرسائل…",
+  "cl.tool_use": "🔧 {tool}",
+  "cl.tool_result": "↩ {tool}"
 }

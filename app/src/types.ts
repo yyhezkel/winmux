@@ -15,8 +15,13 @@ export interface TmuxSessionInfo {
 export type SplitDirection = "horizontal" | "vertical";
 
 // Phase 8.A: pane kind. Default = terminal for legacy panes (server omits the field).
-// Phase 22 adds "claudechat".
-export type PaneKind = "terminal" | "browser" | "filemanager" | "claudechat";
+// Phase 22 adds "claudechat". Phase 24.B adds "claudelog".
+export type PaneKind =
+  | "terminal"
+  | "browser"
+  | "filemanager"
+  | "claudechat"
+  | "claudelog";
 
 export type BrowserState = {
   url: string;
@@ -46,6 +51,44 @@ export type ClaudeChatState = {
   messages: ChatMessage[];
 };
 
+// Phase 24.B: backend response shapes for claude_log_* tauri
+// commands. Mirror Rust serde output (snake_case field names; None
+// values are omitted from the JSON via skip_serializing_if).
+export interface ClaudeSyncResult {
+  synced: number;
+  skipped: number;
+  errors: string[];
+  total_bytes: number;
+}
+
+export interface ClaudeLogSummary {
+  session_id: string;
+  message_count: number;
+  first_user?: string;
+  last_assistant?: string;
+  project_path?: string;
+  file_size: number;
+  /** Unix seconds. */
+  local_mtime: number;
+}
+
+export interface ClaudeLogEntry {
+  line_no: number;
+  /** "user" | "assistant" | "tool_use" | "tool_result" | "system" | "summary" */
+  entry_type: string;
+  text: string;
+  tool_name?: string;
+  timestamp?: string;
+  session_id?: string;
+}
+
+export interface ClaudeLogState {
+  /** Current session being viewed. Unset = pane shows the picker. */
+  session_id?: string;
+  /** Manual filter input. Persisted so reload preserves it. */
+  filter?: string;
+}
+
 export type LayoutNode =
   | {
       kind: "pane";
@@ -57,6 +100,8 @@ export type LayoutNode =
       browser?: BrowserState;
       // Phase 22: only set on ClaudeChat panes.
       chat?: ClaudeChatState;
+      // Phase 24.B: only set on ClaudeLog panes.
+      claudelog?: ClaudeLogState;
       title?: string;
       annotation?: string;
     }

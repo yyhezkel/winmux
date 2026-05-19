@@ -29,7 +29,12 @@ use serde::Serialize;
 use tauri::State;
 use tokio::io::AsyncReadExt;
 
-use crate::{config_dir_pub, dlog, AppState, Session, SshClient};
+use tauri::{AppHandle, Emitter};
+
+use crate::{
+    config_dir_pub, dlog, persist, update_claudelog_pane, AppState, Session, SshClient,
+    WorkspacesFile,
+};
 
 // ─── public schemas ────────────────────────────────────────────────────────
 
@@ -347,6 +352,54 @@ pub(crate) fn claude_log_list(workspace_id: String) -> Result<Vec<ClaudeLogSumma
     }
     out.sort_by(|a, b| b.local_mtime.cmp(&a.local_mtime));
     Ok(out)
+}
+
+/// Phase 24.B: persist the picker selection / filter input on a
+/// ClaudeLog pane. Either field is optional — pass None to leave it
+/// unchanged. Empty string clears (matches the FE semantics).
+/// Returns the updated workspaces file so the FE can re-render.
+#[tauri::command]
+pub(crate) async fn claude_log_pane_set(
+    state: tauri::State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+    session_id: Option<String>,
+    filter: Option<String>,
+) -> Result<WorkspacesFile, String> {
+    // 3-state semantics on each input:
+    //   None              → leave unchanged
+    //   Some("")          → clear (write None to disk)
+    //   Some("non-empty") → set to that value
+    // Encoded as Option<Option<String>> so the closure consumes each
+    // action exactly once with no borrow-of-moved issues.
+    let session_action: Option<Option<String>> =
+        session_id.map(|s| if s.is_empty() { None } else { Some(s) });
+    let filter_action: Option<Option<String>> =
+        filter.map(|s| if s.is_empty() { None } else { Some(s) });
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        let layout = ws
+            .layout
+            .take()
+            .ok_or_else(|| "workspace has no layout".to_string())?;
+        ws.layout = Some(update_claudelog_pane(layout, &pane_id, &mut |c| {
+            if let Some(action) = &session_action {
+                c.session_id = action.clone();
+            }
+            if let Some(action) = &filter_action {
+                c.filter = action.clone();
+            }
+        }));
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(state.workspaces.lock().unwrap().clone())
 }
 
 #[tauri::command]

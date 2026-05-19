@@ -1,0 +1,58 @@
+# Normalize line endings across platforms.
+#
+# Without this file, git on Windows with core.autocrlf=true would
+# rewrite every file from LF (in the repo) to CRLF (in the working
+# tree) on checkout, and back to LF on commit. That convoluted
+# round-trip blew up when the WSL/sandbox side and the Windows side
+# both touched the index — git couldn't agree on what "unchanged"
+# means and reported phantom diffs.
+#
+# Rule of thumb:
+#   - Code / config / docs:   text in the repo, LF in the working tree.
+#   - Windows shell scripts:  text in the repo, CRLF in the working
+#                             tree (cmd.exe insists).
+#   - Everything else:        let git auto-detect; binaries opt out.
+
+# Default: text files are LF everywhere.
+* text=auto eol=lf
+
+# Windows shells / installers — must stay CRLF on disk or they break
+# when launched from cmd.exe / Windows Installer.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+*.psm1      text eol=crlf
+*.psd1      text eol=crlf
+*.reg       text eol=crlf
+
+# Linux-only shell scripts always LF (already covered by the default
+# but explicit for grep-ability).
+*.sh        text eol=lf
+
+# Known binaries — never normalize.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.icns      binary
+*.exe       binary
+*.dll       binary
+*.so        binary
+*.dylib     binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.otf       binary
+*.eot       binary
+*.zip       binary
+*.gz        binary
+*.tar       binary
+*.tgz       binary
+*.7z        binary
+*.pdf       binary
+*.mp3       binary
+*.mp4       binary
+*.webm      binary
+*.wav       binary
+*.flac      binary

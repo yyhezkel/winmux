@@ -116,6 +116,28 @@ pub(crate) fn file_mkdir_local(path: String) -> Result<(), String> {
     std::fs::create_dir_all(&p).map_err(|e| format!("mkdir {p:?}: {e}"))
 }
 
+/// Phase 23: create a new empty file locally. Fails if the path already
+/// exists (we never silently truncate an existing file from a "New
+/// file" UI gesture — that's a recipe for data loss).
+#[tauri::command]
+pub(crate) fn file_create_local(path: String) -> Result<(), String> {
+    let p = PathBuf::from(expand_path(&path));
+    if p.exists() {
+        return Err(format!("already exists: {}", p.display()));
+    }
+    if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("mkdir parent: {e}"))?;
+        }
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&p)
+        .map_err(|e| format!("create {p:?}: {e}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn file_home_local() -> String {
     std::env::var("USERPROFILE")
@@ -350,6 +372,72 @@ pub(crate) async fn file_mkdir_remote(
         .map_err(|e| format!("mkdir {path}: {e}"));
     let _ = sftp.close().await;
     r
+}
+
+/// Phase 23: create a new empty file on the remote via SFTP. Refuses
+/// to overwrite an existing path — first `stat`s and bails if found,
+/// so a "New file" gesture can't clobber data. Note: SFTP's `create`
+/// truncates by default; the explicit pre-check is what gives us the
+/// "fail if exists" semantics.
+#[tauri::command]
+pub(crate) async fn file_create_remote(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+) -> Result<(), String> {
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| "no active SSH session".to_string())?;
+    let sftp = open_sftp(&handle).await?;
+    if sftp.metadata(&path).await.is_ok() {
+        let _ = sftp.close().await;
+        return Err(format!("already exists: {path}"));
+    }
+    let create_r = sftp
+        .create(&path)
+        .await
+        .map_err(|e| format!("sftp create {path}: {e}"));
+    let r = match create_r {
+        Ok(mut file) => {
+            // Touch zero bytes so the file exists on disk with size 0.
+            let _ = file.flush().await;
+            let _ = file.shutdown().await;
+            Ok(())
+        }
+        Err(e) => Err(e),
+    };
+    let _ = sftp.close().await;
+    r
+}
+
+/// Phase 23: upload arbitrary bytes (sourced from the frontend, e.g.
+/// from an `<input type="file">` blob) to a remote path. Used by the
+/// "Upload from disk" picker so the user can grab files outside the
+/// current local-column directory without having to navigate there
+/// first. The frontend sends bytes as a JSON array of u8 — that's the
+/// shape Tauri's IPC bridge serializes Uint8Array into.
+#[tauri::command]
+pub(crate) async fn file_upload_bytes(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    remote_path: String,
+    bytes: Vec<u8>,
+) -> Result<u64, String> {
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| "no active SSH session".to_string())?;
+    let sftp = open_sftp(&handle).await?;
+    let mut file = sftp
+        .create(&remote_path)
+        .await
+        .map_err(|e| format!("sftp create {remote_path}: {e}"))?;
+    file.write_all(&bytes)
+        .await
+        .map_err(|e| format!("write: {e}"))?;
+    file.flush().await.ok();
+    file.shutdown().await.ok();
+    let n = bytes.len() as u64;
+    drop(file);
+    let _ = sftp.close().await;
+    Ok(n)
 }
 
 #[tauri::command]

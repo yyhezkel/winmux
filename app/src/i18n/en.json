@@ -108,9 +108,7 @@
   "notes.btn.reopen": "Reopen",
   "notes.btn.mark_done": "Mark done",
   "notes.btn.delete": "Delete",
-
   "feed.btn.dismiss": "Dismiss",
-
   "browser.btn.back": "Back",
   "browser.btn.reload": "Reload",
   "browser.btn.home": "Home",
@@ -121,7 +119,6 @@
   "browser.btn.close": "Close pane",
   "browser.waiting_ssh": "Waiting for SSH session to come up…",
   "browser.empty_url": "Enter a URL above to load a page.",
-
   "ws.create.title.new": "New workspace",
   "ws.create.title.edit": "Edit workspace",
   "ws.create.field.name": "Name",
@@ -148,7 +145,6 @@
   "ws.create.field.env": "Env vars",
   "ws.create.btn.add_env": "+ add",
   "ws.create.btn.create": "Create",
-
   "wizard.import_btn": "Import from SSH config",
   "wizard.import_no_hosts": "No ~/.ssh/config hosts found",
   "wizard.import_hosts_tooltip": "Pick from {n} ssh_config host(s)",
@@ -164,7 +160,6 @@
   "wizard.test_meta": "Method: {method} · Stage: {stage} · {ms}ms",
   "wizard.picker.title": "Pick a host from ~/.ssh/config",
   "wizard.picker.empty": "No Host blocks found. Add some to ~/.ssh/config to use this.",
-
   "provisioning.title": "Provision new server",
   "provisioning.step.connect": "1 / 4 · Connect",
   "provisioning.step.configure": "2 / 4 · Configure",
@@ -194,7 +189,6 @@
   "provisioning.run.starting": "(starting…)",
   "provisioning.btn.mark_done": "Mark done",
   "provisioning.done.message": "Provisioning finished. You can close this dialog.",
-
   "fm.btn.up": "Up",
   "fm.btn.refresh": "Refresh",
   "fm.btn.new_folder": "New folder",
@@ -209,7 +203,6 @@
   "fm.action.confirm_delete": "Delete {name}? This cannot be undone.",
   "fm.action.rename_prompt": "Rename \"{name}\" to:",
   "fm.action.mkdir_prompt": "New folder name:",
-
   "settings.font.web.title": "Web font (optional)",
   "settings.font.web.url": "Stylesheet URL",
   "settings.font.web.hint": "Pastes a CSS link tag at runtime. After it loads, type the family name in the fields above (e.g. {example}).",
@@ -223,14 +216,12 @@
   "settings.terminal.rtl.off.desc": "WebGL renderer, no reorder. Hebrew bytes render left-to-right as written.",
   "settings.terminal.use_winmux_tmux_config.label": "Use winmux tmux config (recommended)",
   "settings.terminal.use_winmux_tmux_config.hint": "Bundles a tmux.conf at ~/.winmux/tmux.conf so wheel scrolls the scrollback ring instead of shell history, 50k-line buffer, sane truecolour. Turn off to fall back to your own ~/.tmux.conf. Takes effect on next pane connect.",
-
   "ws_header.add_browser": "🌐 + browser",
   "ws_header.add_filemanager": "🗂 + files",
   "ws_header.add_chat": "💬 + chat",
   "ws_header.split_browser_title": "Split into browser pane",
   "ws_header.split_filemanager_title": "Split into file manager pane (local + SFTP)",
   "ws_header.split_chat_title": "Split into Claude Chat pane",
-
   "chat.header_prefix": "💬 claude chat",
   "chat.placeholder": "Message Claude…",
   "chat.send_button": "Send",
@@ -241,10 +232,8 @@
   "chat.error.no_claude": "Claude CLI not installed. Install via Provisioning Wizard or manually.",
   "chat.error.timeout": "Claude did not respond in time.",
   "chat.error.network": "Connection to Claude failed.",
-
   "sidebar.provision_server": "☁ Provision server",
   "sidebar.provision_server_tooltip": "Bootstrap a fresh server with users, keys, and tools",
-
   "ws.create.mode.wizard": "Wizard",
   "ws.create.mode.custom": "Custom command",
   "ws.create.shell.label": "Shell",
@@ -260,7 +249,6 @@
   "ws.create.cwd.defaults": "Common locations",
   "ws.create.custom_cmd.label": "Command",
   "ws.create.custom_cmd.placeholder": "e.g. pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd",
-
   "provisioning.agents.section_title": "AI coding agents",
   "provisioning.agents.help": "All optional. Codex and Gemini require Node.js (enable that step too).",
   "provisioning.step.install_claude.label": "Claude Code (Anthropic) — curl installer",
@@ -271,14 +259,12 @@
   "provisioning.step.install_gemini.auth_hint": "Run `gemini` to sign in with Google, or set GEMINI_API_KEY for headless mode.",
   "provisioning.step.add_winmux_to_path.label": "Add winmux to PATH",
   "provisioning.step.add_winmux_to_path.description": "Append ~/.winmux/bin to the user's shell rc file (bash / zsh / fish). Idempotent.",
-
   "provisioning.field.workspace_name": "Workspace name",
   "provisioning.field.workspace_name.placeholder": "(auto-derived from host)",
   "provisioning.done.workspace_created": "✓ Workspace \"{name}\" created and ready.",
   "provisioning.done.workspace_skipped": "Provisioning ended without a working key login — no workspace was created. Re-run the wizard or create one manually.",
   "provisioning.done.btn.open_now": "Open it now",
   "provisioning.done.btn.open_with_claude": "Open with Claude Code",
-
   "settings.tab.shortcuts": "shortcuts",
   "settings.shortcuts.title": "Keyboard shortcuts",
   "settings.shortcuts.hint": "Click a binding to record a new combination. Esc cancels. Modifier-only chords (Ctrl alone, etc.) are rejected.",
@@ -291,14 +277,12 @@
   "settings.shortcuts.toggle_settings": "Toggle settings",
   "settings.shortcuts.ctrl_c_copy": "When text is selected, Ctrl+C copies instead of sending SIGINT",
   "settings.shortcuts.recording": "press a key combo…",
-
   "fm.checkbox.show_local": "Show local",
   "fm.empty.connect_terminal_first": "Connect a terminal pane in this workspace to load remote files.",
   "fm.action.open": "Open",
   "fm.action.edit": "Edit",
   "fm.toast.opened_local": "Opened {file}",
   "fm.toast.opened_remote": "Downloaded to temp and opened: {file} (changes won't sync back)",
-
   "common.loading": "Loading…",
   "common.saving": "Saving…",
   "editor.title": "{filename} — Editor",
@@ -309,7 +293,6 @@
   "editor.binary_warning": "Binary file — use Open instead.",
   "editor.large_file_warning": "File is large ({size}). Editing may be slow.",
   "editor.dirty": "unsaved",
-
   "settings.tab.claude": "claude",
   "settings.claude.title": "Claude session summary",
   "settings.claude.hint": "Pipe the last N exchanges of a Claude Code conversation through `claude -p` on the remote, save the result as a winmux note tagged `summary`. Manual trigger: keyboard shortcut. Automatic: opt in below.",
@@ -321,7 +304,6 @@
   "claude.summary.toast": "Summary saved as note ({count} messages)",
   "claude.summary.no_workspace": "No active workspace.",
   "claude.summary.empty": "No messages found in session.",
-
   "hooks_update.banner.title": "Hook spec update available",
   "hooks_update.banner.text": "{agent} hooks v{current} → v{latest} on this server",
   "hooks_update.btn.update": "Update now",
@@ -329,5 +311,25 @@
   "hooks_update.btn.skip": "Skip this version",
   "hooks_update.toast_done": "Hooks updated to v{version}. Restart your agent to take effect.",
   "settings.hooks_updates.title": "Hook update banners",
-  "settings.hooks_updates.show_banners": "Show a banner when an agent's hook spec is outdated"
+  "settings.hooks_updates.show_banners": "Show a banner when an agent's hook spec is outdated",
+  "fm.action.create_file_prompt": "New file name (will be created empty):",
+  "fm.btn.new_file": "New file",
+  "fm.btn.upload_from_disk_remote": "Upload file from disk → remote",
+  "fm.btn.upload_from_disk_local": "Add file from disk → local folder",
+  "fm.btn.copy_path_current": "Copy current path",
+  "fm.action.copy_path": "Copy path",
+  "fm.toast.path_copied": "Copied: {path}",
+  "editor.btn.find": "Find (Ctrl+F) / Replace (Ctrl+H)",
+  "editor.dir.title": "Text direction (auto follows document language)",
+  "editor.dir.auto": "Auto",
+  "editor.find.placeholder": "Find…",
+  "editor.find.next": "Next (F3 / Enter)",
+  "editor.find.prev": "Previous (Shift+F3 / Shift+Enter)",
+  "editor.find.case_sensitive": "Case sensitive",
+  "editor.find.regex": "Regular expression",
+  "editor.find.show_replace": "Show replace",
+  "editor.find.hide_replace": "Hide replace",
+  "editor.replace.placeholder": "Replace with…",
+  "editor.replace.one": "Replace",
+  "editor.replace.all": "Replace all"
 }

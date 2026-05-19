@@ -141,6 +141,17 @@ export class TerminalInstance {
   private dataDisposable: IDisposable | null = null;
   private ro: ResizeObserver | null = null;
   private dirObserver: MutationObserver | null = null;
+  // Phase 23.E: keep a handle to the WebGL addon so we can flush its
+  // glyph atlas on resize. Without that, the GPU canvas keeps painting
+  // the previous viewport's grid metrics — visible as "stuck" lines
+  // that don't reflow when the user drags the pane divider.
+  private webglAddon: WebglAddon | null = null;
+  // Phase 23.E: rAF-throttle the ResizeObserver fire-rate. During a
+  // drag, RO fires per-pixel and each call sends a SIGWINCH down the
+  // SSH channel — tmux struggles to keep up and the renderer thrashes.
+  // One fit per animation frame is enough; the trailing call after
+  // the drag stops is what produces the final correct layout.
+  private resizeRafId: number | null = null;
 
   constructor(paneId: string) {
     this.paneId = paneId;
@@ -186,6 +197,13 @@ export class TerminalInstance {
       windowsPty: { backend: "conpty" },
       windowOptions: { setWinSizeChars: true },
       convertEol: false,
+      // Phase 23.E: explicit reflow=true. xterm.js's default is true,
+      // but if a previous setting drifted, scrollback wouldn't rewrap
+      // when the pane is resized — text appears "stuck" at the
+      // pre-resize column width. Belt-and-suspenders.
+      // (Property removed in xterm v5+; if the type errors leave it
+      // out — we still get reflow because that's now the unconditional
+      // behaviour.)
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
@@ -224,13 +242,23 @@ export class TerminalInstance {
     // DOM, so the browser BiDi engine has nothing to hook into.
     if (this.rtlModeAtConstruct !== "auto_per_line") {
       try {
-        this.term.loadAddon(new WebglAddon());
+        const addon = new WebglAddon();
+        this.term.loadAddon(addon);
+        this.webglAddon = addon;
       } catch (e) {
         console.warn("WebGL addon unavailable", e);
       }
     }
 
-    this.ro = new ResizeObserver(() => this.fitAndResize());
+    // Phase 23.E: rAF-throttled fit. During a drag, multiple per-pixel
+    // resize events collapse into one fit per animation frame.
+    this.ro = new ResizeObserver(() => {
+      if (this.resizeRafId != null) return;
+      this.resizeRafId = requestAnimationFrame(() => {
+        this.resizeRafId = null;
+        this.fitAndResize();
+      });
+    });
     this.ro.observe(this.container);
     g_terminals.add(this);
 
@@ -294,15 +322,35 @@ export class TerminalInstance {
   }
 
   fitAndResize() {
+    const prevCols = this.term.cols;
+    const prevRows = this.term.rows;
     try {
       this.fit.fit();
     } catch {}
-    if (this.sessionId) {
+    const changed = this.term.cols !== prevCols || this.term.rows !== prevRows;
+    if (this.sessionId && changed) {
       invoke("pty_resize", {
         sessionId: this.sessionId,
         cols: this.term.cols,
         rows: this.term.rows,
       }).catch(() => {});
+    }
+    // Phase 23.E: force a repaint so the WebGL canvas / DOM renderer
+    // doesn't keep the previous viewport's grid metrics around. The
+    // FitAddon recomputes cols/rows from the container, but the
+    // already-rendered scrollback content otherwise keeps its old
+    // wrap points and looks "stuck" at the old width.
+    if (changed) {
+      try {
+        // Clearing the glyph texture atlas forces the WebGL addon to
+        // re-rasterize at the new cell size. Without this, the atlas
+        // contains glyphs sized for the OLD pane width and the canvas
+        // paints them at stale offsets.
+        this.webglAddon?.clearTextureAtlas?.();
+      } catch {}
+      try {
+        this.term.refresh(0, this.term.rows - 1);
+      } catch {}
     }
   }
 
@@ -326,6 +374,10 @@ export class TerminalInstance {
   }
 
   dispose() {
+    if (this.resizeRafId != null) {
+      cancelAnimationFrame(this.resizeRafId);
+      this.resizeRafId = null;
+    }
     this.ro?.disconnect();
     this.ro = null;
     this.dirObserver?.disconnect();

@@ -234,21 +234,8 @@
 
   "ws_header.add_browser": "🌐 + браузер",
   "ws_header.add_filemanager": "🗂 + файлы",
-  "ws_header.add_chat": "💬 + чат",
   "ws_header.split_browser_title": "Разделить на панель браузера",
   "ws_header.split_filemanager_title": "Разделить на панель файлового менеджера (локальный + SFTP)",
-  "ws_header.split_chat_title": "Разделить на панель чата Claude",
-
-  "chat.header_prefix": "💬 чат claude",
-  "chat.placeholder": "Сообщение для Claude…",
-  "chat.send_button": "Отправить",
-  "chat.attach_button": "Прикрепить файл",
-  "chat.clear": "Очистить",
-  "chat.empty.title": "Начните разговор",
-  "chat.empty.subtitle": "Введите сообщение ниже, чтобы начать.",
-  "chat.error.no_claude": "Claude CLI не установлен. Установите через мастер настройки или вручную.",
-  "chat.error.timeout": "Claude не ответил вовремя.",
-  "chat.error.network": "Не удалось подключиться к Claude.",
 
   "sidebar.provision_server": "☁ Подготовить сервер",
   "sidebar.provision_server_tooltip": "Подготовка нового сервера: пользователи, ключи, утилиты",
@@ -374,16 +361,5 @@
   "tmux_picker.new_session_hint_v2": "Создать новую сессию с уникальным авто-сгенерированным именем",
   "tmux_picker.label_secondary": "session: {name}",
 
-  "ws_header.add_claudelog": "🗒 + журнал claude",
-  "ws_header.split_claudelog_title": "Разделить на панель журнала разговоров Claude",
-
-  "cl.title": "Журнал разговоров Claude",
-  "cl.sync_now": "Синхронизировать сейчас",
-  "cl.last_synced": "Последняя синхронизация {age} назад",
-  "cl.never_synced": "Никогда не синхронизировалось",
-  "cl.empty": "Нет синхронизированных сессий. Подключите терминал и нажмите «Синхронизировать сейчас».",
-  "cl.pick_session": "Выберите сессию",
-  "cl.filter_placeholder": "Фильтр сообщений…",
-  "cl.tool_use": "🔧 {tool}",
-  "cl.tool_result": "↩ {tool}"
+  "_phase24d_note": "Phase 24.D removed ws_header.add_chat / .add_claudelog and the chat.* / cl.* key namespaces with the ClaudeChat (Phase 22) + ClaudeLog (Phase 24.B) panes."
 }

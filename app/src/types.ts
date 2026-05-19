@@ -15,13 +15,9 @@ export interface TmuxSessionInfo {
 export type SplitDirection = "horizontal" | "vertical";
 
 // Phase 8.A: pane kind. Default = terminal for legacy panes (server omits the field).
-// Phase 22 adds "claudechat". Phase 24.B adds "claudelog".
-export type PaneKind =
-  | "terminal"
-  | "browser"
-  | "filemanager"
-  | "claudechat"
-  | "claudelog";
+// Phase 24.D: removed "claudechat" (Phase 22) + "claudelog" (Phase 24.B) — backend
+// aliases those JSON variants back to "terminal" at deserialize time.
+export type PaneKind = "terminal" | "browser" | "filemanager";
 
 export type BrowserState = {
   url: string;
@@ -33,27 +29,13 @@ export type BrowserState = {
   forward_localhost?: boolean;
 };
 
-// Phase 22: chat state persisted per pane.
-export type ChatRole = "user" | "assistant" | "system";
-export type MessageStatus = "sending" | "done" | "error";
+// Phase 24.D: ChatRole / MessageStatus / ChatMessage / ClaudeChatState
+// (Phase 22) removed alongside the ClaudeChat pane. The
+// ClaudeLog* types just below are kept for the dead-code-but-
+// registered backend (a future unified-view rebuild can consume the
+// existing claude_log_sync / list / read commands without re-typing).
 
-export type ChatMessage = {
-  id: string;
-  role: ChatRole;
-  content: string;
-  timestamp: string;
-  status?: MessageStatus;
-};
-
-export type ClaudeChatState = {
-  session_id?: string;
-  model?: string;
-  messages: ChatMessage[];
-};
-
-// Phase 24.B: backend response shapes for claude_log_* tauri
-// commands. Mirror Rust serde output (snake_case field names; None
-// values are omitted from the JSON via skip_serializing_if).
+/** Phase 24.B: kept for future unified-view rebuild — no current consumer. */
 export interface ClaudeSyncResult {
   synced: number;
   skipped: number;
@@ -61,6 +43,7 @@ export interface ClaudeSyncResult {
   total_bytes: number;
 }
 
+/** Phase 24.B: kept for future unified-view rebuild — no current consumer. */
 export interface ClaudeLogSummary {
   session_id: string;
   message_count: number;
@@ -72,6 +55,7 @@ export interface ClaudeLogSummary {
   local_mtime: number;
 }
 
+/** Phase 24.B: kept for future unified-view rebuild — no current consumer. */
 export interface ClaudeLogEntry {
   line_no: number;
   /** "user" | "assistant" | "tool_use" | "tool_result" | "system" | "summary" */
@@ -82,10 +66,11 @@ export interface ClaudeLogEntry {
   session_id?: string;
 }
 
+/** Phase 24.B: kept for future unified-view rebuild — no current consumer.
+ *  The Rust-side `claudelog` field on LayoutNode::Pane was removed in 24.D
+ *  along with `chat`; if the pane comes back, restore both. */
 export interface ClaudeLogState {
-  /** Current session being viewed. Unset = pane shows the picker. */
   session_id?: string;
-  /** Manual filter input. Persisted so reload preserves it. */
   filter?: string;
 }
 
@@ -98,10 +83,10 @@ export type LayoutNode =
       // Required for terminal panes; absent for browser panes.
       connection?: Connection;
       browser?: BrowserState;
-      // Phase 22: only set on ClaudeChat panes.
-      chat?: ClaudeChatState;
-      // Phase 24.B: only set on ClaudeLog panes.
-      claudelog?: ClaudeLogState;
+      // Phase 24.D: removed `chat` / `claudelog` fields with the
+      // ClaudeChat (Phase 22) + ClaudeLog (Phase 24.B) panes.
+      // Legacy JSON that still has those keys deserializes cleanly
+      // (TS is structural; missing keys here are ignored).
       title?: string;
       annotation?: string;
     }

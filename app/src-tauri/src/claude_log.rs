@@ -1,23 +1,27 @@
-//! Phase 24.A: backend for the ClaudeLog pane.
+//! Phase 24.A: backend for the (now-removed) ClaudeLog pane.
 //!
-//! Mirrors the remote `~/.claude/projects/**/*.jsonl` Claude Code
-//! conversation transcripts down to a local store at
-//! `%APPDATA%/winmux/claude-logs/<workspace_id>/<session_id>.jsonl`.
-//! Once local, the frontend can render them as HTML chat bubbles in
-//! Phase 24.B and sidestep the xterm.js scrollback-reflow limitations
-//! that motivated this whole detour.
+//! Phase 24.D rolled back the ClaudeChat + ClaudeLog FE panes
+//! ("three competing 'talk to claude' UIs felt fragmented"), but
+//! Yossi explicitly asked to keep this backend module alive for a
+//! future unified-view rebuild. The three sync/list/read tauri
+//! commands stay registered in `invoke_handler!` — they just have
+//! no FE caller right now. The `#![allow(dead_code)]` at the top
+//! silences the cascade of warnings that the unused module +
+//! response types would otherwise generate.
 //!
-//! Three tauri commands:
+//! Three tauri commands (registered, no current consumer):
 //!   - claude_log_sync(workspace_id, session_id?) — SFTP-mirror new/
 //!     changed files (mtime-gated, full-file fetch — no byte diffing)
 //!   - claude_log_list(workspace_id) — pure local directory scan +
-//!     per-file summary for the picker UI
+//!     per-file summary
 //!   - claude_log_read(workspace_id, session_id) — parses the local
 //!     jsonl into a structured ClaudeLogEntry stream (handles content
 //!     as string OR block array; summarizes tool_use/tool_result)
 //!
 //! No background SSH reconnects — if there's no live handle, sync
 //! errors cleanly and the user connects a terminal pane first.
+
+#![allow(dead_code)]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -29,12 +33,7 @@ use serde::Serialize;
 use tauri::State;
 use tokio::io::AsyncReadExt;
 
-use tauri::{AppHandle, Emitter};
-
-use crate::{
-    config_dir_pub, dlog, persist, update_claudelog_pane, AppState, Session, SshClient,
-    WorkspacesFile,
-};
+use crate::{config_dir_pub, dlog, AppState, Session, SshClient};
 
 // ─── public schemas ────────────────────────────────────────────────────────
 
@@ -354,53 +353,11 @@ pub(crate) fn claude_log_list(workspace_id: String) -> Result<Vec<ClaudeLogSumma
     Ok(out)
 }
 
-/// Phase 24.B: persist the picker selection / filter input on a
-/// ClaudeLog pane. Either field is optional — pass None to leave it
-/// unchanged. Empty string clears (matches the FE semantics).
-/// Returns the updated workspaces file so the FE can re-render.
-#[tauri::command]
-pub(crate) async fn claude_log_pane_set(
-    state: tauri::State<'_, AppState>,
-    app: AppHandle,
-    workspace_id: String,
-    pane_id: String,
-    session_id: Option<String>,
-    filter: Option<String>,
-) -> Result<WorkspacesFile, String> {
-    // 3-state semantics on each input:
-    //   None              → leave unchanged
-    //   Some("")          → clear (write None to disk)
-    //   Some("non-empty") → set to that value
-    // Encoded as Option<Option<String>> so the closure consumes each
-    // action exactly once with no borrow-of-moved issues.
-    let session_action: Option<Option<String>> =
-        session_id.map(|s| if s.is_empty() { None } else { Some(s) });
-    let filter_action: Option<Option<String>> =
-        filter.map(|s| if s.is_empty() { None } else { Some(s) });
-    {
-        let mut file = state.workspaces.lock().unwrap();
-        let ws = file
-            .workspaces
-            .iter_mut()
-            .find(|w| w.id == workspace_id)
-            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
-        let layout = ws
-            .layout
-            .take()
-            .ok_or_else(|| "workspace has no layout".to_string())?;
-        ws.layout = Some(update_claudelog_pane(layout, &pane_id, &mut |c| {
-            if let Some(action) = &session_action {
-                c.session_id = action.clone();
-            }
-            if let Some(action) = &filter_action {
-                c.filter = action.clone();
-            }
-        }));
-    }
-    persist(&state)?;
-    let _ = app.emit("workspaces:changed", ());
-    Ok(state.workspaces.lock().unwrap().clone())
-}
+// Phase 24.D: claude_log_pane_set was removed alongside the
+// ClaudeLog pane kind (it persisted picker selection / filter to a
+// `claudelog` field on LayoutNode::Pane that no longer exists). If
+// the unified-view rebuild brings the pane back, restore both the
+// field on LayoutNode::Pane and this command.
 
 #[tauri::command]
 pub(crate) fn claude_log_read(

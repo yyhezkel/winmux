@@ -2,8 +2,8 @@ import { Match, Show, Switch } from "solid-js";
 import { Divider } from "./Divider";
 import { BrowserPane } from "./BrowserPane";
 import { FileManagerPane } from "./FileManagerPane";
-import { ClaudeChatPane } from "./ClaudeChatPane";
-import { ClaudeLogPane } from "./ClaudeLogPane";
+// Phase 24.D: ClaudeChatPane (Phase 22) + ClaudeLogPane (Phase 24.B)
+// removed. Files deleted, Match arms below stripped.
 import {
   PaneView,
   type ConnectOpts,
@@ -15,7 +15,6 @@ import {
   type Connection,
   type LayoutNode,
   type SplitDirection,
-  type WorkspacesFile,
 } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
 
@@ -60,9 +59,8 @@ interface Props {
   // Phase 23.I: workspace name. PaneView's header falls back to it
   // when the pane has no user-set title.
   workspaceName?: string;
-  /** Phase 22: chat panes need to flush an updated WorkspacesFile back
-   *  to the parent App so the new message bubbles render. */
-  onWorkspacesFileUpdate: (f: WorkspacesFile) => void;
+  // Phase 24.D: onWorkspacesFileUpdate removed — its only consumers
+  // were the (now-gone) ChatPane / ClaudeLogPane Match arms.
 }
 
 export function LayoutView(p: Props) {
@@ -164,28 +162,10 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           </div>
         </div>
       </Match>
-      <Match when={kind() === "claudechat"}>
-        <ClaudeChatPane
-          workspaceId={props.all.workspaceId}
-          pane={props.pane}
-          isActive={isActive()}
-          onFocus={props.all.onFocus}
-          onClose={props.all.onClose}
-          onSetTitle={props.all.onSetTitle}
-          onSetAnnotation={props.all.onSetAnnotation}
-          onFileUpdate={props.all.onWorkspacesFileUpdate}
-        />
-      </Match>
-      <Match when={kind() === "claudelog"}>
-        <ClaudeLogPane
-          workspaceId={props.all.workspaceId}
-          pane={props.pane}
-          isActive={isActive()}
-          onFocus={props.all.onFocus}
-          onClose={props.all.onClose}
-          onFileUpdate={props.all.onWorkspacesFileUpdate}
-        />
-      </Match>
+      {/* Phase 24.D: ClaudeChat + ClaudeLog Match arms removed
+          with their pane kinds. Legacy panes with those pane_kind
+          values are aliased to Terminal at deserialize time, so
+          the Switch fallback (PaneView) handles them. */}
     </Switch>
   );
 }

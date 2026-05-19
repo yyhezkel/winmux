@@ -218,20 +218,8 @@
   "settings.terminal.use_winmux_tmux_config.hint": "Bundles a tmux.conf at ~/.winmux/tmux.conf so wheel scrolls the scrollback ring instead of shell history, 50k-line buffer, sane truecolour. Turn off to fall back to your own ~/.tmux.conf. Takes effect on next pane connect.",
   "ws_header.add_browser": "🌐 + browser",
   "ws_header.add_filemanager": "🗂 + files",
-  "ws_header.add_chat": "💬 + chat",
   "ws_header.split_browser_title": "Split into browser pane",
   "ws_header.split_filemanager_title": "Split into file manager pane (local + SFTP)",
-  "ws_header.split_chat_title": "Split into Claude Chat pane",
-  "chat.header_prefix": "💬 claude chat",
-  "chat.placeholder": "Message Claude…",
-  "chat.send_button": "Send",
-  "chat.attach_button": "Attach file",
-  "chat.clear": "Clear",
-  "chat.empty.title": "Start a conversation",
-  "chat.empty.subtitle": "Type a message below to begin.",
-  "chat.error.no_claude": "Claude CLI not installed. Install via Provisioning Wizard or manually.",
-  "chat.error.timeout": "Claude did not respond in time.",
-  "chat.error.network": "Connection to Claude failed.",
   "sidebar.provision_server": "☁ Provision server",
   "sidebar.provision_server_tooltip": "Bootstrap a fresh server with users, keys, and tools",
   "ws.create.mode.wizard": "Wizard",
@@ -356,16 +344,5 @@
   "tmux_picker.new_session_hint_v2": "Create a fresh session with a unique auto-generated name",
   "tmux_picker.label_secondary": "session: {name}",
 
-  "ws_header.add_claudelog": "🗒 + claude log",
-  "ws_header.split_claudelog_title": "Split into Claude conversation log pane",
-
-  "cl.title": "Claude conversation log",
-  "cl.sync_now": "Sync now",
-  "cl.last_synced": "Last synced {age} ago",
-  "cl.never_synced": "Never synced",
-  "cl.empty": "No synced sessions yet. Connect a terminal, then click Sync now.",
-  "cl.pick_session": "Pick a session",
-  "cl.filter_placeholder": "Filter messages…",
-  "cl.tool_use": "🔧 {tool}",
-  "cl.tool_result": "↩ {tool}"
+  "_phase24d_note": "Phase 24.D removed ws_header.add_chat / .add_claudelog and the chat.* / cl.* key namespaces with the ClaudeChat (Phase 22) + ClaudeLog (Phase 24.B) panes."
 }

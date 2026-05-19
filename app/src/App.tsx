@@ -391,7 +391,7 @@ function App() {
   const splitPane = async (
     paneId: string,
     direction: SplitDirection,
-    kind: "terminal" | "browser" | "filemanager" | "claudechat" | "claudelog" = "terminal",
+    kind: "terminal" | "browser" | "filemanager" = "terminal",
     browserUrl?: string
   ) => {
     const ws = activeWs();
@@ -1002,26 +1002,9 @@ function App() {
               >
                 {t("ws_header.add_filemanager")}
               </button>
-              <button
-                class="ws-header-btn"
-                title={t("ws_header.split_chat_title")}
-                onClick={() => {
-                  const pid = activePaneId();
-                  if (pid) splitPane(pid, "horizontal", "claudechat");
-                }}
-              >
-                {t("ws_header.add_chat")}
-              </button>
-              <button
-                class="ws-header-btn"
-                title={t("ws_header.split_claudelog_title")}
-                onClick={() => {
-                  const pid = activePaneId();
-                  if (pid) splitPane(pid, "horizontal", "claudelog");
-                }}
-              >
-                {t("ws_header.add_claudelog")}
-              </button>
+              {/* Phase 24.D: removed + chat / + claude log buttons.
+                  The two pane kinds + their backends are rolled back
+                  pending a future unified-view rebuild. */}
             </Show>
           </div>
           </ErrorBoundary>
@@ -1127,7 +1110,6 @@ function App() {
                 onBrowserGoBack={browserGoBack}
                 onBrowserGoHome={browserGoHome}
                 onBrowserSetForward={browserSetForward}
-                onWorkspacesFileUpdate={updateFile}
               />
             </ErrorBoundary>
           </div>

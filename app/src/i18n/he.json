@@ -234,21 +234,8 @@
 
   "ws_header.add_browser": "🌐 + דפדפן",
   "ws_header.add_filemanager": "🗂 + קבצים",
-  "ws_header.add_chat": "💬 + צ׳אט",
   "ws_header.split_browser_title": "פצל לפאנל דפדפן",
   "ws_header.split_filemanager_title": "פצל לפאנל מנהל קבצים (מקומי + SFTP)",
-  "ws_header.split_chat_title": "פצל לפאנל שיחה עם Claude",
-
-  "chat.header_prefix": "💬 שיחה עם claude",
-  "chat.placeholder": "כתוב הודעה ל-Claude…",
-  "chat.send_button": "שלח",
-  "chat.attach_button": "צרף קובץ",
-  "chat.clear": "נקה",
-  "chat.empty.title": "התחל שיחה",
-  "chat.empty.subtitle": "הקלד הודעה למטה כדי להתחיל.",
-  "chat.error.no_claude": "ה-CLI של Claude לא מותקן. התקן דרך אשף ההתקנה או ידנית.",
-  "chat.error.timeout": "Claude לא הגיב בזמן.",
-  "chat.error.network": "החיבור ל-Claude נכשל.",
 
   "sidebar.provision_server": "☁ הקם שרת",
   "sidebar.provision_server_tooltip": "הקמת שרת חדש עם משתמשים, מפתחות וכלים",
@@ -374,16 +361,5 @@
   "tmux_picker.new_session_hint_v2": "צור session חדש עם שם ייחודי שנוצר אוטומטית",
   "tmux_picker.label_secondary": "session: {name}",
 
-  "ws_header.add_claudelog": "🗒 + claude log",
-  "ws_header.split_claudelog_title": "פצל לפאנל תיעוד שיחת Claude",
-
-  "cl.title": "תיעוד שיחת Claude",
-  "cl.sync_now": "סנכרן עכשיו",
-  "cl.last_synced": "סונכרן לפני {age}",
-  "cl.never_synced": "מעולם לא סונכרן",
-  "cl.empty": "אין סשנים מסונכרנים. חבר טרמינל ולחץ סנכרן עכשיו.",
-  "cl.pick_session": "בחר סשן",
-  "cl.filter_placeholder": "סנן הודעות…",
-  "cl.tool_use": "🔧 {tool}",
-  "cl.tool_result": "↩ {tool}"
+  "_phase24d_note": "Phase 24.D removed ws_header.add_chat / .add_claudelog and the chat.* / cl.* key namespaces with the ClaudeChat (Phase 22) + ClaudeLog (Phase 24.B) panes."
 }

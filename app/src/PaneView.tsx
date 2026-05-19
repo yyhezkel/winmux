@@ -18,15 +18,16 @@ export type ConnectOpts = {
   password?: string;
   keyPassphrase?: string;
   acceptUnknownHost?: boolean;
-  // Phase 11.A: when true the SSH shell is wrapped in `tmux new-session -A`
-  // so a reconnect attaches to the same session.
   persistent?: boolean;
-  // Phase 12.B Smart Connect.
   mode?: "default" | "tmux" | "plain" | "cmd" | "claude";
   cwdOverride?: string;
   cmd?: string;
   claudeArgs?: string;
+  // Phase 23.F: override the auto-derived tmux session name (picker).
+  tmuxSession?: string;
 };
+
+export type { TmuxSessionInfo } from "./types";
 
 export type PassphrasePending = { paneId: string; keyPath: string; bad?: boolean };
 export type HostTrustPending = {
@@ -164,6 +165,30 @@ export function PaneView(p: Props) {
   const [smartModal, setSmartModal] = createSignal<null | "cwd" | "cmd" | "claude_args">(null);
   const [smartInput, setSmartInput] = createSignal("");
   const [showClaudePicker, setShowClaudePicker] = createSignal(false);
+  // Phase 23.F: tmux session picker state.
+  const [tmuxSessions, setTmuxSessions] = createSignal<import("./types").TmuxSessionInfo[] | null>(null);
+  const [tmuxPickerLoading, setTmuxPickerLoading] = createSignal(false);
+  const [tmuxPickerErr, setTmuxPickerErr] = createSignal<string | null>(null);
+  const openTmuxPicker = async () => {
+    setTmuxSessions([]);
+    setTmuxPickerLoading(true);
+    setTmuxPickerErr(null);
+    try {
+      const list = await invoke<import("./types").TmuxSessionInfo[]>("pane_list_tmux_sessions", {
+        workspaceId: p.workspaceId,
+      });
+      setTmuxSessions(list);
+    } catch (e) {
+      setTmuxPickerErr(String(e));
+      setTmuxSessions([]);
+    } finally {
+      setTmuxPickerLoading(false);
+    }
+  };
+  const closeTmuxPicker = () => {
+    setTmuxSessions(null);
+    setTmuxPickerErr(null);
+  };
   const closeConnectMenu = () => setShowConnectMenu(false);
   const submitSmartModal = () => {
     const m = smartModal();
@@ -486,7 +511,9 @@ export function PaneView(p: Props) {
                       onClick={(e) => e.stopPropagation()}
                     >
                       <Show when={isSsh()}>
-                        <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "tmux" }); }}>
+                        {/* Phase 23.F: open picker instead of attaching
+                             to the auto-named session. */}
+                        <button onClick={() => { closeConnectMenu(); openTmuxPicker(); }}>
                           {t("common.connect_tmux")}
                         </button>
                       </Show>
@@ -582,6 +609,77 @@ export function PaneView(p: Props) {
             });
           }}
         />
+      </Show>
+
+      {/* Phase 23.F: tmux session picker. */}
+      <Show when={tmuxSessions() !== null}>
+        <div class="modal-backdrop" onClick={closeTmuxPicker}>
+          <div class="modal claude-picker" onClick={(e) => e.stopPropagation()}>
+            <div class="settings-head">
+              <h3>Attach to tmux session</h3>
+              <button class="feed-x" title={t("common.close")} onClick={closeTmuxPicker}>×</button>
+            </div>
+            <div class="claude-picker-body">
+              <Show when={tmuxPickerLoading()}>
+                <p class="status-line">Loading sessions…</p>
+              </Show>
+              <Show when={tmuxPickerErr()}>
+                <p class="status-line err">⚠ {tmuxPickerErr()}</p>
+              </Show>
+              <ul class="claude-list">
+                <li
+                  class="claude-row"
+                  onClick={() => {
+                    closeTmuxPicker();
+                    p.onConnect(p.pane.pane_id, { mode: "tmux" });
+                  }}
+                >
+                  <div class="claude-row-head">
+                    <code class="claude-id">🆕</code>
+                    <span class="claude-proj"><b>New session</b></span>
+                    <span class="claude-age">→ pane id</span>
+                  </div>
+                  <div class="claude-prev">Create a fresh tmux session named after this pane.</div>
+                </li>
+                {(tmuxSessions() ?? []).map((s) => {
+                  const ageOf = (epoch: number) => {
+                    if (!epoch) return "—";
+                    const sec = Math.max(1, Math.floor(Date.now() / 1000 - epoch));
+                    if (sec < 60) return `${sec}s`;
+                    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+                    if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+                    return `${Math.floor(sec / 86400)}d`;
+                  };
+                  return (
+                    <li
+                      class="claude-row"
+                      onClick={() => {
+                        closeTmuxPicker();
+                        p.onConnect(p.pane.pane_id, {
+                          mode: "tmux",
+                          tmuxSession: s.name,
+                        });
+                      }}
+                      title={`Created ${ageOf(s.created)} ago${s.last_attached ? `, last attached ${ageOf(s.last_attached)} ago` : ""}`}
+                    >
+                      <div class="claude-row-head">
+                        <code class="claude-id">{s.name.slice(0, 14)}</code>
+                        <span class="claude-proj">
+                          {s.windows} window{s.windows === 1 ? "" : "s"}
+                          {s.attached ? " · ⚠ attached" : ""}
+                        </span>
+                        <span class="claude-age">{ageOf(s.last_attached || s.created)}</span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <Show when={!tmuxPickerLoading() && (tmuxSessions()?.length ?? 0) === 0 && !tmuxPickerErr()}>
+                <p class="status-line">No existing sessions — pick "New session" above.</p>
+              </Show>
+            </div>
+          </div>
+        </div>
       </Show>
     </div>
   );

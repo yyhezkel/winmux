@@ -1929,6 +1929,10 @@ async fn spawn_ssh(
     cols: u16,
     rows: u16,
     persistent: bool,
+    // Phase 23.F: when set, override the pane-id-derived tmux session
+    // name. Passed through from pane_connect when the picker UI chose
+    // a specific orphan session to attach to.
+    tmux_session_name: Option<String>,
 ) -> Result<String, String> {
     dlog(&format!(
         "spawn_ssh: entry ws={} pane={} target={}@{}:{}",
@@ -2186,8 +2190,15 @@ async fn spawn_ssh(
         emit_exit(&app_for_task, &id_for_task, exit_reason);
     });
 
+    // Phase 23.F: caller-supplied name wins (picker path); pane-id
+    // fallback keeps the legacy auto-name behaviour.
     let tmux_name = if persistent {
-        Some(sanitize_tmux_session_name(&pane_id))
+        Some(
+            tmux_session_name
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| sanitize_tmux_session_name(&pane_id)),
+        )
     } else {
         None
     };
@@ -3427,6 +3438,10 @@ async fn pane_connect(
     cwd_override: Option<String>,
     cmd: Option<String>,
     claude_args: Option<String>,
+    // Phase 23.F: when set AND we're in a persistent flow, override
+    // the auto-derived tmux session name. Lets the user attach to a
+    // previously-orphaned session whose original pane was closed.
+    tmux_session_name: Option<String>,
 ) -> Result<String, String> {
     // Look up connection from workspaces state. Phase 7.C: also lift `env` and
     // `setup_command` from the workspace so we can inject them after the shell is up.
@@ -3518,6 +3533,7 @@ async fn pane_connect(
                 cols,
                 rows,
                 effective_persistent,
+                tmux_session_name.clone(),
             )
             .await?
         }
@@ -3592,6 +3608,77 @@ async fn pane_connect(
     }
 
     Ok(session_id)
+}
+
+/// Phase 23.F: tmux session metadata returned by
+/// pane_list_tmux_sessions for the Connect (tmux) picker modal.
+#[derive(Clone, Serialize)]
+pub(crate) struct TmuxSessionInfo {
+    pub name: String,
+    pub created: i64,
+    pub attached: bool,
+    pub windows: u32,
+    pub last_attached: i64,
+}
+
+/// Phase 23.F: enumerate the tmux sessions live on a workspace's
+/// host. Returns Ok([]) when tmux isn't installed or no sessions
+/// exist. Used by the Connect (tmux) split-button to populate a
+/// picker so users can attach to an orphan session whose original
+/// pane was closed.
+#[tauri::command]
+async fn pane_list_tmux_sessions(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<TmuxSessionInfo>, String> {
+    let handle = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions
+            .iter()
+            .find_map(|(_sid, sess)| match sess {
+                Session::Ssh(s) if s.workspace_id == workspace_id => Some(s.handle.clone()),
+                _ => None,
+            })
+    }
+    .ok_or_else(|| "no active SSH session for this workspace".to_string())?;
+    let script = "tmux list-sessions -F '#{session_name}|#{session_created}|#{session_attached}|#{session_windows}|#{session_last_attached}' 2>/dev/null || true";
+    use russh::ChannelMsg;
+    let mut ch = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("channel_open: {e}"))?;
+    ch.exec(true, script.as_bytes())
+        .await
+        .map_err(|e| format!("exec: {e}"))?;
+    let mut stdout = Vec::new();
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(6), async {
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                ChannelMsg::Data { ref data } => stdout.extend_from_slice(data),
+                ChannelMsg::Eof | ChannelMsg::Close | ChannelMsg::ExitStatus { .. } => break,
+                _ => {}
+            }
+        }
+    })
+    .await;
+    let _ = ch.close().await;
+    let text = String::from_utf8_lossy(&stdout);
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() < 5 { continue; }
+        out.push(TmuxSessionInfo {
+            name: parts[0].to_string(),
+            created: parts[1].parse().unwrap_or(0),
+            attached: parts[2] == "1",
+            windows: parts[3].parse().unwrap_or(0),
+            last_attached: parts[4].parse().unwrap_or(0),
+        });
+    }
+    out.sort_by(|a, b| b.last_attached.max(b.created).cmp(&a.last_attached.max(a.created)));
+    Ok(out)
 }
 
 /// Phase 12.B: Claude Code session metadata returned by
@@ -4219,6 +4306,7 @@ pub fn run() {
             pane_persistence_get,
             pane_persistence_list,
             pane_list_claude_sessions,
+            pane_list_tmux_sessions,
             pane_set_title,
             pane_set_annotation,
             pane_browser_navigate,

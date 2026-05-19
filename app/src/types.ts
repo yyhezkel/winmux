@@ -2,6 +2,16 @@ export type Connection =
   | { type: "local"; shell?: string }
   | { type: "ssh"; host: string; user: string; port: number; key_path?: string };
 
+// Phase 23.F: shape returned by pane_list_tmux_sessions. Used by
+// the Connect (tmux) picker.
+export interface TmuxSessionInfo {
+  name: string;
+  created: number;
+  attached: boolean;
+  windows: number;
+  last_attached: number;
+}
+
 export type SplitDirection = "horizontal" | "vertical";
 
 // Phase 8.A: pane kind. Default = terminal for legacy panes (server omits the field).

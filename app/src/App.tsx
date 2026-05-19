@@ -537,6 +537,8 @@ function App() {
     cwdOverride?: string;
     cmd?: string;
     claudeArgs?: string;
+    // Phase 23.F: override tmux session name (picker path).
+    tmuxSession?: string;
   };
 
   const connectPane = async (paneId: string, opts: ConnectOpts = {}) => {
@@ -556,6 +558,7 @@ function App() {
         cwdOverride: opts.cwdOverride ?? null,
         cmd: opts.cmd ?? null,
         claudeArgs: opts.claudeArgs ?? null,
+        tmuxSessionName: opts.tmuxSession ?? null,
         cols: ti.term.cols || 80,
         rows: ti.term.rows || 24,
       });

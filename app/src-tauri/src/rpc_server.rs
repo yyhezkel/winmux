@@ -504,12 +504,30 @@ async fn dispatch(
                 find_workspace_for_pane(&file, &pane_id)
                     .ok_or_else(|| format!("no pane {pane_id}"))?
             };
+            // Phase 23.C: compute the same workspace-level fallback
+            // that workspace_split uses, so agent-driven splits via
+            // RPC also inherit the workspace's SSH connection when
+            // the source pane has none of its own.
+            let fallback_conn: Option<crate::Connection> = if matches!(kind, PaneKind::Terminal) {
+                let layout_fallback = state
+                    .workspaces
+                    .lock()
+                    .unwrap()
+                    .workspaces
+                    .iter()
+                    .find(|w| w.id == workspace_id)
+                    .and_then(|w| w.layout.as_ref().and_then(crate::first_terminal_connection_pub));
+                layout_fallback
+                    .or_else(|| crate::live_ssh_connection_for_workspace_pub(state, &workspace_id))
+            } else {
+                None
+            };
             {
                 let mut file = state.workspaces.lock().unwrap();
                 if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
                     if let Some(layout) = ws.layout.take() {
                         let (new_layout, _) =
-                            split_pane_in(layout, &pane_id, direction, kind, url);
+                            split_pane_in(layout, &pane_id, direction, kind, url, fallback_conn);
                         ws.layout = Some(new_layout);
                     }
                 }

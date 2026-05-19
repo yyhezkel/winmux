@@ -58,6 +58,15 @@ pub(crate) struct SshSession {
     // the shell in a tmux attach-or-create. Storing the name lets us send
     // `tmux kill-session -t NAME` via a separate exec channel on demand.
     pub(crate) tmux_session: Option<String>,
+    // Phase 23.C: connection metadata so we can rehydrate a `Connection`
+    // value from a live session — used by `live_ssh_connection_for_workspace`
+    // when the user adds a new terminal pane to an SSH workspace whose
+    // connection details no longer live in any pane (e.g. all terminals
+    // closed but a FileManager pane kept the SSH handle alive).
+    pub(crate) host: String,
+    pub(crate) user: String,
+    pub(crate) port: u16,
+    pub(crate) key_path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -790,6 +799,13 @@ pub(crate) fn split_pane_in(
     dir: SplitDirection,
     new_kind: PaneKind,
     new_browser_url: Option<String>,
+    // Phase 23.C: workspace-derived fallback when the source pane has
+    // no connection field (FileManager / Browser / ClaudeChat). The
+    // caller is responsible for pre-computing this via
+    // `first_terminal_connection` + `live_ssh_connection_for_workspace`.
+    // Only used when `new_kind == Terminal`. Pass None to keep the
+    // legacy Local-fallback behaviour.
+    workspace_terminal_fallback: Option<Connection>,
 ) -> (LayoutNode, bool) {
     match node {
         LayoutNode::Pane {
@@ -804,10 +820,15 @@ pub(crate) fn split_pane_in(
             if pane_id == target {
                 let (new_kind_resolved, new_conn, new_browser, new_chat) = match new_kind {
                     PaneKind::Terminal => {
-                        // For a terminal sibling, inherit this pane's connection if it has
-                        // one; otherwise (splitting off a browser pane) fall back to local.
+                        // Inherit chain: source pane's own connection →
+                        // workspace-level fallback (any terminal pane or
+                        // live SSH session) → Local. Splitting from a
+                        // FileManager/Browser pane in an SSH workspace
+                        // now correctly produces another SSH terminal,
+                        // not a stray local cmd.
                         let conn = connection
                             .clone()
+                            .or(workspace_terminal_fallback.clone())
                             .unwrap_or(Connection::Local { shell: None });
                         (PaneKind::Terminal, Some(conn), None, None)
                     }
@@ -900,6 +921,7 @@ pub(crate) fn split_pane_in(
                 dir.clone(),
                 new_kind,
                 new_browser_url.clone(),
+                workspace_terminal_fallback.clone(),
             );
             if found1 {
                 return (
@@ -914,7 +936,7 @@ pub(crate) fn split_pane_in(
                 );
             }
             let (new_second, found2) =
-                split_pane_in(*second, target, dir, new_kind, new_browser_url);
+                split_pane_in(*second, target, dir, new_kind, new_browser_url, workspace_terminal_fallback);
             (
                 LayoutNode::Split {
                     split_id,
@@ -2144,6 +2166,10 @@ async fn spawn_ssh(
             handle: handle_for_state,
             workspace_id: workspace_id_for_state.clone(),
             tmux_session: tmux_name.clone(),
+            host: host.clone(),
+            user: user.clone(),
+            port,
+            key_path: key_path.clone(),
         }),
     );
 
@@ -2690,6 +2716,42 @@ pub(crate) fn first_terminal_connection_pub(node: &LayoutNode) -> Option<Connect
     first_terminal_connection(node)
 }
 
+/// Phase 23.C: visible to other modules (rpc_server) for the same
+/// inheritance chain when splits come in via RPC.
+pub(crate) fn live_ssh_connection_for_workspace_pub(
+    state: &AppState,
+    workspace_id: &str,
+) -> Option<Connection> {
+    live_ssh_connection_for_workspace(state, workspace_id)
+}
+
+// Phase 23.C: extract a `Connection` from a live SSH session for this
+// workspace. Returns None if no SSH session is currently bound to the
+// workspace. Used as a second-tier fallback in `workspace_split` so
+// the user can re-add a terminal pane to an SSH workspace whose
+// connection details no longer live in any pane (e.g. after closing
+// the last terminal but the SSH handle is still alive because a
+// FileManager pane kept it pinned).
+fn live_ssh_connection_for_workspace(
+    state: &AppState,
+    workspace_id: &str,
+) -> Option<Connection> {
+    let sessions = state.sessions.lock().ok()?;
+    for sess in sessions.values() {
+        if let Session::Ssh(s) = sess {
+            if s.workspace_id == workspace_id {
+                return Some(Connection::Ssh {
+                    host: s.host.clone(),
+                    user: s.user.clone(),
+                    port: s.port,
+                    key_path: s.key_path.clone(),
+                });
+            }
+        }
+    }
+    None
+}
+
 fn first_terminal_connection(node: &LayoutNode) -> Option<Connection> {
     match node {
         LayoutNode::Pane {
@@ -2788,12 +2850,36 @@ fn workspace_split(
     browser_url: Option<String>,
 ) -> Result<WorkspacesFile, String> {
     let kind = pane_kind.unwrap_or(PaneKind::Terminal);
+    // Phase 23.C: when the new pane will be a Terminal, derive a
+    // fallback connection BEFORE we mutate the layout. Three-tier
+    // lookup:
+    //   1. The source pane's own connection (handled inside split_pane_in).
+    //   2. Any other terminal pane in this workspace.
+    //   3. A live SSH session bound to this workspace (FileManager /
+    //      Browser pane may be keeping it alive even when no terminal
+    //      pane remains).
+    // This fixes the bug where splitting from a FileManager/Browser
+    // pane fell back to Local cmd instead of the workspace's SSH
+    // connection.
+    let fallback_conn: Option<Connection> = if matches!(kind, PaneKind::Terminal) {
+        let layout_fallback = state
+            .workspaces
+            .lock()
+            .unwrap()
+            .workspaces
+            .iter()
+            .find(|w| w.id == workspace_id)
+            .and_then(|w| w.layout.as_ref().and_then(first_terminal_connection));
+        layout_fallback.or_else(|| live_ssh_connection_for_workspace(&state, &workspace_id))
+    } else {
+        None
+    };
     {
         let mut file = state.workspaces.lock().unwrap();
         if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
             if let Some(layout) = ws.layout.take() {
                 let (new_layout, _) =
-                    split_pane_in(layout, &pane_id, direction, kind, browser_url);
+                    split_pane_in(layout, &pane_id, direction, kind, browser_url, fallback_conn);
                 ws.layout = Some(new_layout);
             }
         }

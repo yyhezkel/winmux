@@ -350,5 +350,18 @@
   "hooks_update.btn.skip": "تخطّي هذا الإصدار",
   "hooks_update.toast_done": "تم تحديث Hooks إلى v{version}. أعد تشغيل العميل.",
   "settings.hooks_updates.title": "شعارات تحديث Hooks",
-  "settings.hooks_updates.show_banners": "إظهار شعار عندما تكون hooks العميل قديمة"
+  "settings.hooks_updates.show_banners": "إظهار شعار عندما تكون hooks العميل قديمة",
+
+  "tmux_picker.title": "الاتصال بجلسة tmux",
+  "tmux_picker.new_session": "جلسة جديدة",
+  "tmux_picker.new_session_hint": "أنشئ جلسة tmux جديدة باسم هذه اللوحة.",
+  "tmux_picker.loading": "جارٍ تحميل الجلسات…",
+  "tmux_picker.empty": "لا توجد جلسات حالية — اختر \"جلسة جديدة\" أعلاه.",
+  "tmux_picker.pane_id_target": "→ pane id",
+  "tmux_picker.attached": "⚠ متصلة",
+  "tmux_picker.window": "{n} نافذة",
+  "tmux_picker.windows": "{n} نوافذ",
+  "tmux_picker.rename": "إعادة تسمية",
+  "tmux_picker.rename_prompt": "اسم جديد لـ \"{name}\":",
+  "tmux_picker.invalid_name": "لا يمكن أن يحتوي الاسم على مسافات أو نقاط أو نقطتين رأسيتين."
 }

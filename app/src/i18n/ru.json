@@ -350,5 +350,18 @@
   "hooks_update.btn.skip": "Пропустить эту версию",
   "hooks_update.toast_done": "Hooks обновлены до v{version}. Перезапустите агент.",
   "settings.hooks_updates.title": "Баннеры обновлений hooks",
-  "settings.hooks_updates.show_banners": "Показывать баннер, когда hooks агента устарели"
+  "settings.hooks_updates.show_banners": "Показывать баннер, когда hooks агента устарели",
+
+  "tmux_picker.title": "Подключиться к сессии tmux",
+  "tmux_picker.new_session": "Новая сессия",
+  "tmux_picker.new_session_hint": "Создать новую сессию tmux с именем этой панели.",
+  "tmux_picker.loading": "Загрузка сессий…",
+  "tmux_picker.empty": "Нет существующих сессий — выберите «Новая сессия» выше.",
+  "tmux_picker.pane_id_target": "→ pane id",
+  "tmux_picker.attached": "⚠ занята",
+  "tmux_picker.window": "{n} окно",
+  "tmux_picker.windows": "{n} окон",
+  "tmux_picker.rename": "Переименовать",
+  "tmux_picker.rename_prompt": "Новое имя для «{name}»:",
+  "tmux_picker.invalid_name": "Имя не может содержать пробелы, точки или двоеточия."
 }

@@ -685,6 +685,34 @@ body {
   background: transparent !important;
 }
 
+/* Phase 23.G: pin terminal containers to LTR so xterm.js's
+   mouse coords don't get mirrored by the surrounding RTL UI.
+   The terminal content itself stays bidi-correct via xterm.js's
+   own renderer; this only affects the container's coord system. */
+.terminal-container,
+.terminal-container .xterm,
+.terminal-container .xterm-screen,
+.terminal-container .xterm-rows {
+  direction: ltr !important;
+}
+
+/* Phase 23.G: per-row Rename button inside the tmux session picker. */
+.tmux-rename-btn {
+  background: transparent;
+  border: 1px solid var(--w-border);
+  color: var(--w-text-dim);
+  margin-inline-start: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--w-fs-sm);
+}
+.tmux-rename-btn:hover {
+  background: var(--w-surface-hi);
+  color: var(--w-accent);
+  border-color: var(--w-border-hi);
+}
+
 /* ─── Connect / status ─── */
 
 .pw-row {

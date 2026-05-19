@@ -3681,6 +3681,75 @@ async fn pane_list_tmux_sessions(
     Ok(out)
 }
 
+/// Phase 23.G: rename a tmux session over the workspace's SSH
+/// handle. Used by the Connect (tmux) picker's per-row Rename
+/// button. tmux's own rules (no spaces/dots/colons) are enforced
+/// frontend-side; we re-validate here as a defense-in-depth check
+/// so a bogus name can never reach `tmux rename-session`.
+#[tauri::command]
+async fn tmux_rename_session(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    if new_name.is_empty() || old_name.is_empty() {
+        return Err("name cannot be empty".into());
+    }
+    if new_name.chars().any(|c| c == ' ' || c == '.' || c == ':') {
+        return Err("name cannot contain spaces, dots, or colons".into());
+    }
+    let handle = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions
+            .iter()
+            .find_map(|(_sid, sess)| match sess {
+                Session::Ssh(s) if s.workspace_id == workspace_id => Some(s.handle.clone()),
+                _ => None,
+            })
+    }
+    .ok_or_else(|| "no active SSH session for this workspace".to_string())?;
+    // tmux session names must already be safe (validated above), so
+    // single-quote escaping is sufficient.
+    let cmd = format!(
+        "tmux rename-session -t '{}' '{}' 2>&1",
+        old_name.replace('\'', "'\\''"),
+        new_name.replace('\'', "'\\''"),
+    );
+    use russh::ChannelMsg;
+    let mut ch = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("channel_open: {e}"))?;
+    ch.exec(true, cmd.as_bytes())
+        .await
+        .map_err(|e| format!("exec: {e}"))?;
+    let mut stdout = Vec::new();
+    let mut exit_code: Option<u32> = None;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                ChannelMsg::Data { ref data } => stdout.extend_from_slice(data),
+                ChannelMsg::ExitStatus { exit_status } => exit_code = Some(exit_status),
+                ChannelMsg::Eof | ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+    })
+    .await;
+    let _ = ch.close().await;
+    let stderr_text = String::from_utf8_lossy(&stdout).trim().to_string();
+    match exit_code {
+        Some(0) => Ok(()),
+        Some(code) => Err(if stderr_text.is_empty() {
+            format!("tmux exit {code}")
+        } else {
+            stderr_text
+        }),
+        None => Err("tmux rename-session did not return an exit status".into()),
+    }
+}
+
 /// Phase 12.B: Claude Code session metadata returned by
 /// pane_list_claude_sessions for the session-picker modal.
 #[derive(Clone, Serialize)]
@@ -4307,6 +4376,7 @@ pub fn run() {
             pane_persistence_list,
             pane_list_claude_sessions,
             pane_list_tmux_sessions,
+            tmux_rename_session,
             pane_set_title,
             pane_set_annotation,
             pane_browser_navigate,

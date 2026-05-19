@@ -332,5 +332,18 @@
   "editor.find.hide_replace": "Hide replace",
   "editor.replace.placeholder": "Replace with…",
   "editor.replace.one": "Replace",
-  "editor.replace.all": "Replace all"
+  "editor.replace.all": "Replace all",
+
+  "tmux_picker.title": "Attach to tmux session",
+  "tmux_picker.new_session": "New session",
+  "tmux_picker.new_session_hint": "Create a fresh tmux session named after this pane.",
+  "tmux_picker.loading": "Loading sessions…",
+  "tmux_picker.empty": "No existing sessions — pick \"New session\" above.",
+  "tmux_picker.pane_id_target": "→ pane id",
+  "tmux_picker.attached": "⚠ attached",
+  "tmux_picker.window": "{n} window",
+  "tmux_picker.windows": "{n} windows",
+  "tmux_picker.rename": "Rename",
+  "tmux_picker.rename_prompt": "New name for \"{name}\":",
+  "tmux_picker.invalid_name": "Name can't contain spaces, dots, or colons."
 }

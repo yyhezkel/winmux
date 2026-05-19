@@ -188,6 +188,36 @@ export function PaneView(p: Props) {
   const closeTmuxPicker = () => {
     setTmuxSessions(null);
     setTmuxPickerErr(null);
+    setRenameErrors({});
+  };
+  // Phase 23.G: per-row rename error map (session_name → message).
+  // Cleared on each successful rename / picker close.
+  const [renameErrors, setRenameErrors] = createSignal<Record<string, string>>({});
+  const renameTmuxSession = async (oldName: string) => {
+    const next = window.prompt(
+      t("tmux_picker.rename_prompt", { name: oldName }),
+      oldName,
+    );
+    if (!next || next === oldName) return;
+    if (/[\s.:]/.test(next)) {
+      setRenameErrors((prev) => ({ ...prev, [oldName]: t("tmux_picker.invalid_name") }));
+      return;
+    }
+    try {
+      await invoke("tmux_rename_session", {
+        workspaceId: p.workspaceId,
+        oldName,
+        newName: next,
+      });
+      setRenameErrors((prev) => {
+        const { [oldName]: _drop, ...rest } = prev;
+        return rest;
+      });
+      // Re-fetch so the row reflects the new name.
+      await openTmuxPicker();
+    } catch (err) {
+      setRenameErrors((prev) => ({ ...prev, [oldName]: String(err) }));
+    }
   };
   const closeConnectMenu = () => setShowConnectMenu(false);
   const submitSmartModal = () => {
@@ -616,12 +646,12 @@ export function PaneView(p: Props) {
         <div class="modal-backdrop" onClick={closeTmuxPicker}>
           <div class="modal claude-picker" onClick={(e) => e.stopPropagation()}>
             <div class="settings-head">
-              <h3>Attach to tmux session</h3>
+              <h3>{t("tmux_picker.title")}</h3>
               <button class="feed-x" title={t("common.close")} onClick={closeTmuxPicker}>×</button>
             </div>
             <div class="claude-picker-body">
               <Show when={tmuxPickerLoading()}>
-                <p class="status-line">Loading sessions…</p>
+                <p class="status-line">{t("tmux_picker.loading")}</p>
               </Show>
               <Show when={tmuxPickerErr()}>
                 <p class="status-line err">⚠ {tmuxPickerErr()}</p>
@@ -636,10 +666,10 @@ export function PaneView(p: Props) {
                 >
                   <div class="claude-row-head">
                     <code class="claude-id">🆕</code>
-                    <span class="claude-proj"><b>New session</b></span>
-                    <span class="claude-age">→ pane id</span>
+                    <span class="claude-proj"><b>{t("tmux_picker.new_session")}</b></span>
+                    <span class="claude-age">{t("tmux_picker.pane_id_target")}</span>
                   </div>
-                  <div class="claude-prev">Create a fresh tmux session named after this pane.</div>
+                  <div class="claude-prev">{t("tmux_picker.new_session_hint")}</div>
                 </li>
                 {(tmuxSessions() ?? []).map((s) => {
                   const ageOf = (epoch: number) => {
@@ -650,6 +680,9 @@ export function PaneView(p: Props) {
                     if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
                     return `${Math.floor(sec / 86400)}d`;
                   };
+                  const winLabel = s.windows === 1
+                    ? t("tmux_picker.window", { n: String(s.windows) })
+                    : t("tmux_picker.windows", { n: String(s.windows) });
                   return (
                     <li
                       class="claude-row"
@@ -665,17 +698,32 @@ export function PaneView(p: Props) {
                       <div class="claude-row-head">
                         <code class="claude-id">{s.name.slice(0, 14)}</code>
                         <span class="claude-proj">
-                          {s.windows} window{s.windows === 1 ? "" : "s"}
-                          {s.attached ? " · ⚠ attached" : ""}
+                          {winLabel}
+                          {s.attached ? ` · ${t("tmux_picker.attached")}` : ""}
                         </span>
                         <span class="claude-age">{ageOf(s.last_attached || s.created)}</span>
+                        {/* Phase 23.G: per-row rename. Stop propagation
+                            so clicking the pencil doesn't also attach. */}
+                        <button
+                          class="tmux-rename-btn"
+                          title={t("tmux_picker.rename")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void renameTmuxSession(s.name);
+                          }}
+                        >
+                          ✎
+                        </button>
                       </div>
+                      <Show when={renameErrors()[s.name]}>
+                        <div class="status-line err">⚠ {renameErrors()[s.name]}</div>
+                      </Show>
                     </li>
                   );
                 })}
               </ul>
               <Show when={!tmuxPickerLoading() && (tmuxSessions()?.length ?? 0) === 0 && !tmuxPickerErr()}>
-                <p class="status-line">No existing sessions — pick "New session" above.</p>
+                <p class="status-line">{t("tmux_picker.empty")}</p>
               </Show>
             </div>
           </div>

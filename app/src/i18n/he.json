@@ -350,5 +350,18 @@
   "hooks_update.btn.skip": "דלג על גרסה זו",
   "hooks_update.toast_done": "ה-hooks עודכנו ל-v{version}. הפעל מחדש את הסוכן.",
   "settings.hooks_updates.title": "באנרים של עדכוני hooks",
-  "settings.hooks_updates.show_banners": "הצג באנר כש-hook spec של סוכן מיושן"
+  "settings.hooks_updates.show_banners": "הצג באנר כש-hook spec של סוכן מיושן",
+
+  "tmux_picker.title": "התחבר ל-tmux session",
+  "tmux_picker.new_session": "סשן חדש",
+  "tmux_picker.new_session_hint": "צור סשן tmux חדש על שם ה-pane.",
+  "tmux_picker.loading": "טוען סשנים…",
+  "tmux_picker.empty": "אין סשנים קיימים — בחר \"סשן חדש\" למעלה.",
+  "tmux_picker.pane_id_target": "→ pane id",
+  "tmux_picker.attached": "⚠ מחובר",
+  "tmux_picker.window": "{n} window",
+  "tmux_picker.windows": "{n} חלונות",
+  "tmux_picker.rename": "שנה שם",
+  "tmux_picker.rename_prompt": "שם חדש ל-\"{name}\":",
+  "tmux_picker.invalid_name": "השם לא יכול להכיל רווחים, נקודות או נקודתיים."
 }

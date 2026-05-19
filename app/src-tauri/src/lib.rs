@@ -3446,66 +3446,35 @@ fn pane_set_title(
     }
     persist(&state)?;
 
-    // Phase 23.I: if this pane has a live tmux session, rename it to
-    // match the new title. Pane title IS the tmux session name — that's
-    // the cleaner mental model than the in-picker Rename button (23.G).
+    // Phase 23.J: TEMPORARILY DISABLED the spawned tmux-rename
+    // side-effect. The original Phase 23.I block kicked off a
+    // tokio::spawn that called tmux_rename_session_via_handle over
+    // the existing SSH handle. When Yossi renamed a title to Hebrew,
+    // app.exe died with STATUS_STACK_BUFFER_OVERRUN exactly 5s after
+    // persist — matching the 5s timeout in the spawned task. Suspect
+    // a panic crossing the russh future-poll FFI boundary (which
+    // triggers __fastfail(7) on Windows even with the default
+    // panic=unwind strategy). The panic hook installed in run()
+    // will capture the exact culprit on the next reproduction.
     //
-    // Best-effort: a failure here doesn't fail pane_set_title (the
-    // user's title change is the primary action; tmux rename is the
-    // side-effect). We log via dlog so debugging is trivial.
-    let tmux_target = match (&normalized, lookup_tmux_for_pane(&state, &pane_id)) {
-        (Some(new_title), Some((ssh_session_id, handle, old_tmux_name))) => {
-            sanitize_tmux_session_name_for_title(new_title).map(|sanitized| {
-                (ssh_session_id, handle, old_tmux_name, sanitized)
-            })
-        }
-        _ => None,
-    };
-    if let Some((ssh_session_id, handle, old_name, new_name)) = tmux_target {
-        if new_name != old_name {
-            let state_clone = AppState {
-                sessions: state.sessions.clone(),
-                pane_sessions: state.pane_sessions.clone(),
-                workspaces: state.workspaces.clone(),
-                load_state: state.load_state.clone(),
-                notifications: state.notifications.clone(),
-                pane_status: state.pane_status.clone(),
-                feed: state.feed.clone(),
-                notes: state.notes.clone(),
-                settings: state.settings.clone(),
-                recent_paths: state.recent_paths.clone(),
-                forwards: state.forwards.clone(),
-                browser_pending: state.browser_pending.clone(),
-                browser_load_waiters: state.browser_load_waiters.clone(),
-                console_buffer: state.console_buffer.clone(),
-                iframe_pending: state.iframe_pending.clone(),
-                claude_paths: state.claude_paths.clone(),
-            };
-            let pane_id_log = pane_id.clone();
-            tokio::spawn(async move {
-                match tmux_rename_session_via_handle(&handle, &old_name, &new_name).await {
-                    Ok(()) => {
-                        // Update in-memory session record so subsequent
-                        // operations (kill_session, etc.) use the new name.
-                        if let Ok(mut sessions) = state_clone.sessions.lock() {
-                            if let Some(Session::Ssh(s)) = sessions.get_mut(&ssh_session_id) {
-                                s.tmux_session = Some(new_name.clone());
-                            }
-                        }
-                        dlog(&format!(
-                            "pane_set_title: tmux rename ok pane={pane_id_log} {old_name} -> {new_name}"
-                        ));
-                    }
-                    Err(e) => {
-                        dlog(&format!(
-                            "pane_set_title: tmux rename FAILED pane={pane_id_log} \
-                             {old_name} -> {new_name}: {e}"
-                        ));
-                    }
-                }
-            });
-        }
-    }
+    // What still works:
+    //  - pane.title editing (this command)
+    //  - Title shown in pane header
+    //  - pane_connect deriving the tmux session name from pane.title
+    //    at *initial* connect time (no spawned task, different path)
+    //
+    // What's lost until we re-enable:
+    //  - Auto-sync of tmux session name when the title changes
+    //    AFTER the tmux session was already created. The session
+    //    keeps whatever name it was created with; re-attaching with
+    //    a new title only takes effect on the next FRESH tmux
+    //    session.
+    //
+    // TODO(Phase 23.K+): re-enable once the panic hook reveals the
+    // root cause. Likely fix is wrapping the spawned task body in
+    // std::panic::catch_unwind or moving the work out of the spawned
+    // task entirely (e.g. into a foreground async tauri command the
+    // FE invokes explicitly after pane_set_title).
 
     let _ = app.emit("workspaces:changed", ());
     Ok(state.workspaces.lock().unwrap().clone())
@@ -3515,6 +3484,11 @@ fn pane_set_title(
 /// return (session_id, ssh handle clone, current tmux session name).
 /// Returns None if the pane has no session, the session is not SSH,
 /// or it has no tmux wrapper.
+/// Phase 23.J: orphaned for now — the only caller (the spawned
+/// rename task in pane_set_title) was disabled pending root-cause
+/// of the Hebrew-title crash. Kept in place so Phase 23.K can
+/// re-enable without re-writing it.
+#[allow(dead_code)]
 fn lookup_tmux_for_pane(
     state: &AppState,
     pane_id: &str,
@@ -4448,6 +4422,44 @@ pub fn run() {
         .with_max_level(tracing::Level::INFO)
         .try_init()
         .ok();
+
+    // Phase 23.J: capture every panic to debug.log so the next
+    // reproduction tells us EXACTLY what panicked, instead of dying
+    // silently to WinDbg with no info. The Phase 23.I Hebrew-title
+    // crash was a STATUS_STACK_BUFFER_OVERRUN (__fastfail(7)) with
+    // no Rust panic trace anywhere — we had to reverse-engineer the
+    // cause from WER event metadata and 5-second timing. This hook
+    // eliminates that guesswork for next time.
+    //
+    // RUST_BACKTRACE=1 is set unconditionally before the hook so
+    // `Backtrace::capture()` always returns frames (otherwise the
+    // env var defaults to off and capture() returns "disabled").
+    // Safe to set in dev builds; revisit for release.
+    std::env::set_var("RUST_BACKTRACE", "1");
+    std::panic::set_hook(Box::new(|info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown location>".to_string());
+        let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "<non-string panic payload>".to_string()
+        };
+        let bt = std::backtrace::Backtrace::capture();
+        let thread_name = std::thread::current()
+            .name()
+            .unwrap_or("<unnamed>")
+            .to_string();
+        dlog(&format!(
+            "PANIC at {location}: {msg}\n  thread: {thread_name}\n  backtrace:\n{bt}"
+        ));
+        // Re-emit to stderr so any wrapping process (cargo run, tauri
+        // dev server, etc.) can also surface it inline.
+        eprintln!("PANIC at {location}: {msg}");
+    }));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

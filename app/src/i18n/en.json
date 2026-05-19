@@ -314,6 +314,7 @@
   "settings.hooks_updates.show_banners": "Show a banner when an agent's hook spec is outdated",
   "fm.action.create_file_prompt": "New file name (will be created empty):",
   "fm.btn.new_file": "New file",
+  "fm.btn.add_menu": "Add… (new folder / new file / upload from disk)",
   "fm.btn.upload_from_disk_remote": "Upload file from disk → remote",
   "fm.btn.upload_from_disk_local": "Add file from disk → local folder",
   "fm.btn.copy_path_current": "Copy current path",

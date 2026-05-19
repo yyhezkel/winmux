@@ -2532,6 +2532,23 @@ fn collect_pane_connection_kinds(node: &LayoutNode, is_ssh: &mut bool) {
     }
 }
 
+// Phase 23.B: does the layout contain a non-terminal pane that depends on
+// a live workspace-level SSH handle? FileManager and Browser panes pull
+// the SSH handle out of `state.sessions` at runtime via
+// `pick_ssh_handle_for_workspace`; if we tear down the last terminal pane's
+// SSH session, those panes go dark with no in-UI way to reconnect.
+// ClaudeChat is local, doesn't count.
+fn layout_has_ssh_consumer_pane(node: &LayoutNode) -> bool {
+    match node {
+        LayoutNode::Pane { pane_kind, .. } => {
+            matches!(pane_kind, PaneKind::FileManager | PaneKind::Browser)
+        }
+        LayoutNode::Split { first, second, .. } => {
+            layout_has_ssh_consumer_pane(first) || layout_has_ssh_consumer_pane(second)
+        }
+    }
+}
+
 // ─── Workspace mutation commands ─────────────────────────────────────────────
 
 #[tauri::command]
@@ -3127,6 +3144,14 @@ fn workspace_close_pane(
     pane_id: String,
 ) -> Result<WorkspacesFile, String> {
     let removed_pane: Option<String>;
+    // Phase 23.B: capture whether the workspace still has any
+    // SSH-consuming non-terminal panes AFTER the close. If yes, we
+    // must keep the SSH handle alive even though the terminal pane
+    // is gone — the file-manager / browser uses
+    // `pick_ssh_handle_for_workspace` which scans the live sessions
+    // for one matching the workspace_id. Killing the SSH session
+    // here would leave those panes dead with no UI to reconnect.
+    let keep_ssh_alive: bool;
     {
         let mut file = state.workspaces.lock().unwrap();
         let ws = file
@@ -3139,12 +3164,36 @@ fn workspace_close_pane(
             .take()
             .ok_or_else(|| "no layout".to_string())?;
         let (new_root, removed) = close_pane_in(layout, &pane_id);
+        keep_ssh_alive = new_root
+            .as_ref()
+            .map(layout_has_ssh_consumer_pane)
+            .unwrap_or(false);
         ws.layout = new_root;
         removed_pane = removed;
     }
     if let Some(pid) = removed_pane {
-        if let Some(sid) = state.pane_sessions.lock().unwrap().remove(&pid) {
-            if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+        // Always unbind the pane from its session — the pane is gone.
+        let sid_opt = state.pane_sessions.lock().unwrap().remove(&pid);
+        if let Some(sid) = sid_opt {
+            // Decide whether to actually drop the session. If the
+            // session is SSH AND the workspace still has a consumer
+            // (file-manager / browser pane), keep it alive so those
+            // panes stay functional. Otherwise drop and clean up.
+            let is_ssh_for_workspace = {
+                let sessions = state.sessions.lock().unwrap();
+                matches!(
+                    sessions.get(&sid),
+                    Some(Session::Ssh(ssh)) if ssh.workspace_id == workspace_id
+                )
+            };
+            if is_ssh_for_workspace && keep_ssh_alive {
+                tracing::info!(
+                    "workspace_close_pane: keeping SSH session {sid} alive — workspace {workspace_id} still has FileManager/Browser pane(s)"
+                );
+                // Leave the session in state.sessions; it has no pane
+                // binding now but `pick_ssh_handle_for_workspace`
+                // will still find it via its workspace_id.
+            } else if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
                 kill_session_inner(&mut s);
             }
         }

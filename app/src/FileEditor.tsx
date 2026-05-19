@@ -49,11 +49,15 @@ export function FileEditor(p: Props) {
   const [err, setErr] = createSignal<string | null>(null);
   const [largeWarn, setLargeWarn] = createSignal(false);
 
-  // Phase 23: text direction. "auto" lets the browser pick base
-  // direction from the first strong character in the value, which is
-  // what programmer code (English-keyword-leading) and Hebrew docs
-  // both want. User can still pin to LTR / RTL manually.
-  const [editorDir, setEditorDir] = createSignal<EditorDir>("auto");
+  // Phase 23: text direction. Default mirrors the UI direction —
+  // Hebrew/Arabic UI users get RTL out of the box (matching pre-Phase 23
+  // behaviour), LTR users get LTR. Switching to "auto" makes the
+  // browser pick base direction from the first strong character in the
+  // value (per-paragraph thanks to `unicode-bidi: plaintext` on the
+  // textarea); "ltr"/"rtl" pin the direction regardless of content.
+  const initialDir: EditorDir =
+    (document?.documentElement?.dir as EditorDir) === "rtl" ? "rtl" : "ltr";
+  const [editorDir, setEditorDir] = createSignal<EditorDir>(initialDir);
 
   // Phase 23: find & replace state. The bar is hidden by default and
   // pops in on Ctrl+F (find) or Ctrl+H (find + replace).

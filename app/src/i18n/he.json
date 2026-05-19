@@ -211,6 +211,7 @@
   "fm.action.mkdir_prompt": "שם התיקייה החדשה:",
   "fm.action.create_file_prompt": "שם הקובץ החדש (ייווצר ריק):",
   "fm.btn.new_file": "קובץ חדש",
+  "fm.btn.add_menu": "הוספה… (תיקייה / קובץ / העלאה מהדיסק)",
   "fm.btn.upload_from_disk_remote": "העלאת קובץ מהדיסק → שרת",
   "fm.btn.upload_from_disk_local": "הוספת קובץ מהדיסק → תיקייה מקומית",
   "fm.btn.copy_path_current": "העתק נתיב נוכחי",

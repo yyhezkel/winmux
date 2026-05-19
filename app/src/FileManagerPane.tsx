@@ -248,14 +248,20 @@ export function FileManagerPane(p: Props) {
     // scroll / Escape. Capture phase so we beat the row's click
     // handler when the user clicks elsewhere.
     const onDocClick = (e: MouseEvent) => {
-      // If they clicked inside the menu itself, the item handler
-      // closes the menu anyway after firing the action; otherwise
-      // close immediately.
+      // If they clicked inside one of our menus, that menu's item
+      // handler closes it after firing the action; otherwise close
+      // immediately. We check all three popup classes in one pass.
       const target = e.target as HTMLElement;
       if (!target?.closest?.(".fm-ctx-menu")) closeCtxMenu();
+      if (!target?.closest?.(".fm-bg-menu")) closeBgCtxMenu();
+      if (!target?.closest?.(".fm-add-menu") && !target?.closest?.(".fm-add-btn")) closeAddMenu();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeCtxMenu();
+      if (e.key === "Escape") {
+        closeCtxMenu();
+        closeBgCtxMenu();
+        closeAddMenu();
+      }
     };
     document.addEventListener("mousedown", onDocClick, true);
     document.addEventListener("keydown", onKey);
@@ -627,52 +633,63 @@ export function FileManagerPane(p: Props) {
   };
   const closeCtxMenu = () => setCtxMenu(null);
 
-  const ColumnHeader = (props: { side: Side; path: () => string; setPath: (v: string) => void; refresh: () => void }) => (
-    <div class="fm-col-head">
-      <button class="fm-up" title={t("fm.btn.up")} onClick={() => goUp(props.side)}>↑</button>
-      <input
-        class="fm-path"
-        value={props.path()}
-        onChange={(e) => {
-          props.setPath(e.currentTarget.value);
-          props.refresh();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            props.setPath((e.target as HTMLInputElement).value);
+  // Phase 23.B: "Add" dropdown next to the path bar — single ＋ button
+  // that opens a small popup with New folder / New file / Upload from
+  // disk. Replaces the prior three separate buttons in the column
+  // header for a less crowded toolbar.
+  const [addMenu, setAddMenu] = createSignal<{ side: Side; x: number; y: number } | null>(null);
+  const closeAddMenu = () => setAddMenu(null);
+  // Phase 23.B: background context menu for clicks on the empty area
+  // of a list (between or below rows). Different from the per-row
+  // context menu — offers create / upload actions for the directory
+  // as a whole.
+  const [bgCtxMenu, setBgCtxMenu] = createSignal<{ side: Side; x: number; y: number } | null>(null);
+  const openBgCtxMenu = (side: Side, ev: MouseEvent) => {
+    // Only fire when the click is on the list itself, not a row.
+    const t = ev.target as HTMLElement;
+    if (t?.closest?.(".fm-row")) return;
+    ev.preventDefault();
+    setBgCtxMenu({ side, x: ev.clientX, y: ev.clientY });
+    setFocusedSide(side);
+  };
+  const closeBgCtxMenu = () => setBgCtxMenu(null);
+
+  const ColumnHeader = (props: { side: Side; path: () => string; setPath: (v: string) => void; refresh: () => void }) => {
+    // Anchor the dropdown at the bottom-left of the + button so it
+    // doesn't drift if the path input width changes between renders.
+    const openAdd = (ev: MouseEvent) => {
+      const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+      setAddMenu({ side: props.side, x: r.left, y: r.bottom + 4 });
+    };
+    return (
+      <div class="fm-col-head">
+        <button class="fm-up" title={t("fm.btn.up")} onClick={() => goUp(props.side)}>↑</button>
+        <input
+          class="fm-path"
+          value={props.path()}
+          onChange={(e) => {
+            props.setPath(e.currentTarget.value);
             props.refresh();
-          }
-        }}
-        spellcheck={false}
-      />
-      <button class="fm-tool" title={t("fm.btn.refresh")} onClick={props.refresh}>⟳</button>
-      <button class="fm-tool" title={t("fm.btn.new_folder")} onClick={() => mkdirIn(props.side)}>📁＋</button>
-      <button class="fm-tool" title={t("fm.btn.new_file")} onClick={() => createFileIn(props.side)}>📄＋</button>
-      {/* Phase 23: "Upload from disk" — opens the OS file picker.
-           Always shown so users can also pick into the local column
-           (i.e. copy a file from anywhere on disk into the displayed
-           local folder). For local side this acts as a save-as-here. */}
-      <button
-        class="fm-tool"
-        title={
-          props.side === "remote"
-            ? t("fm.btn.upload_from_disk_remote")
-            : t("fm.btn.upload_from_disk_local")
-        }
-        onClick={() => pickAndUpload(props.side)}
-        disabled={props.side === "remote" && !p.hasSsh}
-      >
-        ↥
-      </button>
-      <button
-        class="fm-tool"
-        title={t("fm.btn.copy_path_current")}
-        onClick={() => void copyPathOf(props.side, "")}
-      >
-        ⧉
-      </button>
-    </div>
-  );
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              props.setPath((e.target as HTMLInputElement).value);
+              props.refresh();
+            }
+          }}
+          spellcheck={false}
+        />
+        <button class="fm-tool" title={t("fm.btn.refresh")} onClick={props.refresh}>⟳</button>
+        <button
+          class="fm-tool fm-add-btn"
+          title={t("fm.btn.add_menu")}
+          onClick={openAdd}
+        >
+          ＋
+        </button>
+      </div>
+    );
+  };
 
   const transferDir = createMemo(() => (p.hasSsh ? "Upload ↦ / Download ↤" : ""));
   void transferDir; // currently rendered inline in toolbar
@@ -786,7 +803,10 @@ export function FileManagerPane(p: Props) {
             ref={(el) => (localColRef = el)}
           >
             <ColumnHeader side="local" path={localPath} setPath={setLocalPath} refresh={refreshLocal} />
-            <div class="fm-list">
+            <div
+              class="fm-list"
+              onContextMenu={(ev) => openBgCtxMenu("local", ev)}
+            >
               <For each={localEntries()}>
                 {(e) => (
                   <div
@@ -815,7 +835,10 @@ export function FileManagerPane(p: Props) {
             ref={(el) => (remoteColRef = el)}
           >
             <ColumnHeader side="remote" path={remotePath} setPath={setRemotePath} refresh={refreshRemote} />
-            <div class="fm-list">
+            <div
+              class="fm-list"
+              onContextMenu={(ev) => openBgCtxMenu("remote", ev)}
+            >
               <Show
                 when={remoteEntries().length > 0}
                 fallback={
@@ -919,6 +942,94 @@ export function FileManagerPane(p: Props) {
               <div class="fm-ctx-sep" />
               <button class="fm-ctx-item fm-ctx-danger" onClick={fire(() => void deleteSel(side))}>
                 {t("common.delete")}
+              </button>
+            </div>
+          );
+        })()}
+      </Show>
+
+      {/* Phase 23.B: "+" dropdown next to the path bar.
+           Shows New folder / New file / Upload from disk. */}
+      <Show when={addMenu()}>
+        {(() => {
+          const m = addMenu()!;
+          const maxX = window.innerWidth - 200;
+          const maxY = window.innerHeight - 180;
+          const x = Math.min(m.x, maxX);
+          const y = Math.min(m.y, maxY);
+          const side = m.side;
+          const fire = (fn: () => void) => () => {
+            fn();
+            closeAddMenu();
+          };
+          return (
+            <div
+              class="fm-ctx-menu fm-add-menu"
+              style={{ left: `${x}px`, top: `${y}px` }}
+              onClick={(ev) => ev.stopPropagation()}
+            >
+              <button class="fm-ctx-item" onClick={fire(() => void mkdirIn(side))}>
+                📁  {t("fm.btn.new_folder")}
+              </button>
+              <button class="fm-ctx-item" onClick={fire(() => void createFileIn(side))}>
+                📄  {t("fm.btn.new_file")}
+              </button>
+              <button
+                class="fm-ctx-item"
+                disabled={side === "remote" && !p.hasSsh}
+                onClick={fire(() => pickAndUpload(side))}
+              >
+                ↥  {side === "remote"
+                  ? t("fm.btn.upload_from_disk_remote")
+                  : t("fm.btn.upload_from_disk_local")}
+              </button>
+            </div>
+          );
+        })()}
+      </Show>
+
+      {/* Phase 23.B: background context menu — right-click on the empty
+           area of a list (not a row) opens this with directory-level
+           create/upload actions. */}
+      <Show when={bgCtxMenu()}>
+        {(() => {
+          const m = bgCtxMenu()!;
+          const maxX = window.innerWidth - 200;
+          const maxY = window.innerHeight - 200;
+          const x = Math.min(m.x, maxX);
+          const y = Math.min(m.y, maxY);
+          const side = m.side;
+          const fire = (fn: () => void) => () => {
+            fn();
+            closeBgCtxMenu();
+          };
+          return (
+            <div
+              class="fm-ctx-menu fm-bg-menu"
+              style={{ left: `${x}px`, top: `${y}px` }}
+              onClick={(ev) => ev.stopPropagation()}
+            >
+              <button class="fm-ctx-item" onClick={fire(() => void mkdirIn(side))}>
+                📁  {t("fm.btn.new_folder")}
+              </button>
+              <button class="fm-ctx-item" onClick={fire(() => void createFileIn(side))}>
+                📄  {t("fm.btn.new_file")}
+              </button>
+              <button
+                class="fm-ctx-item"
+                disabled={side === "remote" && !p.hasSsh}
+                onClick={fire(() => pickAndUpload(side))}
+              >
+                ↥  {side === "remote"
+                  ? t("fm.btn.upload_from_disk_remote")
+                  : t("fm.btn.upload_from_disk_local")}
+              </button>
+              <div class="fm-ctx-sep" />
+              <button class="fm-ctx-item" onClick={fire(() => void copyPathOf(side, ""))}>
+                {t("fm.btn.copy_path_current")}
+              </button>
+              <button class="fm-ctx-item" onClick={fire(() => (side === "local" ? refreshLocal() : refreshRemote()))}>
+                {t("fm.btn.refresh")}
               </button>
             </div>
           );

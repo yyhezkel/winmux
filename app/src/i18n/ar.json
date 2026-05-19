@@ -211,6 +211,7 @@
   "fm.action.mkdir_prompt": "اسم المجلد الجديد:",
   "fm.action.create_file_prompt": "اسم الملف الجديد (سيتم إنشاؤه فارغًا):",
   "fm.btn.new_file": "ملف جديد",
+  "fm.btn.add_menu": "إضافة… (مجلد / ملف / رفع من القرص)",
   "fm.btn.upload_from_disk_remote": "رفع ملف من القرص → البعيد",
   "fm.btn.upload_from_disk_local": "إضافة ملف من القرص → المجلد المحلي",
   "fm.btn.copy_path_current": "نسخ المسار الحالي",

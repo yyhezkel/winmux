@@ -693,6 +693,19 @@ pub(crate) fn find_pane_connection(node: &LayoutNode, target: &str) -> Option<Co
     }
 }
 
+/// Phase 23.I: look up a pane's user-set title in a layout tree.
+/// Used by `pane_connect` to derive a tmux session name from the
+/// title (pane title IS the tmux session name).
+pub(crate) fn find_pane_title(node: &LayoutNode, target: &str) -> Option<String> {
+    match node {
+        LayoutNode::Pane { pane_id, title, .. } if pane_id == target => title.clone(),
+        LayoutNode::Pane { .. } => None,
+        LayoutNode::Split { first, second, .. } => {
+            find_pane_title(first, target).or_else(|| find_pane_title(second, target))
+        }
+    }
+}
+
 // Phase 8.A: existence check independent of pane kind. find_pane_connection returns
 // None for browser panes (no connection), so callers that only need "does this pane
 // exist somewhere in this layout" must use this instead.
@@ -1237,6 +1250,52 @@ pub(crate) fn sanitize_tmux_session_name(pane_id: &str) -> String {
         .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
         .collect();
     format!("winmux-{}", cleaned)
+}
+
+/// Phase 23.I: derive a tmux session name from a user-supplied pane
+/// title. Keeps Unicode (Hebrew, Arabic, CJK, etc.) so a title like
+/// "מחקר X" becomes a session literally named "מחקר_X". The only
+/// substitutions are tmux's hard-blockers — `.` and `:` — plus
+/// whitespace collapsing. Returns None when the title is empty or
+/// becomes empty after sanitization; the caller falls back to the
+/// pane-id-derived name in that case.
+pub(crate) fn sanitize_tmux_session_name_for_title(title: &str) -> Option<String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(trimmed.len());
+    let mut prev_was_underscore = false;
+    for c in trimmed.chars() {
+        let replaced = if c == '.' || c == ':' || c.is_whitespace() {
+            '_'
+        } else {
+            c
+        };
+        if replaced == '_' {
+            // Collapse runs of underscores (from whitespace runs) to one.
+            if prev_was_underscore {
+                continue;
+            }
+            prev_was_underscore = true;
+        } else {
+            prev_was_underscore = false;
+        }
+        out.push(replaced);
+    }
+    // Trim leading/trailing underscores left over from the trim+replace.
+    let trimmed_out = out.trim_matches('_').to_string();
+    if trimmed_out.is_empty() {
+        return None;
+    }
+    // Cap at 100 chars by char (not byte) count so we don't slice
+    // mid-codepoint on Hebrew/Arabic/CJK titles.
+    if trimmed_out.chars().count() > 100 {
+        let truncated: String = trimmed_out.chars().take(100).collect();
+        Some(truncated)
+    } else {
+        Some(trimmed_out)
+    }
 }
 
 /// Minimal POSIX single-quote escape. Wraps the value in single quotes and
@@ -3381,13 +3440,151 @@ fn pane_set_title(
         let mut file = state.workspaces.lock().unwrap();
         if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
             if let Some(layout) = ws.layout.take() {
-                ws.layout = Some(update_pane_in(layout, &pane_id, Some(normalized), None));
+                ws.layout = Some(update_pane_in(layout, &pane_id, Some(normalized.clone()), None));
             }
         }
     }
     persist(&state)?;
+
+    // Phase 23.I: if this pane has a live tmux session, rename it to
+    // match the new title. Pane title IS the tmux session name — that's
+    // the cleaner mental model than the in-picker Rename button (23.G).
+    //
+    // Best-effort: a failure here doesn't fail pane_set_title (the
+    // user's title change is the primary action; tmux rename is the
+    // side-effect). We log via dlog so debugging is trivial.
+    let tmux_target = match (&normalized, lookup_tmux_for_pane(&state, &pane_id)) {
+        (Some(new_title), Some((ssh_session_id, handle, old_tmux_name))) => {
+            sanitize_tmux_session_name_for_title(new_title).map(|sanitized| {
+                (ssh_session_id, handle, old_tmux_name, sanitized)
+            })
+        }
+        _ => None,
+    };
+    if let Some((ssh_session_id, handle, old_name, new_name)) = tmux_target {
+        if new_name != old_name {
+            let state_clone = AppState {
+                sessions: state.sessions.clone(),
+                pane_sessions: state.pane_sessions.clone(),
+                workspaces: state.workspaces.clone(),
+                load_state: state.load_state.clone(),
+                notifications: state.notifications.clone(),
+                pane_status: state.pane_status.clone(),
+                feed: state.feed.clone(),
+                notes: state.notes.clone(),
+                settings: state.settings.clone(),
+                recent_paths: state.recent_paths.clone(),
+                forwards: state.forwards.clone(),
+                browser_pending: state.browser_pending.clone(),
+                browser_load_waiters: state.browser_load_waiters.clone(),
+                console_buffer: state.console_buffer.clone(),
+                iframe_pending: state.iframe_pending.clone(),
+                claude_paths: state.claude_paths.clone(),
+            };
+            let pane_id_log = pane_id.clone();
+            tokio::spawn(async move {
+                match tmux_rename_session_via_handle(&handle, &old_name, &new_name).await {
+                    Ok(()) => {
+                        // Update in-memory session record so subsequent
+                        // operations (kill_session, etc.) use the new name.
+                        if let Ok(mut sessions) = state_clone.sessions.lock() {
+                            if let Some(Session::Ssh(s)) = sessions.get_mut(&ssh_session_id) {
+                                s.tmux_session = Some(new_name.clone());
+                            }
+                        }
+                        dlog(&format!(
+                            "pane_set_title: tmux rename ok pane={pane_id_log} {old_name} -> {new_name}"
+                        ));
+                    }
+                    Err(e) => {
+                        dlog(&format!(
+                            "pane_set_title: tmux rename FAILED pane={pane_id_log} \
+                             {old_name} -> {new_name}: {e}"
+                        ));
+                    }
+                }
+            });
+        }
+    }
+
     let _ = app.emit("workspaces:changed", ());
     Ok(state.workspaces.lock().unwrap().clone())
+}
+
+/// Phase 23.I helper: look up the SSH session bound to a pane and
+/// return (session_id, ssh handle clone, current tmux session name).
+/// Returns None if the pane has no session, the session is not SSH,
+/// or it has no tmux wrapper.
+fn lookup_tmux_for_pane(
+    state: &AppState,
+    pane_id: &str,
+) -> Option<(String, Arc<client::Handle<SshClient>>, String)> {
+    let pane_sessions = state.pane_sessions.lock().ok()?;
+    let sid = pane_sessions.get(pane_id)?.clone();
+    drop(pane_sessions);
+    let sessions = state.sessions.lock().ok()?;
+    match sessions.get(&sid) {
+        Some(Session::Ssh(s)) => s
+            .tmux_session
+            .as_ref()
+            .map(|t| (sid.clone(), s.handle.clone(), t.clone())),
+        _ => None,
+    }
+}
+
+/// Phase 23.I helper: run `tmux rename-session -t <old> <new>` over an
+/// existing SSH handle. Shared by pane_set_title and the legacy 23.G
+/// tmux_rename_session tauri command. Validates names defensively
+/// (no spaces/dots/colons) — `sanitize_tmux_session_name_for_title`
+/// already collapses those, but a direct CLI caller might not.
+async fn tmux_rename_session_via_handle(
+    handle: &client::Handle<SshClient>,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), String> {
+    if new_name.is_empty() {
+        return Err("name cannot be empty".into());
+    }
+    if new_name.chars().any(|c| c == '.' || c == ':') {
+        return Err("name cannot contain dots or colons".into());
+    }
+    let cmd = format!(
+        "tmux rename-session -t '{}' '{}' 2>&1",
+        old_name.replace('\'', "'\\''"),
+        new_name.replace('\'', "'\\''"),
+    );
+    use russh::ChannelMsg;
+    let mut ch = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("channel_open: {e}"))?;
+    ch.exec(true, cmd.as_bytes())
+        .await
+        .map_err(|e| format!("exec: {e}"))?;
+    let mut stdout = Vec::new();
+    let mut exit_code: Option<u32> = None;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                ChannelMsg::Data { ref data } => stdout.extend_from_slice(data),
+                ChannelMsg::ExitStatus { exit_status } => exit_code = Some(exit_status),
+                ChannelMsg::Eof | ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+    })
+    .await;
+    let _ = ch.close().await;
+    let stderr_text = String::from_utf8_lossy(&stdout).trim().to_string();
+    match exit_code {
+        Some(0) => Ok(()),
+        Some(code) => Err(if stderr_text.is_empty() {
+            format!("tmux exit {code}")
+        } else {
+            stderr_text
+        }),
+        None => Err("tmux rename-session did not return an exit status".into()),
+    }
 }
 
 #[tauri::command]
@@ -3445,7 +3642,9 @@ async fn pane_connect(
 ) -> Result<String, String> {
     // Look up connection from workspaces state. Phase 7.C: also lift `env` and
     // `setup_command` from the workspace so we can inject them after the shell is up.
-    let (conn, cwd, ws_env, ws_setup) = {
+    // Phase 23.I: also lift the pane's title so the persistent (tmux) flow can
+    // derive a session name from it instead of the opaque pane-id default.
+    let (conn, cwd, ws_env, ws_setup, pane_title) = {
         let file = state.workspaces.lock().unwrap();
         let ws = file
             .workspaces
@@ -3479,13 +3678,33 @@ async fn pane_connect(
                     format!("no pane {pane_id}")
                 }
             })?;
+        let title = find_pane_title(layout, &pane_id);
         (
             conn,
             ws.cwd.clone(),
             ws.env.clone(),
             ws.setup_command.clone(),
+            title,
         )
     };
+
+    // Phase 23.I: resolve the effective tmux session name BEFORE we
+    // hand off to spawn_ssh. Precedence:
+    //   1. Caller-supplied tmux_session_name (picker chose explicit
+    //      existing-session attach)
+    //   2. Sanitized pane title (pane title IS the tmux session name —
+    //      Hebrew/Arabic/CJK titles supported)
+    //   3. None — spawn_ssh's tmux_name derivation falls back to
+    //      `sanitize_tmux_session_name(&pane_id)` (the legacy
+    //      "winmux-<paneid>" auto-name)
+    let effective_tmux_name: Option<String> = tmux_session_name
+        .clone()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            pane_title
+                .as_deref()
+                .and_then(sanitize_tmux_session_name_for_title)
+        });
 
     // Resolve shell kind for env-line formatting (need this BEFORE we move `conn`).
     let shell_kind = match &conn {
@@ -3533,7 +3752,7 @@ async fn pane_connect(
                 cols,
                 rows,
                 effective_persistent,
-                tmux_session_name.clone(),
+                effective_tmux_name.clone(),
             )
             .await?
         }
@@ -3700,10 +3919,11 @@ async fn pane_list_tmux_sessions(
 }
 
 /// Phase 23.G: rename a tmux session over the workspace's SSH
-/// handle. Used by the Connect (tmux) picker's per-row Rename
-/// button. tmux's own rules (no spaces/dots/colons) are enforced
-/// frontend-side; we re-validate here as a defense-in-depth check
-/// so a bogus name can never reach `tmux rename-session`.
+/// handle. The Phase 23.G in-picker Rename button was removed in
+/// Phase 23.I (pane title became the canonical session name) — this
+/// command stays registered for any future CLI / programmatic caller
+/// (e.g. Phase 24 bulk renames). Now delegates to the shared
+/// `tmux_rename_session_via_handle` helper that pane_set_title uses.
 #[tauri::command]
 async fn tmux_rename_session(
     state: State<'_, AppState>,
@@ -3711,11 +3931,8 @@ async fn tmux_rename_session(
     old_name: String,
     new_name: String,
 ) -> Result<(), String> {
-    if new_name.is_empty() || old_name.is_empty() {
-        return Err("name cannot be empty".into());
-    }
-    if new_name.chars().any(|c| c == ' ' || c == '.' || c == ':') {
-        return Err("name cannot contain spaces, dots, or colons".into());
+    if old_name.is_empty() {
+        return Err("old_name cannot be empty".into());
     }
     let handle = {
         let sessions = state.sessions.lock().unwrap();
@@ -3727,45 +3944,7 @@ async fn tmux_rename_session(
             })
     }
     .ok_or_else(|| "no active SSH session for this workspace".to_string())?;
-    // tmux session names must already be safe (validated above), so
-    // single-quote escaping is sufficient.
-    let cmd = format!(
-        "tmux rename-session -t '{}' '{}' 2>&1",
-        old_name.replace('\'', "'\\''"),
-        new_name.replace('\'', "'\\''"),
-    );
-    use russh::ChannelMsg;
-    let mut ch = handle
-        .channel_open_session()
-        .await
-        .map_err(|e| format!("channel_open: {e}"))?;
-    ch.exec(true, cmd.as_bytes())
-        .await
-        .map_err(|e| format!("exec: {e}"))?;
-    let mut stdout = Vec::new();
-    let mut exit_code: Option<u32> = None;
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while let Some(msg) = ch.wait().await {
-            match msg {
-                ChannelMsg::Data { ref data } => stdout.extend_from_slice(data),
-                ChannelMsg::ExitStatus { exit_status } => exit_code = Some(exit_status),
-                ChannelMsg::Eof | ChannelMsg::Close => break,
-                _ => {}
-            }
-        }
-    })
-    .await;
-    let _ = ch.close().await;
-    let stderr_text = String::from_utf8_lossy(&stdout).trim().to_string();
-    match exit_code {
-        Some(0) => Ok(()),
-        Some(code) => Err(if stderr_text.is_empty() {
-            format!("tmux exit {code}")
-        } else {
-            stderr_text
-        }),
-        None => Err("tmux rename-session did not return an exit status".into()),
-    }
+    tmux_rename_session_via_handle(&handle, &old_name, &new_name).await
 }
 
 /// Phase 12.B: Claude Code session metadata returned by

@@ -56,6 +56,9 @@ interface Props {
   // Phase 23.D: the workspace's canonical connection, threaded
   // through to PaneView so isSsh() can fall back to it.
   workspaceConnection?: Connection;
+  // Phase 23.I: workspace name. PaneView's header falls back to it
+  // when the pane has no user-set title.
+  workspaceName?: string;
   /** Phase 22: chat panes need to flush an updated WorkspacesFile back
    *  to the parent App so the new message bubbles render. */
   onWorkspacesFileUpdate: (f: WorkspacesFile) => void;
@@ -96,6 +99,7 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           workspaceId={props.all.workspaceId}
           pane={props.pane}
           workspaceConnection={props.all.workspaceConnection}
+          workspaceName={props.all.workspaceName}
           isActive={isActive()}
           isConnected={props.all.connectedPaneIds.has(props.pane.pane_id)}
           pendingPasswordFor={props.all.pendingPasswordFor}

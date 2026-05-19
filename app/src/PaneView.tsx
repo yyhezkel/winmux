@@ -119,6 +119,10 @@ interface Props {
   // / Browser / ClaudeChat panes, or a fresh Terminal pane). Threaded
   // from App.tsx via LayoutView.
   workspaceConnection?: Connection;
+  // Phase 23.I: the workspace name. The pane header falls back to it
+  // when the user hasn't set a pane-specific title, replacing the
+  // noisy "ssh user@host:port" auto-label.
+  workspaceName?: string;
   isActive: boolean;
   isConnected: boolean;
   pendingPasswordFor: string | null;
@@ -188,37 +192,11 @@ export function PaneView(p: Props) {
   const closeTmuxPicker = () => {
     setTmuxSessions(null);
     setTmuxPickerErr(null);
-    setRenameErrors({});
   };
-  // Phase 23.G: per-row rename error map (session_name → message).
-  // Cleared on each successful rename / picker close.
-  const [renameErrors, setRenameErrors] = createSignal<Record<string, string>>({});
-  const renameTmuxSession = async (oldName: string) => {
-    const next = window.prompt(
-      t("tmux_picker.rename_prompt", { name: oldName }),
-      oldName,
-    );
-    if (!next || next === oldName) return;
-    if (/[\s.:]/.test(next)) {
-      setRenameErrors((prev) => ({ ...prev, [oldName]: t("tmux_picker.invalid_name") }));
-      return;
-    }
-    try {
-      await invoke("tmux_rename_session", {
-        workspaceId: p.workspaceId,
-        oldName,
-        newName: next,
-      });
-      setRenameErrors((prev) => {
-        const { [oldName]: _drop, ...rest } = prev;
-        return rest;
-      });
-      // Re-fetch so the row reflects the new name.
-      await openTmuxPicker();
-    } catch (err) {
-      setRenameErrors((prev) => ({ ...prev, [oldName]: String(err) }));
-    }
-  };
+  // Phase 23.I: removed renameErrors + renameTmuxSession. Pane title
+  // is now the canonical tmux session name — edit the title via the
+  // pane header's ✎ button instead. Backend pane_set_title auto-runs
+  // tmux rename-session over the existing SSH handle.
   const closeConnectMenu = () => setShowConnectMenu(false);
   const submitSmartModal = () => {
     const m = smartModal();
@@ -275,12 +253,28 @@ export function PaneView(p: Props) {
       onMouseDown={() => p.onFocus(p.pane.pane_id)}
     >
       <div class="pane-header">
-        <span class="pane-conn">
-          {p.pane.connection ? describeConnection(p.pane.connection) : "—"}
+        {/* Phase 23.I: header fallback chain — user-set pane.title
+            beats workspace name beats the raw SSH URL. The old
+            describeConnection() output (e.g. "ssh runner@1.2.3.4:22")
+            was noisy and only useful for debugging. */}
+        <span
+          class="pane-conn"
+          title={
+            p.pane.connection
+              ? describeConnection(p.pane.connection)
+              : p.workspaceConnection
+                ? describeConnection(p.workspaceConnection)
+                : undefined
+          }
+        >
+          {p.pane.title
+            ?? p.workspaceName
+            ?? (p.pane.connection
+              ? describeConnection(p.pane.connection)
+              : p.workspaceConnection
+                ? describeConnection(p.workspaceConnection)
+                : "—")}
         </span>
-        <Show when={p.pane.title}>
-          <span class="pane-title" title={p.pane.title!}>· {p.pane.title}</span>
-        </Show>
         <Show when={p.pane.annotation}>
           <button
             class="pane-btn"
@@ -702,22 +696,10 @@ export function PaneView(p: Props) {
                           {s.attached ? ` · ${t("tmux_picker.attached")}` : ""}
                         </span>
                         <span class="claude-age">{ageOf(s.last_attached || s.created)}</span>
-                        {/* Phase 23.G: per-row rename. Stop propagation
-                            so clicking the pencil doesn't also attach. */}
-                        <button
-                          class="tmux-rename-btn"
-                          title={t("tmux_picker.rename")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void renameTmuxSession(s.name);
-                          }}
-                        >
-                          ✎
-                        </button>
+                        {/* Phase 23.I: Rename button removed. Pane title
+                            is the canonical session name now — use the
+                            pane header's ✎ instead. */}
                       </div>
-                      <Show when={renameErrors()[s.name]}>
-                        <div class="status-line err">⚠ {renameErrors()[s.name]}</div>
-                      </Show>
                     </li>
                   );
                 })}

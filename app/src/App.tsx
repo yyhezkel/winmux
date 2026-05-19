@@ -1051,6 +1051,7 @@ function App() {
                 activePaneId={activePaneId()}
                 connectedPaneIds={connectedPanes()}
                 workspaceConnection={activeWs()?.connection}
+                workspaceName={activeWs()?.name}
                 workspaceIsSsh={
                   // Phase 16: walk the active workspace's layout looking for
                   // any pane with an SSH connection. We pre-compute this

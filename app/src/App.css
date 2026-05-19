@@ -696,22 +696,10 @@ body {
   direction: ltr !important;
 }
 
-/* Phase 23.G: per-row Rename button inside the tmux session picker. */
-.tmux-rename-btn {
-  background: transparent;
-  border: 1px solid var(--w-border);
-  color: var(--w-text-dim);
-  margin-inline-start: 8px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: var(--w-fs-sm);
-}
-.tmux-rename-btn:hover {
-  background: var(--w-surface-hi);
-  color: var(--w-accent);
-  border-color: var(--w-border-hi);
-}
+/* Phase 23.G/I: per-row Rename button was removed in 23.I. Pane title
+   is now the canonical tmux session name — edit it via the pane
+   header's ✎ button and pane_set_title runs tmux rename-session
+   automatically over the existing SSH handle. */
 
 /* ─── Connect / status ─── */
 
@@ -2741,7 +2729,9 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.claude-prev b { color: var(--w-success); margin-right: 4px; font-weight: 700; }
+/* Phase 23.I: margin-inline-end so the "U:" / "A:" prefix gap
+   flips correctly under <html dir="rtl">. */
+.claude-prev b { color: var(--w-success); margin-inline-end: 4px; font-weight: 700; }
 
 /* ─── Phase 22: Claude Chat pane ──────────────────────────────────── */
 

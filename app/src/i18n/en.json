@@ -351,5 +351,8 @@
   "claude_picker.loading": "Loading…",
   "claude_picker.empty": "No Claude Code sessions found on this host.",
   "claude_picker.user_prefix": "U:",
-  "claude_picker.assistant_prefix": "A:"
+  "claude_picker.assistant_prefix": "A:",
+
+  "tmux_picker.new_session_hint_v2": "Create a fresh session with a unique auto-generated name",
+  "tmux_picker.label_secondary": "session: {name}"
 }

@@ -3446,35 +3446,35 @@ fn pane_set_title(
     }
     persist(&state)?;
 
-    // Phase 23.J: TEMPORARILY DISABLED the spawned tmux-rename
-    // side-effect. The original Phase 23.I block kicked off a
-    // tokio::spawn that called tmux_rename_session_via_handle over
-    // the existing SSH handle. When Yossi renamed a title to Hebrew,
-    // app.exe died with STATUS_STACK_BUFFER_OVERRUN exactly 5s after
-    // persist — matching the 5s timeout in the spawned task. Suspect
-    // a panic crossing the russh future-poll FFI boundary (which
-    // triggers __fastfail(7) on Windows even with the default
-    // panic=unwind strategy). The panic hook installed in run()
-    // will capture the exact culprit on the next reproduction.
+    // Phase 23.K: if the pane has a live tmux session, update the
+    // LOCAL label for it. Pure disk write (no SSH, no spawned task)
+    // — sidesteps the Phase 23.I crash entirely. The picker reads
+    // this map back in `tmux_labels_get` and shows the label as the
+    // primary line, with the raw tmux session name as secondary.
     //
-    // What still works:
-    //  - pane.title editing (this command)
-    //  - Title shown in pane header
-    //  - pane_connect deriving the tmux session name from pane.title
-    //    at *initial* connect time (no spawned task, different path)
-    //
-    // What's lost until we re-enable:
-    //  - Auto-sync of tmux session name when the title changes
-    //    AFTER the tmux session was already created. The session
-    //    keeps whatever name it was created with; re-attaching with
-    //    a new title only takes effect on the next FRESH tmux
-    //    session.
-    //
-    // TODO(Phase 23.K+): re-enable once the panic hook reveals the
-    // root cause. Likely fix is wrapping the spawned task body in
-    // std::panic::catch_unwind or moving the work out of the spawned
-    // task entirely (e.g. into a foreground async tauri command the
-    // FE invokes explicitly after pane_set_title).
+    // The Phase 23.J disabled remote-tmux-rename side-effect stays
+    // disabled — labels give us the user-friendly Hebrew title
+    // experience without crossing the FFI panic boundary.
+    if let Some(label_text) = normalized.as_deref() {
+        let tmux_target = {
+            let pane_sessions = state.pane_sessions.lock().ok();
+            let sid = pane_sessions
+                .as_ref()
+                .and_then(|m| m.get(&pane_id).cloned());
+            drop(pane_sessions);
+            sid.and_then(|sid| {
+                state.sessions.lock().ok().and_then(|sessions| {
+                    match sessions.get(&sid) {
+                        Some(Session::Ssh(s)) => s.tmux_session.clone(),
+                        _ => None,
+                    }
+                })
+            })
+        };
+        if let Some(tmux_name) = tmux_target {
+            set_tmux_label_internal(&workspace_id, &tmux_name, label_text);
+        }
+    }
 
     let _ = app.emit("workspaces:changed", ());
     Ok(state.workspaces.lock().unwrap().clone())
@@ -3890,6 +3890,118 @@ async fn pane_list_tmux_sessions(
     }
     out.sort_by(|a, b| b.last_attached.max(b.created).cmp(&a.last_attached.max(a.created)));
     Ok(out)
+}
+
+// ─── Phase 23.K: local tmux session labels ─────────────────────────────────
+//
+// User-friendly Hebrew/Arabic/CJK label for each tmux session, stored
+// locally on the Windows host (NOT in tmux itself). The Phase 23.I
+// experiment of actually renaming the remote tmux session crashed on
+// Hebrew (see Phase 23.J root-cause notes). Labels sidestep that
+// entirely: tmux session names stay ASCII / safe, but the picker UI
+// shows whatever the user typed in the pane title.
+//
+// File: %APPDATA%/winmux/tmux-labels.json
+// Schema: { version: 1, labels: { workspace_id: { session_name: label } } }
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub(crate) struct TmuxLabelsFile {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub labels: HashMap<String, HashMap<String, String>>,
+}
+
+fn tmux_labels_path() -> Result<PathBuf, String> {
+    Ok(config_dir()?.join("tmux-labels.json"))
+}
+
+fn load_tmux_labels() -> TmuxLabelsFile {
+    let path = match tmux_labels_path() {
+        Ok(p) => p,
+        Err(_) => return TmuxLabelsFile::default(),
+    };
+    if !path.exists() {
+        return TmuxLabelsFile::default();
+    }
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            dlog(&format!("tmux-labels: read failed: {e}"));
+            return TmuxLabelsFile::default();
+        }
+    };
+    serde_json::from_str(&text).unwrap_or_else(|e| {
+        dlog(&format!("tmux-labels: parse failed: {e}"));
+        TmuxLabelsFile::default()
+    })
+}
+
+fn save_tmux_labels(file: &TmuxLabelsFile) -> Result<(), String> {
+    use std::io::Write as _;
+    let path = tmux_labels_path()?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| "no parent dir".to_string())?
+        .to_path_buf();
+    let tmp = dir.join(format!("tmux-labels.{}.tmp", std::process::id()));
+    let text = serde_json::to_string_pretty(file).map_err(|e| e.to_string())?;
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp)
+            .map_err(|e| format!("open tmp {:?}: {e}", tmp))?;
+        f.write_all(text.as_bytes())
+            .map_err(|e| format!("write tmp: {e}"))?;
+        f.sync_all().map_err(|e| format!("fsync: {e}"))?;
+    }
+    std::fs::rename(&tmp, &path).map_err(|e| format!("rename: {e}"))?;
+    Ok(())
+}
+
+/// Internal helper used by both the tauri command and pane_set_title's
+/// auto-label hook. Empty label clears the entry; clearing the last
+/// entry in a workspace also removes the workspace key for cleanliness.
+fn set_tmux_label_internal(workspace_id: &str, session_name: &str, label: &str) {
+    let mut file = load_tmux_labels();
+    let trimmed = label.trim();
+    if trimmed.is_empty() {
+        if let Some(ws_map) = file.labels.get_mut(workspace_id) {
+            ws_map.remove(session_name);
+            if ws_map.is_empty() {
+                file.labels.remove(workspace_id);
+            }
+        }
+    } else {
+        file.labels
+            .entry(workspace_id.to_string())
+            .or_insert_with(HashMap::new)
+            .insert(session_name.to_string(), trimmed.to_string());
+    }
+    if let Err(e) = save_tmux_labels(&file) {
+        dlog(&format!("tmux-labels: save failed: {e}"));
+    }
+}
+
+#[tauri::command]
+fn tmux_labels_get(workspace_id: String) -> HashMap<String, String> {
+    let file = load_tmux_labels();
+    file.labels.get(&workspace_id).cloned().unwrap_or_default()
+}
+
+#[tauri::command]
+fn tmux_label_set(
+    workspace_id: String,
+    session_name: String,
+    label: Option<String>,
+) -> Result<(), String> {
+    if session_name.is_empty() {
+        return Err("session_name cannot be empty".into());
+    }
+    set_tmux_label_internal(&workspace_id, &session_name, label.as_deref().unwrap_or(""));
+    Ok(())
 }
 
 /// Phase 23.G: rename a tmux session over the workspace's SSH
@@ -4586,6 +4698,8 @@ pub fn run() {
             pane_list_claude_sessions,
             pane_list_tmux_sessions,
             tmux_rename_session,
+            tmux_labels_get,
+            tmux_label_set,
             pane_set_title,
             pane_set_annotation,
             pane_browser_navigate,

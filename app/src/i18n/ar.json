@@ -369,5 +369,8 @@
   "claude_picker.loading": "جارٍ التحميل…",
   "claude_picker.empty": "لم يتم العثور على جلسات Claude Code على هذا المضيف.",
   "claude_picker.user_prefix": "المستخدم:",
-  "claude_picker.assistant_prefix": "Claude:"
+  "claude_picker.assistant_prefix": "Claude:",
+
+  "tmux_picker.new_session_hint_v2": "أنشئ جلسة جديدة باسم فريد يتم توليده تلقائيًا",
+  "tmux_picker.label_secondary": "session: {name}"
 }

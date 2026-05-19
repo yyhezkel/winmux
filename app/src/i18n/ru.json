@@ -369,5 +369,8 @@
   "claude_picker.loading": "Загрузка…",
   "claude_picker.empty": "Сессии Claude Code на этом хосте не найдены.",
   "claude_picker.user_prefix": "Пользователь:",
-  "claude_picker.assistant_prefix": "Claude:"
+  "claude_picker.assistant_prefix": "Claude:",
+
+  "tmux_picker.new_session_hint_v2": "Создать новую сессию с уникальным авто-сгенерированным именем",
+  "tmux_picker.label_secondary": "session: {name}"
 }

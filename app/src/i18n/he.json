@@ -369,5 +369,8 @@
   "claude_picker.loading": "טוען…",
   "claude_picker.empty": "לא נמצאו sessions של Claude Code בשרת הזה.",
   "claude_picker.user_prefix": "משתמש:",
-  "claude_picker.assistant_prefix": "Claude:"
+  "claude_picker.assistant_prefix": "Claude:",
+
+  "tmux_picker.new_session_hint_v2": "צור session חדש עם שם ייחודי שנוצר אוטומטית",
+  "tmux_picker.label_secondary": "session: {name}"
 }

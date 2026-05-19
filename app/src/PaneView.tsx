@@ -173,6 +173,12 @@ export function PaneView(p: Props) {
   const [tmuxSessions, setTmuxSessions] = createSignal<import("./types").TmuxSessionInfo[] | null>(null);
   const [tmuxPickerLoading, setTmuxPickerLoading] = createSignal(false);
   const [tmuxPickerErr, setTmuxPickerErr] = createSignal<string | null>(null);
+  // Phase 23.K: local labels for tmux sessions (session_name → label).
+  // Read from %APPDATA%/winmux/tmux-labels.json via tmux_labels_get.
+  // The picker shows the label as the primary line when set, raw
+  // session name as secondary. Best-effort: any fetch error leaves
+  // the map empty and the picker falls back to raw names.
+  const [tmuxLabels, setTmuxLabels] = createSignal<Record<string, string>>({});
   const openTmuxPicker = async () => {
     setTmuxSessions([]);
     setTmuxPickerLoading(true);
@@ -188,10 +194,21 @@ export function PaneView(p: Props) {
     } finally {
       setTmuxPickerLoading(false);
     }
+    // Phase 23.K: fetch labels in parallel. Failures are silent —
+    // labels are a UI sugar, not load-bearing.
+    try {
+      const labels = await invoke<Record<string, string>>("tmux_labels_get", {
+        workspaceId: p.workspaceId,
+      });
+      setTmuxLabels(labels ?? {});
+    } catch {
+      setTmuxLabels({});
+    }
   };
   const closeTmuxPicker = () => {
     setTmuxSessions(null);
     setTmuxPickerErr(null);
+    setTmuxLabels({});
   };
   // Phase 23.I: removed renameErrors + renameTmuxSession. Pane title
   // is now the canonical tmux session name — edit the title via the
@@ -655,7 +672,15 @@ export function PaneView(p: Props) {
                   class="claude-row"
                   onClick={() => {
                     closeTmuxPicker();
-                    p.onConnect(p.pane.pane_id, { mode: "tmux" });
+                    // Phase 23.K: generate a fresh unique tmux name
+                    // client-side so `tmux new-session -A` doesn't
+                    // silently attach to whatever existing session
+                    // happened to be derived from pane.title / pane_id.
+                    const freshName = `new_${Date.now().toString(36)}`;
+                    p.onConnect(p.pane.pane_id, {
+                      mode: "tmux",
+                      tmuxSession: freshName,
+                    });
                   }}
                 >
                   <div class="claude-row-head">
@@ -663,7 +688,7 @@ export function PaneView(p: Props) {
                     <span class="claude-proj"><b>{t("tmux_picker.new_session")}</b></span>
                     <span class="claude-age">{t("tmux_picker.pane_id_target")}</span>
                   </div>
-                  <div class="claude-prev">{t("tmux_picker.new_session_hint")}</div>
+                  <div class="claude-prev">{t("tmux_picker.new_session_hint_v2")}</div>
                 </li>
                 {(tmuxSessions() ?? []).map((s) => {
                   const ageOf = (epoch: number) => {
@@ -677,6 +702,11 @@ export function PaneView(p: Props) {
                   const winLabel = s.windows === 1
                     ? t("tmux_picker.window", { n: String(s.windows) })
                     : t("tmux_picker.windows", { n: String(s.windows) });
+                  // Phase 23.K: prefer the user's local label over the
+                  // raw tmux session name. The raw name still shows as
+                  // small secondary text so power users can map back
+                  // to `tmux ls` output.
+                  const label = tmuxLabels()[s.name];
                   return (
                     <li
                       class="claude-row"
@@ -690,16 +720,20 @@ export function PaneView(p: Props) {
                       title={`Created ${ageOf(s.created)} ago${s.last_attached ? `, last attached ${ageOf(s.last_attached)} ago` : ""}`}
                     >
                       <div class="claude-row-head">
-                        <code class="claude-id">{s.name.slice(0, 14)}</code>
+                        <code class="claude-id">
+                          {label ? label.slice(0, 24) : s.name.slice(0, 14)}
+                        </code>
                         <span class="claude-proj">
                           {winLabel}
                           {s.attached ? ` · ${t("tmux_picker.attached")}` : ""}
                         </span>
                         <span class="claude-age">{ageOf(s.last_attached || s.created)}</span>
-                        {/* Phase 23.I: Rename button removed. Pane title
-                            is the canonical session name now — use the
-                            pane header's ✎ instead. */}
                       </div>
+                      <Show when={label}>
+                        <div class="claude-prev">
+                          {t("tmux_picker.label_secondary", { name: s.name })}
+                        </div>
+                      </Show>
                     </li>
                   );
                 })}

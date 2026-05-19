@@ -1,6 +1,6 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import type { LayoutNode } from "./types";
+import type { Connection, LayoutNode } from "./types";
 import { describeConnection } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
 import { t } from "./i18n";
@@ -113,6 +113,11 @@ function ClaudeSessionPicker(p: ClaudePickerProps) {
 interface Props {
   workspaceId: string;
   pane: Extract<LayoutNode, { kind: "pane" }>;
+  // Phase 23.D: the workspace's canonical connection. `isSsh()` falls
+  // back to this when the pane itself has no `connection` (FileManager
+  // / Browser / ClaudeChat panes, or a fresh Terminal pane). Threaded
+  // from App.tsx via LayoutView.
+  workspaceConnection?: Connection;
   isActive: boolean;
   isConnected: boolean;
   pendingPasswordFor: string | null;
@@ -147,7 +152,12 @@ export function PaneView(p: Props) {
   const [showAnnot, setShowAnnot] = createSignal(false);
   // Phase 11.A: dropdown next to the disconnect button.
   const [showDiscMenu, setShowDiscMenu] = createSignal(false);
-  const isSsh = () => p.pane.connection?.type === "ssh";
+  // Phase 23.D: workspace dictates connection type. Check pane's own
+  // connection first (set on wired Terminal panes), then fall back to
+  // the workspace's canonical connection so SSH-only menu items
+  // (tmux, claude --resume…) show up from FM / Browser / Chat panes too.
+  const isSsh = () =>
+    (p.pane.connection?.type ?? p.workspaceConnection?.type) === "ssh";
   const isTmux = () => !!p.tmuxSession;
   // Phase 12.B Smart Connect dropdown + extra modals.
   const [showConnectMenu, setShowConnectMenu] = createSignal(false);

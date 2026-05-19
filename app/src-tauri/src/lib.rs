@@ -401,7 +401,15 @@ pub(crate) struct Workspace {
     pub(crate) color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) cwd: Option<String>,
-    // Legacy field — folded into layout on load.
+    // Phase 23.D: canonical workspace-level connection. Populated on
+    // create AND on load (back-filled from the first Terminal pane's
+    // connection if absent). Pane-level `connection` is kept as an
+    // optional override for back-compat, but everything that needs
+    // to spawn a session (pane_connect / split fallback / FE dropdown)
+    // falls through to this field when the pane has no own value.
+    // Reason: enforces "SSH workspace never produces a local shell"
+    // and lets non-Terminal panes (FileManager / Browser / ClaudeChat)
+    // reconnect to the workspace's intended target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) connection: Option<Connection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -591,7 +599,16 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
     let mut migrated = false;
     for ws in file.workspaces.iter_mut() {
         if ws.layout.is_none() {
-            let conn = ws.connection.take().unwrap_or(Connection::Local { shell: None });
+            // Legacy: workspace existed without a layout. Build a
+            // single Terminal pane and seed its connection from the
+            // workspace's legacy `connection` field. Keep the same
+            // value on the workspace too (Phase 23.D: workspace.connection
+            // is now canonical, not consumed).
+            let conn = ws
+                .connection
+                .clone()
+                .unwrap_or(Connection::Local { shell: None });
+            ws.connection = Some(conn.clone());
             ws.layout = Some(LayoutNode::Pane {
                 pane_id: new_pane_id(),
                 pane_kind: PaneKind::Terminal,
@@ -602,6 +619,21 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
                 annotation: None,
             });
             migrated = true;
+        }
+        // Phase 23.D: ensure every workspace has a canonical
+        // `connection` field. Old files where the connection lived
+        // only on the first Terminal pane get back-filled here. This
+        // is what lets pane_connect / split / the frontend dropdown
+        // fall back to the workspace's intended connection when a
+        // pane doesn't have one of its own (FileManager / Browser /
+        // ClaudeChat panes, or a fresh pane added later).
+        if ws.connection.is_none() {
+            if let Some(layout) = ws.layout.as_ref() {
+                if let Some(conn) = first_terminal_connection(layout) {
+                    ws.connection = Some(conn);
+                    migrated = true;
+                }
+            }
         }
     }
     if migrated {
@@ -2593,16 +2625,22 @@ fn workspace_create(
     state: State<'_, AppState>,
     input: CreateInput,
 ) -> Result<WorkspacesFile, String> {
+    // Phase 23.D: workspace.connection is canonical from creation
+    // onward. The first Terminal pane also carries it for
+    // back-compat with older code paths that read pane.connection
+    // directly; future panes added via split / programmatic add
+    // inherit from the workspace level when their own field is None.
+    let conn = input.connection.clone();
     let ws = Workspace {
         id: new_workspace_id(),
         name: input.name,
         color: input.color,
         cwd: input.cwd,
-        connection: None,
+        connection: Some(conn.clone()),
         layout: Some(LayoutNode::Pane {
             pane_id: new_pane_id(),
             pane_kind: PaneKind::Terminal,
-            connection: Some(input.connection),
+            connection: Some(conn),
             browser: None,
             chat: None,
             title: None,
@@ -2862,15 +2900,25 @@ fn workspace_split(
     // pane fell back to Local cmd instead of the workspace's SSH
     // connection.
     let fallback_conn: Option<Connection> = if matches!(kind, PaneKind::Terminal) {
-        let layout_fallback = state
-            .workspaces
-            .lock()
-            .unwrap()
-            .workspaces
-            .iter()
-            .find(|w| w.id == workspace_id)
-            .and_then(|w| w.layout.as_ref().and_then(first_terminal_connection));
-        layout_fallback.or_else(|| live_ssh_connection_for_workspace(&state, &workspace_id))
+        // Phase 23.D: four-tier fallback chain for the new pane's
+        // connection — the workspace-level `connection` is now the
+        // canonical truth, with the others as belt-and-suspenders
+        // for older JSON / mid-session edge cases.
+        //   1. first Terminal pane's connection in the layout
+        //   2. workspace.connection (canonical)
+        //   3. live SSH session bound to the workspace
+        //   4. Local (only if all of the above are absent)
+        let (layout_fallback, ws_conn) = {
+            let file = state.workspaces.lock().unwrap();
+            let ws = file.workspaces.iter().find(|w| w.id == workspace_id);
+            (
+                ws.and_then(|w| w.layout.as_ref().and_then(first_terminal_connection)),
+                ws.and_then(|w| w.connection.clone()),
+            )
+        };
+        layout_fallback
+            .or(ws_conn)
+            .or_else(|| live_ssh_connection_for_workspace(&state, &workspace_id))
     } else {
         None
     };
@@ -3393,13 +3441,29 @@ async fn pane_connect(
             .layout
             .as_ref()
             .ok_or_else(|| "no layout".to_string())?;
-        let conn = find_pane_connection(layout, &pane_id).ok_or_else(|| {
-            if pane_id_exists_in(layout, &pane_id) {
-                format!("pane {pane_id} is not a terminal pane")
-            } else {
-                format!("no pane {pane_id}")
-            }
-        })?;
+        // Phase 23.D: prefer the pane's own connection, but fall
+        // back to the workspace-level `connection` when the pane
+        // doesn't carry one. This lets the user reconnect to the
+        // workspace's intended target from a fresh terminal pane
+        // (e.g. one added via split off a FileManager/Browser)
+        // even if pane.connection was never set, AND enforces "an
+        // SSH workspace never accidentally spawns a local shell"
+        // semantics requested by Yossi.
+        let conn = find_pane_connection(layout, &pane_id)
+            .or_else(|| {
+                if pane_id_exists_in(layout, &pane_id) {
+                    ws.connection.clone()
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| {
+                if pane_id_exists_in(layout, &pane_id) {
+                    format!("pane {pane_id} is not a terminal pane and workspace has no connection")
+                } else {
+                    format!("no pane {pane_id}")
+                }
+            })?;
         (
             conn,
             ws.cwd.clone(),

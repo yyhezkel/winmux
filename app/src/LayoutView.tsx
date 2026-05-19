@@ -11,6 +11,7 @@ import {
 } from "./PaneView";
 import {
   paneKindOf,
+  type Connection,
   type LayoutNode,
   type SplitDirection,
   type WorkspacesFile,
@@ -52,6 +53,9 @@ interface Props {
   // tells it explicitly. True iff the workspace has at least one
   // pane with an SSH connection.
   workspaceIsSsh: boolean;
+  // Phase 23.D: the workspace's canonical connection, threaded
+  // through to PaneView so isSsh() can fall back to it.
+  workspaceConnection?: Connection;
   /** Phase 22: chat panes need to flush an updated WorkspacesFile back
    *  to the parent App so the new message bubbles render. */
   onWorkspacesFileUpdate: (f: WorkspacesFile) => void;
@@ -91,6 +95,7 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
         <PaneView
           workspaceId={props.all.workspaceId}
           pane={props.pane}
+          workspaceConnection={props.all.workspaceConnection}
           isActive={isActive()}
           isConnected={props.all.connectedPaneIds.has(props.pane.pane_id)}
           pendingPasswordFor={props.all.pendingPasswordFor}

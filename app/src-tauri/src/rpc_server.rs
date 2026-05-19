@@ -509,15 +509,19 @@ async fn dispatch(
             // RPC also inherit the workspace's SSH connection when
             // the source pane has none of its own.
             let fallback_conn: Option<crate::Connection> = if matches!(kind, PaneKind::Terminal) {
-                let layout_fallback = state
-                    .workspaces
-                    .lock()
-                    .unwrap()
-                    .workspaces
-                    .iter()
-                    .find(|w| w.id == workspace_id)
-                    .and_then(|w| w.layout.as_ref().and_then(crate::first_terminal_connection_pub));
+                // Phase 23.D: same four-tier fallback as workspace_split,
+                // applied here so agent-driven splits over RPC also
+                // inherit the canonical workspace connection.
+                let (layout_fallback, ws_conn) = {
+                    let file = state.workspaces.lock().unwrap();
+                    let ws = file.workspaces.iter().find(|w| w.id == workspace_id);
+                    (
+                        ws.and_then(|w| w.layout.as_ref().and_then(crate::first_terminal_connection_pub)),
+                        ws.and_then(|w| w.connection.clone()),
+                    )
+                };
                 layout_fallback
+                    .or(ws_conn)
                     .or_else(|| crate::live_ssh_connection_for_workspace_pub(state, &workspace_id))
             } else {
                 None

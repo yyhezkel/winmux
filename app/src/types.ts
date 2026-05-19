@@ -70,7 +70,9 @@ export type Workspace = {
   name: string;
   color?: string;
   cwd?: string;
-  // Legacy field, only present on disk during a migration window.
+  // Phase 23.D: canonical workspace-level connection. Set on create
+  // and back-filled on load from the first Terminal pane. Drives the
+  // Connect dropdown's SSH-vs-Local options via PaneView.isSsh().
   connection?: Connection;
   layout?: LayoutNode;
   // Phase 7.C

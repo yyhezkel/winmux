@@ -1,4 +1,5 @@
 mod claude_chat;
+mod claude_log;
 mod claude_summary;
 mod connect_wizard;
 mod dev;
@@ -4766,6 +4767,9 @@ pub fn run() {
             file_manager::file_write_remote,
             file_manager::file_large_threshold,
             claude_summary::claude_summarize,
+            claude_log::claude_log_sync,
+            claude_log::claude_log_list,
+            claude_log::claude_log_read,
             claude_chat::claude_chat_send,
             claude_chat::claude_chat_clear,
             claude_chat::claude_chat_set_model,

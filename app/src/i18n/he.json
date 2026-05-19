@@ -363,5 +363,11 @@
   "tmux_picker.windows": "{n} חלונות",
   "tmux_picker.rename": "שנה שם",
   "tmux_picker.rename_prompt": "שם חדש ל-\"{name}\":",
-  "tmux_picker.invalid_name": "השם לא יכול להכיל רווחים, נקודות או נקודתיים."
+  "tmux_picker.invalid_name": "השם לא יכול להכיל רווחים, נקודות או נקודתיים.",
+
+  "claude_picker.title": "המשך session של Claude Code",
+  "claude_picker.loading": "טוען…",
+  "claude_picker.empty": "לא נמצאו sessions של Claude Code בשרת הזה.",
+  "claude_picker.user_prefix": "משתמש:",
+  "claude_picker.assistant_prefix": "Claude:"
 }

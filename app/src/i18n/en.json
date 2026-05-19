@@ -345,5 +345,11 @@
   "tmux_picker.windows": "{n} windows",
   "tmux_picker.rename": "Rename",
   "tmux_picker.rename_prompt": "New name for \"{name}\":",
-  "tmux_picker.invalid_name": "Name can't contain spaces, dots, or colons."
+  "tmux_picker.invalid_name": "Name can't contain spaces, dots, or colons.",
+
+  "claude_picker.title": "Resume Claude Code session",
+  "claude_picker.loading": "Loading…",
+  "claude_picker.empty": "No Claude Code sessions found on this host.",
+  "claude_picker.user_prefix": "U:",
+  "claude_picker.assistant_prefix": "A:"
 }

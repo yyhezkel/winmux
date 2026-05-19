@@ -73,14 +73,14 @@ function ClaudeSessionPicker(p: ClaudePickerProps) {
     <div class="modal-backdrop" onClick={p.onClose}>
       <div class="modal claude-picker" onClick={(e) => e.stopPropagation()}>
         <div class="settings-head">
-          <h3>Resume Claude Code session</h3>
+          <h3>{t("claude_picker.title")}</h3>
           <button class="feed-x" title={t("common.close")} onClick={p.onClose}>×</button>
         </div>
         <div class="claude-picker-body">
-          <Show when={loading()}><p class="status-line">Loading…</p></Show>
+          <Show when={loading()}><p class="status-line">{t("claude_picker.loading")}</p></Show>
           <Show when={err()}><p class="status-line err">{err()}</p></Show>
           <Show when={!loading() && !err() && items().length === 0}>
-            <p class="status-line">No Claude Code sessions found on this host.</p>
+            <p class="status-line">{t("claude_picker.empty")}</p>
           </Show>
           <Show when={items().length > 0}>
             <ul class="claude-list">
@@ -96,10 +96,10 @@ function ClaudeSessionPicker(p: ClaudePickerProps) {
                     <span class="claude-age">{fmtAge(it.mtime_unix)}</span>
                   </div>
                   <Show when={it.last_user}>
-                    <div class="claude-prev"><b>U:</b> {it.last_user}</div>
+                    <div class="claude-prev"><b>{t("claude_picker.user_prefix")}</b> {it.last_user}</div>
                   </Show>
                   <Show when={it.last_assistant}>
-                    <div class="claude-prev"><b>A:</b> {it.last_assistant}</div>
+                    <div class="claude-prev"><b>{t("claude_picker.assistant_prefix")}</b> {it.last_assistant}</div>
                   </Show>
                 </li>
               ))}

@@ -363,5 +363,11 @@
   "tmux_picker.windows": "{n} окон",
   "tmux_picker.rename": "Переименовать",
   "tmux_picker.rename_prompt": "Новое имя для «{name}»:",
-  "tmux_picker.invalid_name": "Имя не может содержать пробелы, точки или двоеточия."
+  "tmux_picker.invalid_name": "Имя не может содержать пробелы, точки или двоеточия.",
+
+  "claude_picker.title": "Возобновить сессию Claude Code",
+  "claude_picker.loading": "Загрузка…",
+  "claude_picker.empty": "Сессии Claude Code на этом хосте не найдены.",
+  "claude_picker.user_prefix": "Пользователь:",
+  "claude_picker.assistant_prefix": "Claude:"
 }

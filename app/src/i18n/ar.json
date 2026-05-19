@@ -363,5 +363,11 @@
   "tmux_picker.windows": "{n} نوافذ",
   "tmux_picker.rename": "إعادة تسمية",
   "tmux_picker.rename_prompt": "اسم جديد لـ \"{name}\":",
-  "tmux_picker.invalid_name": "لا يمكن أن يحتوي الاسم على مسافات أو نقاط أو نقطتين رأسيتين."
+  "tmux_picker.invalid_name": "لا يمكن أن يحتوي الاسم على مسافات أو نقاط أو نقطتين رأسيتين.",
+
+  "claude_picker.title": "استئناف جلسة Claude Code",
+  "claude_picker.loading": "جارٍ التحميل…",
+  "claude_picker.empty": "لم يتم العثور على جلسات Claude Code على هذا المضيف.",
+  "claude_picker.user_prefix": "المستخدم:",
+  "claude_picker.assistant_prefix": "Claude:"
 }

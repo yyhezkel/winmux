@@ -3631,6 +3631,16 @@ async fn pane_list_tmux_sessions(
     state: State<'_, AppState>,
     workspace_id: String,
 ) -> Result<Vec<TmuxSessionInfo>, String> {
+    // Phase 23.H: silent Ok([]) fallback when no live SSH handle.
+    // Previously we errored ("no active SSH session for this workspace"),
+    // but the user typically clicks Connect (tmux) BEFORE any pane has
+    // authenticated — the whole point is to pick an orphan session before
+    // connecting. Returning Ok([]) lets the picker render its "New session"
+    // option + the "No existing sessions" empty-state line, which is
+    // accurate ("no sessions visible from winmux right now") and avoids
+    // surfacing a red error for the most common access pattern. Once a
+    // terminal pane authenticates, re-opening the picker will list the
+    // real sessions over the now-live handle.
     let handle = {
         let sessions = state.sessions.lock().unwrap();
         sessions
@@ -3639,8 +3649,16 @@ async fn pane_list_tmux_sessions(
                 Session::Ssh(s) if s.workspace_id == workspace_id => Some(s.handle.clone()),
                 _ => None,
             })
-    }
-    .ok_or_else(|| "no active SSH session for this workspace".to_string())?;
+    };
+    let handle = match handle {
+        Some(h) => h,
+        None => {
+            dlog(&format!(
+                "pane_list_tmux_sessions: no live SSH handle for ws={workspace_id}, returning empty list"
+            ));
+            return Ok(vec![]);
+        }
+    };
     let script = "tmux list-sessions -F '#{session_name}|#{session_created}|#{session_attached}|#{session_windows}|#{session_last_attached}' 2>/dev/null || true";
     use russh::ChannelMsg;
     let mut ch = handle

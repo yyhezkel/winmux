@@ -243,6 +243,26 @@ export class TerminalInstance {
     if (this.rtlModeAtConstruct !== "auto_per_line") {
       try {
         const addon = new WebglAddon();
+        // Phase 25: WebGL contexts can be lost — GPU driver resets,
+        // memory pressure, or an aggressive resize. When that happens
+        // the canvas goes permanently blank unless we react. Disposing
+        // the addon makes xterm.js fall back to the DOM renderer,
+        // which is slower but always renders. Without this handler a
+        // lost context = a dead-blank terminal with no recovery
+        // (the "terminal goes blank after resizing post-conversation"
+        // bug).
+        addon.onContextLoss(() => {
+          console.warn("WebGL context lost — falling back to DOM renderer");
+          try {
+            addon.dispose();
+          } catch {}
+          this.webglAddon = null;
+          // Force a full repaint on the DOM renderer that xterm.js
+          // now falls back to.
+          try {
+            this.term.refresh(0, this.term.rows - 1);
+          } catch {}
+        });
         this.term.loadAddon(addon);
         this.webglAddon = addon;
       } catch (e) {
@@ -335,19 +355,21 @@ export class TerminalInstance {
         rows: this.term.rows,
       }).catch(() => {});
     }
-    // Phase 23.E: force a repaint so the WebGL canvas / DOM renderer
-    // doesn't keep the previous viewport's grid metrics around. The
-    // FitAddon recomputes cols/rows from the container, but the
-    // already-rendered scrollback content otherwise keeps its old
-    // wrap points and looks "stuck" at the old width.
+    // Phase 25: force a repaint after a real dimension change so the
+    // renderer picks up the new grid metrics.
+    //
+    // NOTE: Phase 23.E also called `webglAddon.clearTextureAtlas()`
+    // here. That turned out to be the cause of the "terminal goes
+    // blank after resizing once a conversation has filled the
+    // scrollback" bug — wiping the glyph atlas mid-resize, with a
+    // large reflowed scrollback, could leave the WebGL canvas unable
+    // to re-rasterize and stuck blank. The atlas is invalidated
+    // internally by the WebGL addon on resize anyway, so the manual
+    // call was both redundant and harmful. Removed. A plain
+    // `term.refresh()` is enough to repaint the viewport, and the
+    // onContextLoss handler above covers the case where WebGL does
+    // die.
     if (changed) {
-      try {
-        // Clearing the glyph texture atlas forces the WebGL addon to
-        // re-rasterize at the new cell size. Without this, the atlas
-        // contains glyphs sized for the OLD pane width and the canvas
-        // paints them at stale offsets.
-        this.webglAddon?.clearTextureAtlas?.();
-      } catch {}
       try {
         this.term.refresh(0, this.term.rows - 1);
       } catch {}
@@ -384,6 +406,15 @@ export class TerminalInstance {
     this.dirObserver = null;
     this.detach();
     g_terminals.delete(this);
+    // Phase 25: release the WebGL addon BEFORE term.dispose() so we
+    // can swallow any teardown error specific to the GPU canvas
+    // without the rest of dispose() being skipped. Also reads the
+    // field, which keeps tsc happy now that the in-flight
+    // clearTextureAtlas reader is gone (Phase 23.E).
+    try {
+      this.webglAddon?.dispose();
+    } catch {}
+    this.webglAddon = null;
     this.term.dispose();
     if (this.container.parentElement) {
       this.container.parentElement.removeChild(this.container);

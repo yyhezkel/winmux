@@ -152,6 +152,14 @@ export class TerminalInstance {
   // One fit per animation frame is enough; the trailing call after
   // the drag stops is what produces the final correct layout.
   private resizeRafId: number | null = null;
+  // Phase 25.B: trailing-edge debounce. The rAF throttle alone is
+  // leading-edge — during a FAST drag the very last container size
+  // can land between rAF ticks and never get a fit, leaving the
+  // terminal "stuck" at an intermediate width until the user
+  // re-focuses the pane. This timer fires one authoritative fit
+  // ~140ms after the resize storm ends, guaranteeing the final
+  // dimensions are always applied.
+  private resizeSettleTimer: number | null = null;
 
   constructor(paneId: string) {
     this.paneId = paneId;
@@ -270,14 +278,28 @@ export class TerminalInstance {
       }
     }
 
-    // Phase 23.E: rAF-throttled fit. During a drag, multiple per-pixel
-    // resize events collapse into one fit per animation frame.
+    // Phase 23.E + 25.B: resize handling has two layers.
+    //  - rAF throttle: smooth live updates during the drag without
+    //    flooding SIGWINCH down the SSH channel.
+    //  - trailing settle timer: fires ONE authoritative fit ~140ms
+    //    after the last resize event, so the final container size is
+    //    always applied even if a fast drag's last delta landed
+    //    between rAF ticks. Fixes "terminal stuck at an intermediate
+    //    width until I re-focus the pane".
     this.ro = new ResizeObserver(() => {
-      if (this.resizeRafId != null) return;
-      this.resizeRafId = requestAnimationFrame(() => {
-        this.resizeRafId = null;
+      if (this.resizeRafId == null) {
+        this.resizeRafId = requestAnimationFrame(() => {
+          this.resizeRafId = null;
+          this.fitAndResize();
+        });
+      }
+      if (this.resizeSettleTimer != null) {
+        clearTimeout(this.resizeSettleTimer);
+      }
+      this.resizeSettleTimer = window.setTimeout(() => {
+        this.resizeSettleTimer = null;
         this.fitAndResize();
-      });
+      }, 140);
     });
     this.ro.observe(this.container);
     g_terminals.add(this);
@@ -399,6 +421,12 @@ export class TerminalInstance {
     if (this.resizeRafId != null) {
       cancelAnimationFrame(this.resizeRafId);
       this.resizeRafId = null;
+    }
+    // Phase 25.B: cancel the trailing settle timer so a freed
+    // terminal doesn't fire a fit after disposal.
+    if (this.resizeSettleTimer != null) {
+      clearTimeout(this.resizeSettleTimer);
+      this.resizeSettleTimer = null;
     }
     this.ro?.disconnect();
     this.ro = null;

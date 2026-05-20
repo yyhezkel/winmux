@@ -9,6 +9,8 @@ interface Props {
   workspaceId: string;
   pane: Extract<LayoutNode, { kind: "pane" }>;
   isActive: boolean;
+  // Phase 26: pane is waiting on a blocking agent permission request.
+  isWaiting?: boolean;
   onFocus: (paneId: string) => void;
   onSplit: (paneId: string, direction: SplitDirection) => void;
   onClose: (paneId: string) => void;
@@ -275,7 +277,9 @@ export function BrowserPane(p: Props) {
 
   return (
     <div
-      class={`pane browser-pane ${p.isActive ? "active" : ""}`}
+      class={`pane browser-pane ${p.isActive ? "active" : ""} ${
+        p.isWaiting ? "waiting" : ""
+      }`}
       onMouseDown={() => p.onFocus(p.pane.pane_id)}
     >
       <div class="pane-header browser-header">

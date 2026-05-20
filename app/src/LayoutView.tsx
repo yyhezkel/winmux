@@ -23,6 +23,9 @@ interface Props {
   node: LayoutNode;
   activePaneId: string | null;
   connectedPaneIds: Set<string>;
+  // Phase 26: pane_ids with a pending blocking feed item — these
+  // panes get the cmux-style notification ring.
+  waitingPaneIds: Set<string>;
   pendingPasswordFor: string | null;
   pendingPassphrase: PassphrasePending | null;
   pendingHostTrust: HostTrustPending | null;
@@ -100,6 +103,7 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           workspaceConnection={props.all.workspaceConnection}
           workspaceName={props.all.workspaceName}
           isActive={isActive()}
+          isWaiting={props.all.waitingPaneIds.has(props.pane.pane_id)}
           isConnected={props.all.connectedPaneIds.has(props.pane.pane_id)}
           pendingPasswordFor={props.all.pendingPasswordFor}
           pendingPassphrase={props.all.pendingPassphrase}
@@ -124,6 +128,7 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           workspaceId={props.all.workspaceId}
           pane={props.pane}
           isActive={isActive()}
+          isWaiting={props.all.waitingPaneIds.has(props.pane.pane_id)}
           onFocus={props.all.onFocus}
           onSplit={props.all.onSplit}
           onClose={props.all.onClose}
@@ -137,7 +142,9 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
       </Match>
       <Match when={kind() === "filemanager"}>
         <div
-          class={`pane ${isActive() ? "active" : ""}`}
+          class={`pane ${isActive() ? "active" : ""} ${
+            props.all.waitingPaneIds.has(props.pane.pane_id) ? "waiting" : ""
+          }`}
           onClick={() => props.all.onFocus(props.pane.pane_id)}
         >
           <div class="pane-header">

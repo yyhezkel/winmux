@@ -262,6 +262,27 @@ function App() {
     return live;
   };
 
+  // Phase 26: pane_ids with a pending blocking feed item — these get
+  // the notification ring. Recomputed reactively as feedItems changes.
+  const waitingPaneIds = (): Set<string> => {
+    const s = new Set<string>();
+    for (const it of feedItems()) {
+      if (it.state === "pending" && it.blocking && it.pane_id) s.add(it.pane_id);
+    }
+    return s;
+  };
+  // Phase 26: workspace_ids that contain at least one waiting pane —
+  // drives the sidebar tab highlight.
+  const waitingWorkspaceIds = (): Set<string> => {
+    const s = new Set<string>();
+    for (const it of feedItems()) {
+      if (it.state === "pending" && it.blocking && it.workspace_id) {
+        s.add(it.workspace_id);
+      }
+    }
+    return s;
+  };
+
   const reconcilePanes = (file: WorkspacesFile) => {
     const live = new Set<string>();
     for (const ws of file.workspaces) {
@@ -922,6 +943,7 @@ function App() {
           workspaces={file().workspaces}
           activeId={file().active_workspace_id}
           connectedIds={liveWorkspaceIds()}
+          waitingWorkspaceIds={waitingWorkspaceIds()}
           onActivate={handleSetActive}
           onCreate={() => setShowCreate(true)}
           onProvision={() => setShowProvision(true)}
@@ -1043,6 +1065,7 @@ function App() {
                 node={activeWs()!.layout!}
                 activePaneId={activePaneId()}
                 connectedPaneIds={connectedPanes()}
+                waitingPaneIds={waitingPaneIds()}
                 workspaceConnection={activeWs()?.connection}
                 workspaceName={activeWs()?.name}
                 workspaceIsSsh={

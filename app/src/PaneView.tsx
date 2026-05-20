@@ -124,6 +124,10 @@ interface Props {
   // noisy "ssh user@host:port" auto-label.
   workspaceName?: string;
   isActive: boolean;
+  // Phase 26: pane is waiting on a blocking agent permission request
+  // (a pending blocking feed item bound to this pane_id). Drives the
+  // cmux-style pulsing notification ring around the pane.
+  isWaiting?: boolean;
   isConnected: boolean;
   pendingPasswordFor: string | null;
   pendingPassphrase: PassphrasePending | null;
@@ -266,7 +270,7 @@ export function PaneView(p: Props) {
 
   return (
     <div
-      class={`pane ${p.isActive ? "active" : ""}`}
+      class={`pane ${p.isActive ? "active" : ""} ${p.isWaiting ? "waiting" : ""}`}
       onMouseDown={() => p.onFocus(p.pane.pane_id)}
     >
       <div class="pane-header">

@@ -20,6 +20,11 @@ interface Props {
   workspaces: Workspace[];
   activeId: string | null;
   connectedIds: Set<string>;
+  // Phase 26: workspaces that contain at least one pane with a
+  // pending blocking permission request. Renders a pulsing dot on
+  // the workspace row so the user can spot waiting work across
+  // workspaces.
+  waitingWorkspaceIds: Set<string>;
   onActivate: (id: string) => void;
   onCreate: () => void;
   /** Phase 14.A — open the server provisioning wizard. */
@@ -77,7 +82,9 @@ export function Sidebar(p: Props) {
         <For each={p.workspaces}>
           {(w) => (
             <div
-              class={`ws-item ${p.activeId === w.id ? "active" : ""}`}
+              class={`ws-item ${p.activeId === w.id ? "active" : ""} ${
+                p.waitingWorkspaceIds.has(w.id) ? "has-waiting" : ""
+              }`}
               onClick={() => p.onActivate(w.id)}
               onContextMenu={(e) => {
                 e.preventDefault();

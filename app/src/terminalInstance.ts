@@ -298,8 +298,10 @@ export class TerminalInstance {
       }
       this.resizeSettleTimer = window.setTimeout(() => {
         this.resizeSettleTimer = null;
-        this.fitAndResize();
-      }, 140);
+        // Phase 25.C: force=true — always re-send the settled
+        // dimensions to tmux even if xterm.js thinks nothing changed.
+        this.fitAndResize(true);
+      }, 120);
     });
     this.ro.observe(this.container);
     g_terminals.add(this);
@@ -354,7 +356,10 @@ export class TerminalInstance {
           console.error("pty_write failed", err)
         );
     });
-    this.fitAndResize();
+    // Phase 25.C: force a pty_resize on attach so tmux gets the
+    // current dimensions immediately, even on a reconnect where
+    // xterm.js's cols/rows happen to match the previous session.
+    this.fitAndResize(true);
   }
 
   detach() {
@@ -363,14 +368,23 @@ export class TerminalInstance {
     this.sessionId = null;
   }
 
-  fitAndResize() {
+  fitAndResize(force = false) {
     const prevCols = this.term.cols;
     const prevRows = this.term.rows;
     try {
       this.fit.fit();
     } catch {}
     const changed = this.term.cols !== prevCols || this.term.rows !== prevRows;
-    if (this.sessionId && changed) {
+    // Phase 25.C: when `force` is set (the trailing settle fit after
+    // a resize storm, or attach() on a reconnect), ALWAYS push
+    // pty_resize to the remote even if xterm.js's own cols/rows
+    // didn't change since the last fit. An intermediate fit during a
+    // fast drag can update xterm.js to the final size and fire a
+    // pty_resize that races / never reaches tmux; the settle fit
+    // would then see `changed=false` and skip pty_resize, leaving
+    // tmux painting at the stale width. Forcing the resize
+    // guarantees tmux is told the final dimensions.
+    if (this.sessionId && (changed || force)) {
       invoke("pty_resize", {
         sessionId: this.sessionId,
         cols: this.term.cols,
@@ -391,7 +405,10 @@ export class TerminalInstance {
     // `term.refresh()` is enough to repaint the viewport, and the
     // onContextLoss handler above covers the case where WebGL does
     // die.
-    if (changed) {
+    // Phase 25.C: force=true also triggers a repaint so the settled
+    // fit guarantees a fresh viewport even when grid metrics didn't
+    // change.
+    if (changed || force) {
       try {
         this.term.refresh(0, this.term.rows - 1);
       } catch {}

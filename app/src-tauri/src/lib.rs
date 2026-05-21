@@ -4734,6 +4734,7 @@ pub fn run() {
             settings::settings_reset,
             settings::list_system_fonts,
             updater::check_for_updates_now,
+            updater::download_and_install_update,
             updater::ssh_exec_in_workspace,
             connect_wizard::parse_ssh_config,
             connect_wizard::list_ssh_keys,

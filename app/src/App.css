@@ -2454,6 +2454,23 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   transition: background 100ms ease;
 }
 .update-banner-link:hover { background: rgba(122, 162, 247, 0.18); }
+/* Phase 27: filled primary action — one-click auto-install button. */
+.update-banner-install {
+  background: var(--w-accent);
+  color: var(--w-bg);
+  border: 1px solid var(--w-accent);
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--w-r-sm);
+  cursor: pointer;
+  transition: background 100ms ease, opacity 100ms ease;
+  font-family: inherit;
+}
+.update-banner-install:hover:not(:disabled) { background: var(--w-accent-hi); }
+.update-banner-install:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
 .update-banner-x {
   background: transparent;
   border: none;

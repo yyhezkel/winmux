@@ -33,6 +33,16 @@ pub(crate) struct Manifest {
     pub msi_url: Option<String>,
     #[serde(default)]
     pub msi_sha256: Option<String>,
+    // Phase 27: NSIS installer URL + sha256, used by
+    // `download_and_install_update` for one-click auto-install.
+    // NSIS is preferred over MSI because it handles "app is running"
+    // gracefully (wait / retry / replace) without requiring elevation
+    // every time. Older manifests without these fields fall back to
+    // the manual download path (Release notes link).
+    #[serde(default)]
+    pub nsis_url: Option<String>,
+    #[serde(default)]
+    pub nsis_sha256: Option<String>,
     #[serde(default)]
     pub min_supported_version: Option<String>,
     /// Phase 18: per-agent hook spec versions. Map keyed by agent
@@ -415,4 +425,151 @@ pub(crate) async fn rpc_check_now(state: &AppState, app: &AppHandle) -> serde_js
         "last_check_iso": info.last_check_iso,
         "error": info.error,
     })
+}
+
+// ─── Phase 27: one-click auto-install ──────────────────────────────────────
+
+/// Download a URL to a local path using PowerShell's Invoke-WebRequest.
+/// Mirrors the manifest-fetch path (TLS / proxy / CA store handled by
+/// PowerShell, no reqwest dep) but writes to disk instead of capturing
+/// to stdout — necessary for multi-MB installer downloads.
+async fn powershell_download(url: &str, dest: &std::path::Path) -> Result<(), String> {
+    let req_url = url.to_string();
+    let dest_path = dest.to_string_lossy().to_string();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let out = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$ProgressPreference = 'SilentlyContinue'; \
+                 try { Invoke-WebRequest -Uri $env:WINMUX_DL_URL -OutFile $env:WINMUX_DL_DEST -UseBasicParsing -TimeoutSec 120 } \
+                 catch { Write-Error $_.Exception.Message; exit 1 }",
+            ])
+            .env("WINMUX_DL_URL", &req_url)
+            .env("WINMUX_DL_DEST", &dest_path)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .map_err(|e| format!("spawn powershell: {e}"))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).to_string();
+            return Err(err.lines().next().unwrap_or("powershell error").to_string());
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))??;
+    Ok(())
+}
+
+/// sha256 of a file, lowercase hex. Reads the whole file into memory
+/// — fine for the ~5-7 MB NSIS installer; we'd stream for anything
+/// bigger.
+fn sha256_file(path: &std::path::Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let digest = hasher.finalize();
+    Ok(digest.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+/// Phase 27: re-fetch the manifest, download the NSIS installer
+/// listed in `nsis_url`, verify its sha256 against
+/// `manifest.nsis_sha256`, spawn the installer detached, then exit
+/// the app ~800ms later so the spawned process settles before the
+/// parent goes away.
+///
+/// Integrity: a wrong sha256 deletes the temp file and aborts. This
+/// gives us download integrity but NOT publisher authenticity — the
+/// installer is unsigned (SmartScreen will warn on first launch).
+/// Code-signing is a separate future task; see RELEASING.md
+/// "Caveats" section.
+#[tauri::command]
+pub(crate) async fn download_and_install_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Step 1: re-fetch the manifest (we don't trust the cached one
+    // from the last check — the version might have moved on, and
+    // we'd rather error than install something stale).
+    let url = {
+        let s = state.settings.lock().unwrap();
+        s.updates
+            .manifest_url
+            .clone()
+            .ok_or_else(|| "no manifest_url configured".to_string())?
+    };
+    let manifest = fetch_manifest(&url).await?;
+
+    // Step 2: guards.
+    let nsis_url = manifest
+        .nsis_url
+        .clone()
+        .ok_or_else(|| "manifest has no nsis_url — falling back to manual download".to_string())?;
+    let expected_sha = manifest
+        .nsis_sha256
+        .clone()
+        .ok_or_else(|| "manifest has no nsis_sha256 — refusing to install unverified".to_string())?;
+    if cmp_versions(&manifest.version, APP_VERSION) != std::cmp::Ordering::Greater {
+        return Err(format!(
+            "manifest version {} is not newer than current {APP_VERSION} — nothing to install",
+            manifest.version
+        ));
+    }
+
+    // Step 3: download to %TEMP%.
+    let temp_dir = std::env::temp_dir();
+    let dest = temp_dir.join(format!("winmux-update-{}.exe", manifest.version));
+    dlog(&format!(
+        "updater: downloading {} -> {:?} (expected sha256 {expected_sha})",
+        nsis_url, dest
+    ));
+    powershell_download(&nsis_url, &dest)
+        .await
+        .map_err(|e| format!("download failed: {e}"))?;
+
+    // Step 4: integrity check.
+    let actual_sha = sha256_file(&dest)
+        .map_err(|e| format!("hash failed: {e}"))?;
+    if !actual_sha.eq_ignore_ascii_case(&expected_sha) {
+        let _ = std::fs::remove_file(&dest);
+        return Err(format!(
+            "downloaded installer failed integrity check — expected {expected_sha}, got {actual_sha} — aborting"
+        ));
+    }
+    dlog(&format!("updater: sha256 verified ({actual_sha})"));
+
+    // Step 5: spawn the installer detached and schedule app exit.
+    // CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS so the installer
+    // survives our exit and isn't tied to our console.
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        std::process::Command::new(&dest)
+            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+            .spawn()
+            .map_err(|e| format!("spawn installer: {e}"))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new(&dest)
+            .spawn()
+            .map_err(|e| format!("spawn installer: {e}"))?;
+    }
+    dlog("updater: installer spawned — scheduling app exit in 800ms");
+
+    // Step 6: schedule exit. We can't exit synchronously here because
+    // the FE needs the Ok(()) return to fire before we go away
+    // (otherwise the invoke promise rejects with a window-destroyed
+    // error and the user sees a misleading toast).
+    let app_clone = app.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        app_clone.exit(0);
+    });
+    Ok(())
 }

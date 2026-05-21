@@ -81,6 +81,23 @@ function App() {
   const [settings, setSettings] = createSignal<Settings | null>(null);
   const [showSettings, setShowSettings] = createSignal(false);
   const [updateBanner, setUpdateBanner] = createSignal<UpdateInfo | null>(null);
+  // Phase 27: in-flight state for the one-click installer download.
+  const [installingUpdate, setInstallingUpdate] = createSignal(false);
+  const installUpdate = async () => {
+    if (installingUpdate()) return;
+    setInstallingUpdate(true);
+    try {
+      // Backend will exit() the app ~800ms after this returns; the
+      // invoke promise resolves before exit so we can show "downloading"
+      // → "installing" cleanly. On error the app keeps running.
+      await invoke("download_and_install_update");
+      // We're still alive briefly; the user sees the button locked in
+      // "downloading…" state until the process actually exits.
+    } catch (e) {
+      flashSummaryToast("err", t("update_banner.install_failed", { msg: String(e) }));
+      setInstallingUpdate(false);
+    }
+  };
   // Phase 14.A: server provisioning wizard.
   const [showProvision, setShowProvision] = createSignal(false);
   // Phase 18: hooks-outdated banners — at most one banner per agent
@@ -1219,6 +1236,18 @@ function App() {
                 {t("update_banner.notes")}
               </a>
             </Show>
+            {/* Phase 27: one-click auto-install. The backend downloads
+                the NSIS installer, verifies its sha256 against the
+                manifest, runs it, and exits the app. */}
+            <button
+              class="update-banner-install"
+              disabled={installingUpdate()}
+              onClick={() => void installUpdate()}
+            >
+              {installingUpdate()
+                ? t("update_banner.installing")
+                : t("update_banner.install")}
+            </button>
             <button class="update-banner-x" onClick={() => setUpdateBanner(null)}>×</button>
           </div>
         </div>

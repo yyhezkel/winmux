@@ -1077,80 +1077,97 @@ function App() {
                 </div>
               )}
             >
-              <LayoutView
-                workspaceId={activeWs()!.id}
-                node={activeWs()!.layout!}
-                activePaneId={activePaneId()}
-                connectedPaneIds={connectedPanes()}
-                waitingPaneIds={waitingPaneIds()}
-                workspaceConnection={activeWs()?.connection}
-                workspaceName={activeWs()?.name}
-                workspaceIsSsh={
-                  // Phase 16: walk the active workspace's layout looking for
-                  // any pane with an SSH connection. We pre-compute this
-                  // here so FileManagerPane (which lives deeper in the
-                  // tree and has no connection of its own) can render the
-                  // remote column even before the user opens a terminal.
-                  (() => {
-                    const ws = activeWs();
-                    if (!ws) return false;
-                    if (ws.connection?.type === "ssh") return true;
-                    const walk = (n: LayoutNode): boolean => {
-                      if (n.kind === "pane") {
-                        return n.connection?.type === "ssh";
-                      }
-                      return walk(n.first) || walk(n.second);
-                    };
-                    return ws.layout ? walk(ws.layout) : false;
-                  })()
-                }
-                pendingPasswordFor={pendingPwFor()}
-                pendingPassphrase={pendingPassphraseFor()}
-                pendingHostTrust={pendingHostTrust()}
-                paneStatus={paneStatus()}
-                paneStatusText={paneStatusText()}
-                panePersistence={panePersistence()}
-                ensureTerm={ensureTerm}
-                onFocus={(pid) => {
-                  setActivePaneId(pid);
-                  terms.get(pid)?.focus();
-                }}
-                onConnect={(pid, opts) => connectPane(pid, opts)}
-                onSplit={splitPane}
-                onClose={closePane}
-                onDisconnect={disconnectPane}
-                onKillSession={killSession}
-                onSetTitle={(pid, title) => {
-                  const ws = activeWs();
-                  if (!ws) return;
-                  invoke<WorkspacesFile>("pane_set_title", {
-                    workspaceId: ws.id,
-                    paneId: pid,
-                    title: title.trim() === "" ? null : title,
-                  })
-                    .then((f) => updateFile(f))
-                    .catch((e) => console.error("pane_set_title failed", e));
-                }}
-                onSetAnnotation={(pid, annotation) => {
-                  const ws = activeWs();
-                  if (!ws) return;
-                  invoke<WorkspacesFile>("pane_set_annotation", {
-                    workspaceId: ws.id,
-                    paneId: pid,
-                    annotation: annotation.trim() === "" ? null : annotation,
-                  })
-                    .then((f) => updateFile(f))
-                    .catch((e) =>
-                      console.error("pane_set_annotation failed", e)
-                    );
-                }}
-                onRatioDrag={(sid, r) => setRatio(sid, r, false)}
-                onRatioCommit={(sid, r) => setRatio(sid, r, true)}
-                onBrowserNavigate={browserNavigate}
-                onBrowserGoBack={browserGoBack}
-                onBrowserGoHome={browserGoHome}
-                onBrowserSetForward={browserSetForward}
-              />
+              {/* Phase 28: keyed Show on workspace id. Switching
+                  workspaces (id changes) tears down the LayoutView
+                  subtree so PaneView's onMount re-runs and attaches
+                  the correct terminal container — fixes the
+                  "switching workspaces shows the previous workspace's
+                  terminal" bug. Layout edits within ONE workspace
+                  (split / close pane) keep the same id, so Solid's
+                  fine-grained reactivity handles them without a
+                  full subtree recreation. Terminal instances live in
+                  the g_terminals registry keyed by pane_id, so they
+                  survive the DOM detach/reattach with no scrollback
+                  or session loss. */}
+              <Show when={activeWs()?.id} keyed>
+                {(_id) => (
+                  <LayoutView
+                    workspaceId={activeWs()!.id}
+                    node={activeWs()!.layout!}
+                    activePaneId={activePaneId()}
+                    connectedPaneIds={connectedPanes()}
+                    waitingPaneIds={waitingPaneIds()}
+                    workspaceConnection={activeWs()?.connection}
+                    workspaceName={activeWs()?.name}
+                    workspaceIsSsh={
+                      // Phase 16: walk the active workspace's layout looking for
+                      // any pane with an SSH connection. We pre-compute this
+                      // here so FileManagerPane (which lives deeper in the
+                      // tree and has no connection of its own) can render the
+                      // remote column even before the user opens a terminal.
+                      (() => {
+                        const ws = activeWs();
+                        if (!ws) return false;
+                        if (ws.connection?.type === "ssh") return true;
+                        const walk = (n: LayoutNode): boolean => {
+                          if (n.kind === "pane") {
+                            return n.connection?.type === "ssh";
+                          }
+                          return walk(n.first) || walk(n.second);
+                        };
+                        return ws.layout ? walk(ws.layout) : false;
+                      })()
+                    }
+                    pendingPasswordFor={pendingPwFor()}
+                    pendingPassphrase={pendingPassphraseFor()}
+                    pendingHostTrust={pendingHostTrust()}
+                    paneStatus={paneStatus()}
+                    paneStatusText={paneStatusText()}
+                    panePersistence={panePersistence()}
+                    ensureTerm={ensureTerm}
+                    onFocus={(pid) => {
+                      setActivePaneId(pid);
+                      terms.get(pid)?.focus();
+                    }}
+                    onConnect={(pid, opts) => connectPane(pid, opts)}
+                    onSplit={splitPane}
+                    onClose={closePane}
+                    onDisconnect={disconnectPane}
+                    onKillSession={killSession}
+                    onSetTitle={(pid, title) => {
+                      const ws = activeWs();
+                      if (!ws) return;
+                      invoke<WorkspacesFile>("pane_set_title", {
+                        workspaceId: ws.id,
+                        paneId: pid,
+                        title: title.trim() === "" ? null : title,
+                      })
+                        .then((f) => updateFile(f))
+                        .catch((e) => console.error("pane_set_title failed", e));
+                    }}
+                    onSetAnnotation={(pid, annotation) => {
+                      const ws = activeWs();
+                      if (!ws) return;
+                      invoke<WorkspacesFile>("pane_set_annotation", {
+                        workspaceId: ws.id,
+                        paneId: pid,
+                        annotation:
+                          annotation.trim() === "" ? null : annotation,
+                      })
+                        .then((f) => updateFile(f))
+                        .catch((e) =>
+                          console.error("pane_set_annotation failed", e)
+                        );
+                    }}
+                    onRatioDrag={(sid, r) => setRatio(sid, r, false)}
+                    onRatioCommit={(sid, r) => setRatio(sid, r, true)}
+                    onBrowserNavigate={browserNavigate}
+                    onBrowserGoBack={browserGoBack}
+                    onBrowserGoHome={browserGoHome}
+                    onBrowserSetForward={browserSetForward}
+                  />
+                )}
+              </Show>
             </ErrorBoundary>
           </div>
         </Show>

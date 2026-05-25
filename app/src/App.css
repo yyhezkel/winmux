@@ -1655,13 +1655,36 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   font-size: var(--w-fs-sm);
   font-family: var(--w-font-mono);
 }
+/* Phase 29 (D/E): fixed-height single-row toolbar. The action
+   buttons (Open / Edit / Upload / Download / Rename / Copy path /
+   Delete) are now ALWAYS rendered — when nothing is selected
+   they're disabled rather than removed. Combined with flex-wrap:
+   nowrap + a min-height that fits one row of controls, the
+   toolbar's height never changes between "row selected" and "no
+   selection" states. Earlier the height jumped (buttons appeared,
+   wrapped to a 2nd line), pushing the file list down — the user's
+   double-click second tap then landed on the wrong row.
+   On narrow panes, overflow-x: auto scrolls the toolbar
+   horizontally instead of wrapping. */
 .fm-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--w-border);
   background: var(--w-surface);
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-height: 38px;
+  /* Belt-and-suspenders against the children pushing height. */
+  white-space: nowrap;
+}
+/* Phase 29: keep direct toolbar children from being shrunk by the
+   flex container when the toolbar overflows — let overflow-x scroll
+   instead. */
+.fm-toolbar > * {
   flex-shrink: 0;
 }
 .fm-checkbox {
@@ -1712,7 +1735,57 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: rgba(0,0,0,0.18);
   border-bottom: 1px solid var(--w-border);
   flex-shrink: 0;
+  /* Phase 29 (E): never wrap; path input flexes, buttons stay fixed. */
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
+
+/* Phase 29 (B): sort field <select> styled to match fm-checkbox. */
+.fm-sort-select {
+  background: var(--w-bg);
+  color: var(--w-text);
+  border: 1px solid var(--w-border-hi);
+  border-radius: var(--w-r-sm);
+  padding: 2px 4px;
+  font-size: var(--w-fs-sm);
+  font-family: inherit;
+}
+
+/* Phase 29 (C): filter input with embedded clear button. */
+.fm-filter-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.fm-filter {
+  background: var(--w-bg);
+  color: var(--w-text);
+  border: 1px solid var(--w-border-hi);
+  border-radius: var(--w-r-sm);
+  padding: 3px 22px 3px 8px;
+  font-size: var(--w-fs-sm);
+  font-family: inherit;
+  width: 140px;
+  unicode-bidi: plaintext;
+}
+.fm-filter:focus {
+  outline: 1px solid var(--w-accent);
+  border-color: var(--w-accent);
+}
+.fm-filter-x {
+  position: absolute;
+  inset-inline-end: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--w-text-dim);
+  cursor: pointer;
+  font-size: var(--w-fs-md);
+  line-height: 1;
+  padding: 0 4px;
+}
+.fm-filter-x:hover { color: var(--w-text); }
 .fm-up, .fm-tool {
   background: transparent;
   border: 1px solid var(--w-border-hi);

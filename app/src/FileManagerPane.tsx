@@ -49,11 +49,23 @@ export function FileManagerPane(p: Props) {
   const [busy, setBusy] = createSignal(false);
   const [err, setErr] = createSignal<string | null>(null);
   const [status, setStatus] = createSignal<string>("");
-  // Phase 16: toolbar toggle for hiding the local column when the
-  // user only cares about remote. Default on SSH workspaces is to
-  // show both columns; users who want a wider remote pane flip
-  // this off.
-  const [showLocal, setShowLocal] = createSignal(true);
+  // Phase 16/29: toolbar toggle for hiding the local column when the
+  // user only cares about remote. Phase 29: default flipped to FALSE
+  // — Yossi's workflow is remote-first on SSH workspaces, the local
+  // column was just visual noise most of the time. Local-only
+  // workspaces are unaffected: the column render is guarded by
+  // `!p.hasSsh || showLocal()`, so `!hasSsh` still forces it shown.
+  const [showLocal, setShowLocal] = createSignal(false);
+
+  // Phase 29 (B): per-pane sort control. Directories stay grouped
+  // first regardless of field; within each group, sort by the chosen
+  // field/direction. Name sort is case-insensitive.
+  const [sortMode, setSortMode] = createSignal<"name" | "modified">("name");
+  const [sortDir, setSortDir] = createSignal<"asc" | "desc">("asc");
+
+  // Phase 29 (C): substring name filter, case-insensitive, applies
+  // to BOTH columns. Composes with sort: filter first, then sort.
+  const [filterText, setFilterText] = createSignal("");
 
   // Phase 17.B: built-in editor modal state. When the user clicks
   // Edit on a file row we open the modal targeting that side / path.
@@ -118,6 +130,38 @@ export function FileManagerPane(p: Props) {
     }
     return null;
   });
+
+  // Phase 29 (B+C): derived view of each column's entries after
+  // applying filter (substring on name, case-insensitive) and sort
+  // (directories first, then by name|modified asc|desc). Used by the
+  // <For> renderers below. Pure derivation — the raw signals
+  // localEntries / remoteEntries are still the source of truth
+  // (refresh writes raw lists into them).
+  const cmpEntries = (a: FileEntry, b: FileEntry): number => {
+    // Directories always come before files, regardless of sort field.
+    if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+    let cmp: number;
+    if (sortMode() === "modified") {
+      cmp = (a.modified ?? 0) - (b.modified ?? 0);
+      // Tiebreak on name (case-insensitive) so identical timestamps
+      // produce a stable order.
+      if (cmp === 0) {
+        cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      }
+    } else {
+      cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    }
+    return sortDir() === "asc" ? cmp : -cmp;
+  };
+  const applyFilterSort = (entries: FileEntry[]): FileEntry[] => {
+    const q = filterText().trim().toLowerCase();
+    const filtered = q.length === 0
+      ? entries
+      : entries.filter((e) => e.name.toLowerCase().includes(q));
+    return [...filtered].sort(cmpEntries);
+  };
+  const localEntriesView = createMemo(() => applyFilterSort(localEntries()));
+  const remoteEntriesView = createMemo(() => applyFilterSort(remoteEntries()));
 
   const refreshLocal = async () => {
     try {
@@ -719,76 +763,154 @@ export function FileManagerPane(p: Props) {
             <span>{t("fm.checkbox.show_local")}</span>
           </label>
         </Show>
-        {/* Phase 17.B: a "Selected" action group that lights up the
-             moment any row is selected — gives the user a clear,
-             visible menu instead of relying on the right-click prompt.
-             Buttons fire the same actions as the context-menu entries. */}
-        <Show when={selectedEntry()}>
-          <span class="fm-sep">|</span>
-          <span class="fm-selected-label" title={selectedEntry()!.entry.name}>
-            {selectedEntry()!.entry.name}
-          </span>
-          <button
-            class="fm-action"
-            disabled={busy()}
-            onClick={() => {
-              const s = selectedEntry()!;
-              if (s.side === "local") void openLocal(s.entry);
-              else void openRemote(s.entry);
-            }}
+        {/* Phase 29 (B): sort controls — name vs modified, asc vs
+             desc. Directories always sort first regardless. */}
+        <label class="fm-checkbox" title={t("fm.sort.label")}>
+          <span>{t("fm.sort.label")}:</span>
+          <select
+            class="fm-sort-select"
+            value={sortMode()}
+            onChange={(e) =>
+              setSortMode(e.currentTarget.value as "name" | "modified")
+            }
           >
-            {t("fm.action.open")}
-          </button>
-          <button
-            class="fm-action"
-            disabled={busy() || selectedEntry()!.entry.is_dir}
-            onClick={() => {
-              const s = selectedEntry()!;
-              openEditor(s.side, s.entry.name);
-            }}
-          >
-            {t("fm.action.edit")}
-          </button>
-          <Show when={p.hasSsh && selectedEntry()!.side === "local"}>
+            <option value="name">{t("fm.sort.name")}</option>
+            <option value="modified">{t("fm.sort.modified")}</option>
+          </select>
+        </label>
+        <button
+          class="fm-tool"
+          title={sortDir() === "asc" ? t("fm.sort.asc") : t("fm.sort.desc")}
+          onClick={() => setSortDir(sortDir() === "asc" ? "desc" : "asc")}
+        >
+          {sortDir() === "asc" ? "▲" : "▼"}
+        </button>
+        {/* Phase 29 (C): name-substring filter, applies to both
+             columns, composes with sort. */}
+        <div class="fm-filter-wrap">
+          <input
+            class="fm-filter"
+            type="text"
+            placeholder={t("fm.filter.placeholder")}
+            value={filterText()}
+            onInput={(e) => setFilterText(e.currentTarget.value)}
+          />
+          <Show when={filterText().length > 0}>
             <button
-              class="fm-action"
-              disabled={busy() || selectedEntry()!.entry.is_dir}
-              onClick={() => void uploadSel()}
+              class="fm-filter-x"
+              title={t("common.close")}
+              onClick={() => setFilterText("")}
             >
-              {t("fm.btn.upload")}
+              ×
             </button>
           </Show>
-          <Show when={p.hasSsh && selectedEntry()!.side === "remote"}>
-            <button
-              class="fm-action"
-              disabled={busy() || selectedEntry()!.entry.is_dir}
-              onClick={() => void downloadSel()}
-            >
-              {t("fm.btn.download")}
-            </button>
-          </Show>
+        </div>
+        {/* Phase 29 (D): the selected-actions block is ALWAYS rendered
+             (no <Show> gate) so the toolbar has a constant set of
+             children. Buttons just toggle `disabled` based on whether
+             anything is selected. Combined with the .fm-toolbar CSS
+             (flex-wrap: nowrap, fixed min-height, overflow-x: auto)
+             this gives the toolbar a provably constant height
+             regardless of selection state — selecting a row no longer
+             pushes the file list down and breaks the user's
+             double-click target. */}
+        <span class="fm-sep">|</span>
+        <span
+          class="fm-selected-label"
+          title={selectedEntry()?.entry.name ?? ""}
+        >
+          {selectedEntry()?.entry.name ?? "—"}
+        </span>
+        <button
+          class="fm-action"
+          title={t("fm.action.open")}
+          disabled={busy() || !selectedEntry()}
+          onClick={() => {
+            const s = selectedEntry();
+            if (!s) return;
+            if (s.side === "local") void openLocal(s.entry);
+            else void openRemote(s.entry);
+          }}
+        >
+          {t("fm.action.open")}
+        </button>
+        <button
+          class="fm-action"
+          title={t("fm.action.edit")}
+          disabled={busy() || !selectedEntry() || !!selectedEntry()?.entry.is_dir}
+          onClick={() => {
+            const s = selectedEntry();
+            if (!s) return;
+            openEditor(s.side, s.entry.name);
+          }}
+        >
+          {t("fm.action.edit")}
+        </button>
+        {/* Upload + Download are SSH-workspace-only; further gated by
+             which side the selection is on. Always rendered in SSH
+             workspaces (no Show on selection state) so layout stays
+             constant — they grey out when not applicable. */}
+        <Show when={p.hasSsh}>
           <button
             class="fm-action"
-            disabled={busy()}
-            onClick={() => void renameSel(selectedEntry()!.side)}
+            title={t("fm.btn.upload")}
+            disabled={
+              busy() ||
+              !selectedEntry() ||
+              selectedEntry()?.side !== "local" ||
+              !!selectedEntry()?.entry.is_dir
+            }
+            onClick={() => void uploadSel()}
           >
-            {t("common.rename")}
+            ↥
           </button>
           <button
             class="fm-action"
-            disabled={busy()}
-            onClick={() => void copyPathOf(selectedEntry()!.side, selectedEntry()!.entry.name)}
+            title={t("fm.btn.download")}
+            disabled={
+              busy() ||
+              !selectedEntry() ||
+              selectedEntry()?.side !== "remote" ||
+              !!selectedEntry()?.entry.is_dir
+            }
+            onClick={() => void downloadSel()}
           >
-            {t("fm.action.copy_path")}
-          </button>
-          <button
-            class="fm-action fm-action-danger"
-            disabled={busy()}
-            onClick={() => void deleteSel(selectedEntry()!.side)}
-          >
-            {t("common.delete")}
+            ↧
           </button>
         </Show>
+        <button
+          class="fm-action"
+          title={t("common.rename")}
+          disabled={busy() || !selectedEntry()}
+          onClick={() => {
+            const s = selectedEntry();
+            if (s) void renameSel(s.side);
+          }}
+        >
+          {t("common.rename")}
+        </button>
+        <button
+          class="fm-action"
+          title={t("fm.action.copy_path")}
+          disabled={busy() || !selectedEntry()}
+          onClick={() => {
+            const s = selectedEntry();
+            if (s) void copyPathOf(s.side, s.entry.name);
+          }}
+        >
+          ⧉
+        </button>
+        <button
+          class="fm-action fm-action-danger"
+          title={t("common.delete")}
+          disabled={busy() || !selectedEntry()}
+          onClick={() => {
+            const s = selectedEntry();
+            if (s) void deleteSel(s.side);
+          }}
+        >
+          {t("common.delete")}
+        </button>
         <span class="fm-status">{busy() ? "…" : status()}</span>
         <Show when={err()}>
           <span class="fm-err" title={err()!}>⚠ {err()}</span>
@@ -807,7 +929,7 @@ export function FileManagerPane(p: Props) {
               class="fm-list"
               onContextMenu={(ev) => openBgCtxMenu("local", ev)}
             >
-              <For each={localEntries()}>
+              <For each={localEntriesView()}>
                 {(e) => (
                   <div
                     class={`fm-row ${localSel() === e.name ? "selected" : ""}`}
@@ -856,7 +978,7 @@ export function FileManagerPane(p: Props) {
                   </div>
                 }
               >
-                <For each={remoteEntries()}>
+                <For each={remoteEntriesView()}>
                   {(e) => (
                     <div
                       class={`fm-row ${remoteSel() === e.name ? "selected" : ""}`}

@@ -172,6 +172,7 @@ async fn dispatch(
                 id: new_workspace_id(),
                 name: input.name,
                 color: input.color,
+                emoji: None,
                 cwd: input.cwd,
                 connection: None,
                 layout: Some(LayoutNode::Pane {

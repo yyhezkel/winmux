@@ -109,6 +109,9 @@ export type Workspace = {
   id: string;
   name: string;
   color?: string;
+  // Phase 30: per-workspace emoji glyph, shown as a sidebar prefix
+  // and in the OS window title. Free-form (up to 16 UTF-8 bytes).
+  emoji?: string;
   cwd?: string;
   // Phase 23.D: canonical workspace-level connection. Set on create
   // and back-filled on load from the first Terminal pane. Drives the

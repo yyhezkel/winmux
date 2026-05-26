@@ -972,6 +972,7 @@ fn finalize_workspace(
         // the same colour. Choice is deterministic by host so the same
         // server gets the same colour across re-provisions.
         color: Some(workspace_color_for_host(&input.host)),
+        emoji: None,
         cwd: None,
         connection: Some(new_conn),
         layout: Some(layout),

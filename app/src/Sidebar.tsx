@@ -85,6 +85,8 @@ export function Sidebar(p: Props) {
               class={`ws-item ${p.activeId === w.id ? "active" : ""} ${
                 p.waitingWorkspaceIds.has(w.id) ? "has-waiting" : ""
               }`}
+              data-has-color={w.color ? "true" : "false"}
+              style={w.color ? `--ws-color: ${w.color}` : undefined}
               onClick={() => p.onActivate(w.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -95,7 +97,7 @@ export function Sidebar(p: Props) {
                 class="ws-dot"
                 style={{ background: w.color || "#6b7682" }}
               />
-              <span class="ws-name">{w.name}</span>
+              <span class="ws-name">{w.emoji ? `${w.emoji} ${w.name}` : w.name}</span>
               <WorkspaceBadge w={w} />
               <Show when={p.connectedIds.has(w.id)}>
                 <span class="ws-live" title="connected" />

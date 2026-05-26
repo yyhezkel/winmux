@@ -2888,3 +2888,108 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   animation: winmux-attn-dot 1.4s ease-in-out infinite;
   pointer-events: none;
 }
+
+/* ───────────────────────────────────────────────────────────────
+   Phase 30: per-workspace identity (color + emoji)
+   ─────────────────────────────────────────────────────────────── */
+
+.ws-accent-strip {
+  height: 4px;
+  background: var(--ws-color, transparent);
+  flex-shrink: 0;
+  width: 100%;
+}
+.ws-accent-strip[data-empty="true"] {
+  display: none;
+}
+
+.ws-item[data-has-color="true"] {
+  border-inline-start: 3px solid var(--ws-color);
+  background: color-mix(in srgb, var(--ws-color) 12%, transparent);
+}
+.ws-item[data-has-color="true"].active {
+  background: color-mix(in srgb, var(--ws-color) 22%, transparent);
+}
+
+.ws-identity-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+.ws-identity-label {
+  font-size: var(--w-fs-sm, 12px);
+  color: var(--w-text-dim, #999);
+}
+.ws-identity-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ws-identity-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+.ws-identity-swatch.selected {
+  border-color: #fff;
+  box-shadow: 0 0 0 1px var(--w-border, #444);
+}
+.ws-identity-hex {
+  flex: 1;
+  min-width: 110px;
+  padding: 4px 8px;
+  font-family: var(--w-font-mono, monospace);
+  font-size: var(--w-fs-sm, 12px);
+  border: 1px solid var(--w-border, #444);
+  border-radius: 4px;
+  background: var(--w-surface, #1a1a1a);
+  color: var(--w-text, #ddd);
+}
+.ws-identity-emoji-btn {
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  cursor: pointer;
+  border: 1px solid var(--w-border, #444);
+  border-radius: 6px;
+  background: var(--w-surface, #1a1a1a);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+.ws-identity-emoji-btn.selected {
+  background: var(--w-accent, #3b82f6);
+  color: white;
+}
+.ws-identity-emoji-custom {
+  width: 90px;
+  padding: 4px 8px;
+  font-size: 16px;
+  border: 1px solid var(--w-border, #444);
+  border-radius: 4px;
+  background: var(--w-surface, #1a1a1a);
+  color: var(--w-text, #ddd);
+  text-align: center;
+}
+.ws-identity-reset {
+  margin-inline-start: auto;
+  padding: 4px 10px;
+  font-size: var(--w-fs-sm, 12px);
+  border: 1px solid var(--w-border, #444);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--w-text-dim, #999);
+  cursor: pointer;
+}
+.ws-identity-reset:hover {
+  color: var(--w-text, #ddd);
+  background: var(--w-surface-hover, #2a2a2a);
+}

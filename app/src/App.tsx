@@ -1,6 +1,7 @@
-import { createSignal, ErrorBoundary, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, ErrorBoundary, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { LayoutView } from "./LayoutView";
@@ -29,6 +30,7 @@ import { buildShortcutTable, matches, type ParsedShortcut } from "./shortcuts";
 import {
   collectPanes,
   describeConnection,
+  findPane,
   type Connection,
   type EnvVar,
   type FeedItem,
@@ -299,6 +301,34 @@ function App() {
     }
     return s;
   };
+
+  // Phase 30: live-update the OS window title (Alt+Tab text) from the
+  // active workspace's identity + focused pane + waiting state. Format:
+  // "🟦 ClientA ▸ pane-name ● — winmux". The dot only appears when at
+  // least one pane in the active workspace is in waiting state.
+  createEffect(() => {
+    const ws = activeWs();
+    if (!ws) {
+      void getCurrentWindow().setTitle("winmux");
+      return;
+    }
+    const parts: string[] = [];
+    if (ws.emoji) parts.push(ws.emoji);
+    parts.push(ws.name);
+    const pid = activePaneId();
+    if (pid && ws.layout) {
+      const pane = findPane(ws.layout, pid);
+      const paneName =
+        pane?.title ||
+        (pane?.connection ? describeConnection(pane.connection) : null);
+      if (paneName) {
+        parts.push("▸", paneName);
+      }
+    }
+    if (waitingWorkspaceIds().has(ws.id)) parts.push("●");
+    const title = parts.join(" ") + " — winmux";
+    void getCurrentWindow().setTitle(title);
+  });
 
   const reconcilePanes = (file: WorkspacesFile) => {
     const live = new Set<string>();
@@ -979,6 +1009,15 @@ function App() {
         />
       </ErrorBoundary>
       <div class="main">
+        {/* Phase 30: per-workspace accent strip. Sets the CSS variable
+            inline so the rule in App.css can paint it without needing a
+            second class per workspace. Hidden via data-empty when the
+            workspace has no color (or no active workspace at all). */}
+        <div
+          class="ws-accent-strip"
+          data-empty={activeWs()?.color ? "false" : "true"}
+          style={activeWs()?.color ? `--ws-color: ${activeWs()!.color}` : undefined}
+        />
         <Show when={activeWs()}>
           <ErrorBoundary
             fallback={(err) => (

@@ -376,6 +376,11 @@ pub(crate) struct Workspace {
     pub(crate) name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) color: Option<String>,
+    // Phase 30: per-workspace emoji glyph. Free-form (up to 16 UTF-8 bytes),
+    // typically a single grapheme cluster. Renders as a prefix on the
+    // sidebar tab and in the OS window title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) emoji: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) cwd: Option<String>,
     // Phase 23.D: canonical workspace-level connection. Populated on
@@ -2641,6 +2646,7 @@ fn workspace_create(
         id: new_workspace_id(),
         name: input.name,
         color: input.color,
+        emoji: None,
         cwd: input.cwd,
         connection: Some(conn.clone()),
         layout: Some(LayoutNode::Pane {
@@ -2896,6 +2902,50 @@ fn workspace_rename(
     }
     persist(&state)?;
     Ok(state.workspaces.lock().unwrap().clone())
+}
+
+// Phase 30: dedicated identity command for live preview. The full
+// `workspace_update` path is still used by the modal's Save button;
+// this one lets a swatch click instant-save without rebuilding the
+// whole field set. Validates: hex must be `#rrggbb`, emoji must be
+// <= 16 UTF-8 bytes. Returns the updated workspace.
+#[tauri::command]
+async fn workspace_set_identity(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    color: Option<String>,
+    emoji: Option<String>,
+) -> Result<Workspace, String> {
+    if let Some(c) = color.as_deref() {
+        let bytes = c.as_bytes();
+        let ok = bytes.len() == 7
+            && bytes[0] == b'#'
+            && bytes[1..].iter().all(|b| b.is_ascii_hexdigit());
+        if !ok {
+            return Err(format!("invalid color (want #rrggbb, got {c:?})"));
+        }
+    }
+    if let Some(e) = emoji.as_deref() {
+        if e.len() > 16 {
+            return Err(format!("emoji too long ({} bytes, max 16)", e.len()));
+        }
+    }
+    let updated: Workspace;
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        ws.color = color;
+        ws.emoji = emoji;
+        updated = ws.clone();
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -4688,6 +4738,7 @@ pub fn run() {
             workspace_create,
             workspace_update,
             workspace_rename,
+            workspace_set_identity,
             workspace_delete,
             workspace_set_active,
             workspace_split,

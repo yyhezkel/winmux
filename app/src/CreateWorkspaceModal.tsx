@@ -90,6 +90,11 @@ export function CreateWorkspaceModal(p: Props) {
   const [port, setPort] = createSignal(22);
   const [keyPath, setKeyPath] = createSignal("");
   const [color, setColor] = createSignal("#7aa2f7");
+  const [emoji, setEmoji] = createSignal("");
+  // Phase 30: editable hex value for the custom-color text input. Kept
+  // separate from `color` so a half-typed value (e.g. "#fff") doesn't
+  // clobber the live preview until blur/validation succeeds.
+  const [customHex, setCustomHex] = createSignal("");
   const [setupCmd, setSetupCmd] = createSignal("");
   const [teardownCmd, setTeardownCmd] = createSignal("");
   const [envRows, setEnvRows] = createSignal<EnvVar[]>([]);
@@ -118,6 +123,84 @@ export function CreateWorkspaceModal(p: Props) {
   const [testResult, setTestResult] = createSignal<TestResult | null>(null);
 
   const isEdit = () => p.editing !== null;
+
+  // Phase 30: presets shown in the identity row. Eight named colors that
+  // look distinct on both light and dark surfaces, and nine common
+  // category-style glyphs. Both lists are deliberately short — too many
+  // choices defeats the "instant recognition" goal.
+  const COLOR_PRESETS = [
+    "#1e40af", "#6d28d9", "#16a34a", "#ea580c",
+    "#dc2626", "#ca8a04", "#0891b2", "#475569",
+  ];
+  const EMOJI_PRESETS = ["🟦", "🟣", "🟢", "🟠", "🔴", "🟡", "🔵", "⚪", "⬛"];
+  const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+  // Phase 30: live-save helper. Used by the swatch / emoji buttons so a
+  // click instantly persists + emits `workspaces:changed`; the Save
+  // button is still required for non-identity fields (rename, env, …).
+  const saveIdentity = async (nextColor: string | null, nextEmoji: string | null) => {
+    if (!p.editing) return;
+    try {
+      const ws = await invoke<Workspace>("workspace_set_identity", {
+        workspaceId: p.editing.id,
+        color: nextColor,
+        emoji: nextEmoji,
+      });
+      // Reflect the server-canonical state in local signals. `workspaces:changed`
+      // will reload the workspace list in App.tsx — but the modal keeps a stale
+      // p.editing snapshot, so we update local fields explicitly here too.
+      setColor(ws.color || "#7aa2f7");
+      setEmoji(ws.emoji || "");
+      setCustomHex(ws.color || "");
+    } catch (e) {
+      console.error("workspace_set_identity failed", e);
+    }
+  };
+
+  const pickColor = (hex: string) => {
+    setColor(hex);
+    setCustomHex(hex);
+    void saveIdentity(hex, emoji() || null);
+  };
+
+  const pickEmoji = (g: string) => {
+    setEmoji(g);
+    void saveIdentity(color() || null, g);
+  };
+
+  const onCustomHexBlur = () => {
+    const v = customHex().trim();
+    if (v === "") {
+      // Empty = revert to whatever color() currently shows; do not save.
+      setCustomHex(color());
+      return;
+    }
+    if (HEX_RE.test(v)) {
+      setColor(v);
+      void saveIdentity(v, emoji() || null);
+    } else {
+      // Invalid: revert input to last accepted color.
+      setCustomHex(color());
+    }
+  };
+
+  const onCustomEmojiInput = (v: string) => {
+    // Limit emoji input to 4 grapheme-ish chars (cheap byte cap will keep us
+    // well under the backend's 16-byte ceiling for any plausible glyph).
+    const trimmed = v.slice(0, 8);
+    setEmoji(trimmed);
+  };
+
+  const onCustomEmojiBlur = () => {
+    void saveIdentity(color() || null, emoji() || null);
+  };
+
+  const resetIdentity = () => {
+    setColor("#7aa2f7");
+    setEmoji("");
+    setCustomHex("");
+    void saveIdentity(null, null);
+  };
 
   // Lazy-load the wizard inputs whenever the modal opens. Cheap calls and
   // they make the SSH section feel alive on first render.
@@ -251,6 +334,8 @@ export function CreateWorkspaceModal(p: Props) {
         const w = p.editing;
         setName(w.name);
         setColor(w.color || "#7aa2f7");
+        setEmoji(w.emoji || "");
+        setCustomHex(w.color || "");
         setSetupCmd(w.setup_command || "");
         setTeardownCmd(w.teardown_command || "");
         setEnvRows(w.env ? [...w.env] : []);
@@ -276,6 +361,8 @@ export function CreateWorkspaceModal(p: Props) {
         setPort(22);
         setKeyPath("");
         setColor("#7aa2f7");
+        setEmoji("");
+        setCustomHex("");
         setSetupCmd("");
         setTeardownCmd("");
         setEnvRows([]);
@@ -365,14 +452,77 @@ export function CreateWorkspaceModal(p: Props) {
             />
           </label>
 
-          <label>
-            <span>{t("ws.create.field.color")}</span>
-            <input
-              type="color"
-              value={color()}
-              onInput={(e) => setColor(e.currentTarget.value)}
-            />
-          </label>
+          {/* Phase 30: rich identity picker shown in edit mode only.
+              Each swatch / emoji is live-saved via workspace_set_identity. */}
+          <Show when={isEdit()}>
+            <div class="ws-identity-block">
+              <div class="ws-identity-label">{t("ws.identity.color")}</div>
+              <div class="ws-identity-row">
+                <For each={COLOR_PRESETS}>
+                  {(c) => (
+                    <button
+                      type="button"
+                      class={`ws-identity-swatch ${color() === c ? "selected" : ""}`}
+                      style={{ background: c }}
+                      title={c}
+                      onClick={() => pickColor(c)}
+                    />
+                  )}
+                </For>
+                <input
+                  type="text"
+                  class="ws-identity-hex"
+                  value={customHex()}
+                  placeholder={t("ws.identity.customColor")}
+                  spellcheck={false}
+                  onInput={(e) => setCustomHex(e.currentTarget.value)}
+                  onBlur={onCustomHexBlur}
+                />
+              </div>
+              <div class="ws-identity-label" style="margin-top: 8px">{t("ws.identity.emoji")}</div>
+              <div class="ws-identity-row">
+                <For each={EMOJI_PRESETS}>
+                  {(g) => (
+                    <button
+                      type="button"
+                      class={`ws-identity-emoji-btn ${emoji() === g ? "selected" : ""}`}
+                      title={g}
+                      onClick={() => pickEmoji(g)}
+                    >
+                      {g}
+                    </button>
+                  )}
+                </For>
+                <input
+                  type="text"
+                  class="ws-identity-emoji-custom"
+                  value={emoji()}
+                  placeholder={t("ws.identity.customEmoji")}
+                  maxlength={8}
+                  onInput={(e) => onCustomEmojiInput(e.currentTarget.value)}
+                  onBlur={onCustomEmojiBlur}
+                />
+                <button
+                  type="button"
+                  class="ws-identity-reset"
+                  onClick={resetIdentity}
+                >
+                  {t("ws.identity.reset")}
+                </button>
+              </div>
+            </div>
+          </Show>
+
+          <Show when={!isEdit()}>
+            <label>
+              <span>{t("ws.create.field.color")}</span>
+              <input
+                type="color"
+                value={color()}
+                onInput={(e) => setColor(e.currentTarget.value)}
+              />
+            </label>
+          </Show>
 
           <label>
             <span>{t("ws.create.field.type")}</span>

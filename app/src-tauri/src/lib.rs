@@ -354,6 +354,14 @@ pub(crate) enum LayoutNode {
         title: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         annotation: Option<String>,
+        // Phase 31: per-pane identity. None = inherit from the parent
+        // workspace's identity (set in Phase 30). The workspace value
+        // is what shows in the sidebar/accent strip; the pane value
+        // takes precedence in the pane header + window title when set.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        emoji: Option<String>,
     },
     Split {
         split_id: String,
@@ -598,6 +606,8 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
                 browser: None,
                 title: None,
                 annotation: None,
+                color: None,
+                emoji: None,
             });
             migrated = true;
         }
@@ -733,6 +743,8 @@ pub(crate) fn update_browser_pane(
             mut browser,
             title,
             annotation,
+            color,
+            emoji,
         } => {
             if pane_id == target && pane_kind == PaneKind::Browser {
                 if let Some(b) = browser.as_mut() {
@@ -746,6 +758,8 @@ pub(crate) fn update_browser_pane(
                 browser,
                 title,
                 annotation,
+                color,
+                emoji,
             }
         }
         LayoutNode::Split {
@@ -816,6 +830,8 @@ pub(crate) fn split_pane_in(
             browser,
             title,
             annotation,
+            color,
+            emoji,
         } => {
             if pane_id == target {
                 // Phase 24.D: 3-tuple after ClaudeChat / ClaudeLog
@@ -866,6 +882,11 @@ pub(crate) fn split_pane_in(
                     browser: new_browser,
                     title: None,
                     annotation: None,
+                    // Phase 31: new pane from a split inherits from the
+                    // workspace by default (None = inherit). User can
+                    // override later via pane_set_identity.
+                    color: None,
+                    emoji: None,
                 };
                 let original = LayoutNode::Pane {
                     pane_id,
@@ -874,6 +895,11 @@ pub(crate) fn split_pane_in(
                     browser,
                     title,
                     annotation,
+                    // Phase 31: preserve the original pane's identity
+                    // across the split — it's the same logical pane,
+                    // just relocated under a new Split node.
+                    color,
+                    emoji,
                 };
                 (
                     LayoutNode::Split {
@@ -894,6 +920,8 @@ pub(crate) fn split_pane_in(
                         browser,
                         title,
                         annotation,
+                        color,
+                        emoji,
                     },
                     false,
                 )
@@ -954,6 +982,8 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
             browser,
             title,
             annotation,
+            color,
+            emoji,
         } => {
             // Last pane — can't remove; return unchanged whether or not target matches.
             let _ = pane_id == target;
@@ -965,6 +995,8 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
                     browser,
                     title,
                     annotation,
+                    color,
+                    emoji,
                 }),
                 None,
             )
@@ -1037,6 +1069,8 @@ pub(crate) fn update_pane_in(
             browser,
             title,
             annotation,
+            color,
+            emoji,
         } => {
             if pane_id == target {
                 LayoutNode::Pane {
@@ -1046,6 +1080,8 @@ pub(crate) fn update_pane_in(
                     browser,
                     title: new_title.unwrap_or(title),
                     annotation: new_annotation.unwrap_or(annotation),
+                    color,
+                    emoji,
                 }
             } else {
                 LayoutNode::Pane {
@@ -1055,6 +1091,8 @@ pub(crate) fn update_pane_in(
                     browser,
                     title,
                     annotation,
+                    color,
+                    emoji,
                 }
             }
         }
@@ -2656,6 +2694,8 @@ fn workspace_create(
             browser: None,
             title: None,
             annotation: None,
+            color: None,
+            emoji: None,
         }),
         setup_command: input.setup_command,
         teardown_command: input.teardown_command,
@@ -2753,6 +2793,8 @@ fn workspace_reset_layout(
             browser: None,
             title: None,
             annotation: None,
+            color: None,
+            emoji: None,
         });
     }
     persist(&state)?;
@@ -2841,6 +2883,8 @@ fn backfill_terminal_connections(
             browser,
             title,
             annotation,
+            color,
+            emoji,
         } => {
             let needs_fix =
                 matches!(pane_kind, PaneKind::Terminal) && connection.is_none();
@@ -2861,6 +2905,8 @@ fn backfill_terminal_connections(
                     browser,
                     title,
                     annotation,
+                    color,
+                    emoji,
                 },
                 needs_fix,
             )
@@ -2942,6 +2988,92 @@ async fn workspace_set_identity(
         ws.color = color;
         ws.emoji = emoji;
         updated = ws.clone();
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(updated)
+}
+
+// Phase 31: per-pane identity. Same validation as the workspace
+// command. Walks the workspace's layout to find the matching pane and
+// updates its color/emoji fields. Returns a serializable snapshot of
+// the pane after the update so the frontend can refresh its local
+// state without waiting for the `workspaces:changed` round-trip.
+#[derive(Clone, Serialize)]
+pub(crate) struct PaneIdentity {
+    pub(crate) pane_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) emoji: Option<String>,
+}
+
+fn set_pane_identity_in_layout(
+    node: &mut LayoutNode,
+    target: &str,
+    new_color: &Option<String>,
+    new_emoji: &Option<String>,
+) -> Option<PaneIdentity> {
+    match node {
+        LayoutNode::Pane {
+            pane_id,
+            color,
+            emoji,
+            ..
+        } if pane_id == target => {
+            *color = new_color.clone();
+            *emoji = new_emoji.clone();
+            Some(PaneIdentity {
+                pane_id: pane_id.clone(),
+                color: color.clone(),
+                emoji: emoji.clone(),
+            })
+        }
+        LayoutNode::Pane { .. } => None,
+        LayoutNode::Split { first, second, .. } => {
+            set_pane_identity_in_layout(first, target, new_color, new_emoji)
+                .or_else(|| set_pane_identity_in_layout(second, target, new_color, new_emoji))
+        }
+    }
+}
+
+#[tauri::command]
+async fn pane_set_identity(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+    color: Option<String>,
+    emoji: Option<String>,
+) -> Result<PaneIdentity, String> {
+    if let Some(c) = color.as_deref() {
+        let bytes = c.as_bytes();
+        let ok = bytes.len() == 7
+            && bytes[0] == b'#'
+            && bytes[1..].iter().all(|b| b.is_ascii_hexdigit());
+        if !ok {
+            return Err(format!("invalid color (want #rrggbb, got {c:?})"));
+        }
+    }
+    if let Some(e) = emoji.as_deref() {
+        if e.len() > 16 {
+            return Err(format!("emoji too long ({} bytes, max 16)", e.len()));
+        }
+    }
+    let updated: PaneIdentity;
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        let layout = ws
+            .layout
+            .as_mut()
+            .ok_or_else(|| format!("workspace {workspace_id} has no layout"))?;
+        updated = set_pane_identity_in_layout(layout, &pane_id, &color, &emoji)
+            .ok_or_else(|| format!("no pane {pane_id} in workspace {workspace_id}"))?;
     }
     persist(&state)?;
     let _ = app.emit("workspaces:changed", ());
@@ -4739,6 +4871,7 @@ pub fn run() {
             workspace_update,
             workspace_rename,
             workspace_set_identity,
+            pane_set_identity,
             workspace_delete,
             workspace_set_active,
             workspace_split,

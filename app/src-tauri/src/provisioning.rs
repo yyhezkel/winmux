@@ -963,6 +963,8 @@ fn finalize_workspace(
         browser: None,
         title: None,
         annotation: None,
+        color: None,
+        emoji: None,
     };
     let ws = Workspace {
         id: new_workspace_id(),

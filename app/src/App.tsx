@@ -30,6 +30,7 @@ import { buildShortcutTable, matches, type ParsedShortcut } from "./shortcuts";
 import {
   collectPanes,
   describeConnection,
+  effectiveIdentity,
   findPane,
   type Connection,
   type EnvVar,
@@ -302,10 +303,15 @@ function App() {
     return s;
   };
 
-  // Phase 30: live-update the OS window title (Alt+Tab text) from the
-  // active workspace's identity + focused pane + waiting state. Format:
-  // "🟦 ClientA ▸ pane-name ● — winmux". The dot only appears when at
-  // least one pane in the active workspace is in waiting state.
+  // Phase 30 → Phase 31: live-update the OS window title from the
+  // FOCUSED pane's effective identity (pane override falls back to
+  // workspace). With pane-level identity, Yossi can see in Alt+Tab
+  // which client he's looking at even when multiple panes from
+  // different clients share the same workspace. Format:
+  //   "🟣 ClientB ● — winmux"        (focused pane has title/identity)
+  //   "🟦 ClientA — winmux"          (no focused pane → workspace fallback)
+  // The ● appears when any pane in the active workspace is waiting
+  // (cmux-style dirty indicator on the window itself).
   createEffect(() => {
     const ws = activeWs();
     if (!ws) {
@@ -313,18 +319,14 @@ function App() {
       return;
     }
     const parts: string[] = [];
-    if (ws.emoji) parts.push(ws.emoji);
-    parts.push(ws.name);
     const pid = activePaneId();
-    if (pid && ws.layout) {
-      const pane = findPane(ws.layout, pid);
-      const paneName =
-        pane?.title ||
-        (pane?.connection ? describeConnection(pane.connection) : null);
-      if (paneName) {
-        parts.push("▸", paneName);
-      }
-    }
+    const focused = pid && ws.layout ? findPane(ws.layout, pid) : null;
+    const ident = effectiveIdentity(focused ?? undefined, ws);
+    if (ident.emoji) parts.push(ident.emoji);
+    const focusedName =
+      focused?.title ||
+      (focused?.connection ? describeConnection(focused.connection) : null);
+    parts.push(focusedName ?? ws.name);
     if (waitingWorkspaceIds().has(ws.id)) parts.push("●");
     const title = parts.join(" ") + " — winmux";
     void getCurrentWindow().setTitle(title);
@@ -1138,6 +1140,8 @@ function App() {
                     waitingPaneIds={waitingPaneIds()}
                     workspaceConnection={activeWs()?.connection}
                     workspaceName={activeWs()?.name}
+                    workspaceColor={activeWs()?.color}
+                    workspaceEmoji={activeWs()?.emoji}
                     workspaceIsSsh={
                       // Phase 16: walk the active workspace's layout looking for
                       // any pane with an SSH connection. We pre-compute this

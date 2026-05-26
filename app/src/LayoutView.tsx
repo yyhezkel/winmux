@@ -62,6 +62,11 @@ interface Props {
   // Phase 23.I: workspace name. PaneView's header falls back to it
   // when the pane has no user-set title.
   workspaceName?: string;
+  // Phase 31: workspace identity. Threaded through to PaneView so each
+  // pane can compute its effective identity (own override falls back
+  // to the workspace's value).
+  workspaceColor?: string;
+  workspaceEmoji?: string;
   // Phase 24.D: onWorkspacesFileUpdate removed — its only consumers
   // were the (now-gone) ChatPane / ClaudeLogPane Match arms.
 }
@@ -102,6 +107,8 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           pane={props.pane}
           workspaceConnection={props.all.workspaceConnection}
           workspaceName={props.all.workspaceName}
+          workspaceColor={props.all.workspaceColor}
+          workspaceEmoji={props.all.workspaceEmoji}
           isActive={isActive()}
           isWaiting={props.all.waitingPaneIds.has(props.pane.pane_id)}
           isConnected={props.all.connectedPaneIds.has(props.pane.pane_id)}

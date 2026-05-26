@@ -89,6 +89,10 @@ export type LayoutNode =
       // (TS is structural; missing keys here are ignored).
       title?: string;
       annotation?: string;
+      // Phase 31: per-pane identity overrides the workspace's. Absent
+      // = inherit from the parent workspace.
+      color?: string;
+      emoji?: string;
     }
   | {
       kind: "split";
@@ -181,6 +185,19 @@ export function findPane(
   if (node.kind === "pane")
     return node.pane_id === paneId ? node : null;
   return findPane(node.first, paneId) ?? findPane(node.second, paneId);
+}
+
+// Phase 31: a pane's effective identity is its own override falling
+// back to its workspace's. Used by the pane header, the rename dialog's
+// "inheriting" hint, and the OS window title.
+export function effectiveIdentity(
+  pane: { color?: string; emoji?: string } | null | undefined,
+  ws: { color?: string; emoji?: string } | null | undefined,
+): { color?: string; emoji?: string } {
+  return {
+    color: pane?.color ?? ws?.color,
+    emoji: pane?.emoji ?? ws?.emoji,
+  };
 }
 
 export function describeConnection(c: Connection): string {

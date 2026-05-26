@@ -1,7 +1,7 @@
-import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { Connection, LayoutNode } from "./types";
-import { describeConnection } from "./types";
+import { describeConnection, effectiveIdentity } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
 import { t } from "./i18n";
 
@@ -123,6 +123,12 @@ interface Props {
   // when the user hasn't set a pane-specific title, replacing the
   // noisy "ssh user@host:port" auto-label.
   workspaceName?: string;
+  // Phase 31: the workspace's identity, used to compute the effective
+  // pane identity (pane override falls back to these). Drives the
+  // pane header border + emoji prefix and the rename dialog's
+  // "reset to inherit" hint.
+  workspaceColor?: string;
+  workspaceEmoji?: string;
   isActive: boolean;
   // Phase 26: pane is waiting on a blocking agent permission request
   // (a pending blocking feed item bound to this pane_id). Drives the
@@ -158,6 +164,67 @@ export function PaneView(p: Props) {
   const [editingMeta, setEditingMeta] = createSignal(false);
   const [titleDraft, setTitleDraft] = createSignal("");
   const [annotDraft, setAnnotDraft] = createSignal("");
+  // Phase 31: identity picker state, mirrors workspace-level picker.
+  // `paneColor` / `paneEmoji` hold the pane's own override (None means
+  // "inherit from workspace"). `customHex` is the editable field for
+  // typing a custom color; reverts on blur if invalid.
+  const [paneColor, setPaneColor] = createSignal<string | null>(null);
+  const [paneEmoji, setPaneEmoji] = createSignal<string | null>(null);
+  const [customHex, setCustomHex] = createSignal("");
+  const COLOR_PRESETS = [
+    "#1e40af", "#6d28d9", "#16a34a", "#ea580c",
+    "#dc2626", "#ca8a04", "#0891b2", "#475569",
+  ];
+  const EMOJI_PRESETS = ["🟦", "🟣", "🟢", "🟠", "🔴", "🟡", "🔵", "⚪", "⬛"];
+  const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+  const effective = () =>
+    effectiveIdentity(
+      { color: paneColor() ?? undefined, emoji: paneEmoji() ?? undefined },
+      { color: p.workspaceColor, emoji: p.workspaceEmoji },
+    );
+  const saveIdentity = async (color: string | null, emoji: string | null) => {
+    try {
+      await invoke("pane_set_identity", {
+        workspaceId: p.workspaceId,
+        paneId: p.pane.pane_id,
+        color,
+        emoji,
+      });
+      setPaneColor(color);
+      setPaneEmoji(emoji);
+      setCustomHex(color ?? "");
+    } catch (e) {
+      console.error("pane_set_identity failed", e);
+    }
+  };
+  const pickColor = (hex: string) => {
+    void saveIdentity(hex, paneEmoji());
+  };
+  const pickEmoji = (g: string) => {
+    void saveIdentity(paneColor(), g);
+  };
+  const onCustomHexBlur = () => {
+    const v = customHex().trim();
+    if (v === "") {
+      setCustomHex(paneColor() ?? "");
+      return;
+    }
+    if (HEX_RE.test(v)) {
+      void saveIdentity(v, paneEmoji());
+    } else {
+      setCustomHex(paneColor() ?? "");
+    }
+  };
+  const onCustomEmojiInput = (v: string) => {
+    const trimmed = v.slice(0, 8);
+    setPaneEmoji(trimmed === "" ? null : trimmed);
+  };
+  const onCustomEmojiBlur = () => {
+    void saveIdentity(paneColor(), paneEmoji());
+  };
+  const resetIdentity = () => {
+    void saveIdentity(null, null);
+  };
   const [showAnnot, setShowAnnot] = createSignal(false);
   // Phase 11.A: dropdown next to the disconnect button.
   const [showDiscMenu, setShowDiscMenu] = createSignal(false);
@@ -231,6 +298,12 @@ export function PaneView(p: Props) {
   const openMeta = () => {
     setTitleDraft(p.pane.title ?? "");
     setAnnotDraft(p.pane.annotation ?? "");
+    // Phase 31: hydrate identity from the pane prop (the source of
+    // truth between dialog opens). Falls through to None when the
+    // pane has no override and is inheriting from the workspace.
+    setPaneColor(p.pane.color ?? null);
+    setPaneEmoji(p.pane.emoji ?? null);
+    setCustomHex(p.pane.color ?? "");
     setEditingMeta(true);
   };
   const saveMeta = () => {
@@ -268,16 +341,28 @@ export function PaneView(p: Props) {
       ? p.pendingHostTrust
       : null;
 
+  // Phase 31: live effective identity — recomputed when pane props
+  // change OR when the user picks something in the open editor.
+  const liveEffective = () => {
+    const e = effective();
+    return {
+      color: p.pane.color ?? e.color,
+      emoji: p.pane.emoji ?? e.emoji,
+    };
+  };
   return (
     <div
       class={`pane ${p.isActive ? "active" : ""} ${p.isWaiting ? "waiting" : ""}`}
+      data-has-color={liveEffective().color ? "true" : "false"}
+      style={liveEffective().color ? `--pane-color: ${liveEffective().color}` : undefined}
       onMouseDown={() => p.onFocus(p.pane.pane_id)}
     >
       <div class="pane-header">
         {/* Phase 23.I: header fallback chain — user-set pane.title
             beats workspace name beats the raw SSH URL. The old
             describeConnection() output (e.g. "ssh runner@1.2.3.4:22")
-            was noisy and only useful for debugging. */}
+            was noisy and only useful for debugging.
+            Phase 31: prepend the effective emoji glyph when set. */}
         <span
           class="pane-conn"
           title={
@@ -288,6 +373,9 @@ export function PaneView(p: Props) {
                 : undefined
           }
         >
+          <Show when={liveEffective().emoji}>
+            <span class="pane-emoji">{liveEffective().emoji}</span>{" "}
+          </Show>
           {p.pane.title
             ?? p.workspaceName
             ?? (p.pane.connection
@@ -404,6 +492,74 @@ export function PaneView(p: Props) {
               }
             }}
           />
+          {/* Phase 31: identity picker. Same UX as the workspace
+              picker (Phase 30), reusing the `ws-identity-*` CSS classes
+              and i18n keys. Each click instant-saves via
+              pane_set_identity, so the user can preview the border
+              color change live behind the open dialog. Reset clears the
+              pane's own values → falls back to workspace inheritance. */}
+          <div class="ws-identity-block">
+            <div class="ws-identity-label">{t("ws.identity.color")}</div>
+            <div class="ws-identity-row">
+              <For each={COLOR_PRESETS}>
+                {(c) => (
+                  <button
+                    type="button"
+                    class={`ws-identity-swatch ${paneColor() === c ? "selected" : ""}`}
+                    style={{ background: c }}
+                    title={c}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pickColor(c);
+                    }}
+                  />
+                )}
+              </For>
+              <input
+                type="text"
+                class="ws-identity-hex"
+                value={customHex()}
+                placeholder={t("ws.identity.customColor")}
+                spellcheck={false}
+                onInput={(e) => setCustomHex(e.currentTarget.value)}
+                onBlur={onCustomHexBlur}
+              />
+            </div>
+            <div class="ws-identity-label" style="margin-top: 8px">{t("ws.identity.emoji")}</div>
+            <div class="ws-identity-row">
+              <For each={EMOJI_PRESETS}>
+                {(g) => (
+                  <button
+                    type="button"
+                    class={`ws-identity-emoji-btn ${paneEmoji() === g ? "selected" : ""}`}
+                    title={g}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pickEmoji(g);
+                    }}
+                  >
+                    {g}
+                  </button>
+                )}
+              </For>
+              <input
+                type="text"
+                class="ws-identity-emoji-custom"
+                value={paneEmoji() ?? ""}
+                placeholder={t("ws.identity.customEmoji")}
+                maxlength={8}
+                onInput={(e) => onCustomEmojiInput(e.currentTarget.value)}
+                onBlur={onCustomEmojiBlur}
+              />
+              <button
+                type="button"
+                class="ws-identity-reset"
+                onClick={resetIdentity}
+              >
+                {t("ws.identity.reset")}
+              </button>
+            </div>
+          </div>
           <div class="pane-meta-actions">
             <button class="primary" onClick={saveMeta}>
               Save

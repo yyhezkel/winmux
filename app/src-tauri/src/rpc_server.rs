@@ -182,6 +182,8 @@ async fn dispatch(
                     browser: None,
                     title: None,
                     annotation: None,
+                    color: None,
+                    emoji: None,
                 }),
                 setup_command: input.setup_command,
                 teardown_command: input.teardown_command,
@@ -1456,6 +1458,8 @@ async fn dispatch(
                     browser: None,
                     title: None,
                     annotation: None,
+                    color: None,
+                    emoji: None,
                 });
             }
             persist(state)?;

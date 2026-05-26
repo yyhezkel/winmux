@@ -2993,3 +2993,16 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   color: var(--w-text, #ddd);
   background: var(--w-surface-hover, #2a2a2a);
 }
+
+/* Phase 31: per-pane identity. Effective color (pane override or
+   workspace fallback) paints a 3px left strip on the pane header so
+   the user can tell at a glance which client this pane connects to.
+   The emoji prefix is rendered inline via .pane-emoji inside .pane-conn. */
+.pane[data-has-color="true"] .pane-header {
+  border-inline-start: 3px solid var(--pane-color);
+}
+.pane-emoji {
+  font-size: 14px;
+  vertical-align: middle;
+  margin-inline-end: 2px;
+}

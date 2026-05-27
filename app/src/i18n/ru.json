@@ -302,6 +302,11 @@
   "sshKey.offer.installing": "Установка…",
   "sshKey.offer.skip": "Не сейчас",
   "sshKey.offer.success": "Ключ установлен — следующее подключение будет с ним.",
+  "help.manualGuide.button": "Ручная настройка",
+  "help.copyCode": "Копировать",
+  "help.copied": "Скопировано",
+  "help.title.sshKeySetup": "Ручная настройка SSH-ключа",
+  "help.openHelp.menu": "Открыть справку",
 
   "settings.tab.shortcuts": "горячие клавиши",
   "settings.shortcuts.title": "Горячие клавиши",

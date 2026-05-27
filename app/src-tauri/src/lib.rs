@@ -269,6 +269,10 @@ pub(crate) enum PaneKind {
     /// terminal pane in that workspace has authenticated.
     #[serde(rename = "filemanager", alias = "file_manager", alias = "FileManager")]
     FileManager,
+    /// Phase 33: in-app help pane. Renders a markdown document
+    /// keyed by `help_topic` on the pane node (e.g. "ssh-key-setup").
+    /// Carries no remote state — entirely local, no SSH/PTY.
+    Help,
 }
 
 fn is_terminal_kind(k: &PaneKind) -> bool {
@@ -362,6 +366,11 @@ pub(crate) enum LayoutNode {
         color: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         emoji: Option<String>,
+        // Phase 33: which help topic this pane shows (only meaningful
+        // for `pane_kind == Help`). Same Option pattern as `browser` —
+        // present for Help panes, absent for everything else.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        help_topic: Option<String>,
     },
     Split {
         split_id: String,
@@ -608,6 +617,7 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
                 annotation: None,
                 color: None,
                 emoji: None,
+                help_topic: None,
             });
             migrated = true;
         }
@@ -745,6 +755,7 @@ pub(crate) fn update_browser_pane(
             annotation,
             color,
             emoji,
+            help_topic,
         } => {
             if pane_id == target && pane_kind == PaneKind::Browser {
                 if let Some(b) = browser.as_mut() {
@@ -760,6 +771,7 @@ pub(crate) fn update_browser_pane(
                 annotation,
                 color,
                 emoji,
+                help_topic,
             }
         }
         LayoutNode::Split {
@@ -821,6 +833,9 @@ pub(crate) fn split_pane_in(
     // Only used when `new_kind == Terminal`. Pass None to keep the
     // legacy Local-fallback behaviour.
     workspace_terminal_fallback: Option<Connection>,
+    // Phase 33: help-topic seed for the spawned pane. Only used when
+    // `new_kind == Help`. Pattern mirrors `new_browser_url`.
+    new_help_topic: Option<String>,
 ) -> (LayoutNode, bool) {
     match node {
         LayoutNode::Pane {
@@ -832,6 +847,7 @@ pub(crate) fn split_pane_in(
             annotation,
             color,
             emoji,
+            help_topic,
         } => {
             if pane_id == target {
                 // Phase 24.D: 3-tuple after ClaudeChat / ClaudeLog
@@ -840,7 +856,10 @@ pub(crate) fn split_pane_in(
                 // Terminal in PaneKind's serde, so an existing
                 // workspaces.json with kind=claudechat just shows up
                 // here as Terminal — same handling.
-                let (new_kind_resolved, new_conn, new_browser) = match new_kind {
+                // Phase 33: extended to 4-tuple — Help panes carry a
+                // help_topic that the frontend uses to pick which
+                // markdown doc to render.
+                let (new_kind_resolved, new_conn, new_browser, new_help_t) = match new_kind {
                     PaneKind::Terminal => {
                         // Inherit chain: source pane's own connection →
                         // workspace-level fallback (any terminal pane or
@@ -852,7 +871,7 @@ pub(crate) fn split_pane_in(
                             .clone()
                             .or(workspace_terminal_fallback.clone())
                             .unwrap_or(Connection::Local { shell: None });
-                        (PaneKind::Terminal, Some(conn), None)
+                        (PaneKind::Terminal, Some(conn), None, None)
                     }
                     PaneKind::Browser => {
                         let url = new_browser_url
@@ -865,14 +884,24 @@ pub(crate) fn split_pane_in(
                             forward_localhost: true,
                             last_loaded_url: None,
                         };
-                        (PaneKind::Browser, None, Some(bs))
+                        (PaneKind::Browser, None, Some(bs), None)
                     }
                     PaneKind::FileManager => {
                         // File-manager panes carry no per-pane state in
                         // workspaces.json — local cwd / show_hidden live in
                         // frontend signals; the right column uses whatever
                         // SSH session the workspace currently has.
-                        (PaneKind::FileManager, None, None)
+                        (PaneKind::FileManager, None, None, None)
+                    }
+                    PaneKind::Help => {
+                        // Phase 33: in-app help. Topic defaults to
+                        // ssh-key-setup since that's the most common
+                        // entry point (offered after a password-auth
+                        // SSH connect).
+                        let topic = new_help_topic
+                            .clone()
+                            .unwrap_or_else(|| "ssh-key-setup".to_string());
+                        (PaneKind::Help, None, None, Some(topic))
                     }
                 };
                 let new_pane = LayoutNode::Pane {
@@ -887,6 +916,7 @@ pub(crate) fn split_pane_in(
                     // override later via pane_set_identity.
                     color: None,
                     emoji: None,
+                    help_topic: new_help_t,
                 };
                 let original = LayoutNode::Pane {
                     pane_id,
@@ -900,6 +930,7 @@ pub(crate) fn split_pane_in(
                     // just relocated under a new Split node.
                     color,
                     emoji,
+                    help_topic,
                 };
                 (
                     LayoutNode::Split {
@@ -922,6 +953,7 @@ pub(crate) fn split_pane_in(
                         annotation,
                         color,
                         emoji,
+                        help_topic,
                     },
                     false,
                 )
@@ -941,6 +973,7 @@ pub(crate) fn split_pane_in(
                 new_kind,
                 new_browser_url.clone(),
                 workspace_terminal_fallback.clone(),
+                new_help_topic.clone(),
             );
             if found1 {
                 return (
@@ -954,8 +987,15 @@ pub(crate) fn split_pane_in(
                     true,
                 );
             }
-            let (new_second, found2) =
-                split_pane_in(*second, target, dir, new_kind, new_browser_url, workspace_terminal_fallback);
+            let (new_second, found2) = split_pane_in(
+                *second,
+                target,
+                dir,
+                new_kind,
+                new_browser_url,
+                workspace_terminal_fallback,
+                new_help_topic,
+            );
             (
                 LayoutNode::Split {
                     split_id,
@@ -984,6 +1024,7 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
             annotation,
             color,
             emoji,
+            help_topic,
         } => {
             // Last pane — can't remove; return unchanged whether or not target matches.
             let _ = pane_id == target;
@@ -997,6 +1038,7 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
                     annotation,
                     color,
                     emoji,
+                    help_topic,
                 }),
                 None,
             )
@@ -1071,6 +1113,7 @@ pub(crate) fn update_pane_in(
             annotation,
             color,
             emoji,
+            help_topic,
         } => {
             if pane_id == target {
                 LayoutNode::Pane {
@@ -1082,6 +1125,7 @@ pub(crate) fn update_pane_in(
                     annotation: new_annotation.unwrap_or(annotation),
                     color,
                     emoji,
+                    help_topic,
                 }
             } else {
                 LayoutNode::Pane {
@@ -1093,6 +1137,7 @@ pub(crate) fn update_pane_in(
                     annotation,
                     color,
                     emoji,
+                    help_topic,
                 }
             }
         }
@@ -2936,6 +2981,7 @@ fn workspace_create(
             annotation: None,
             color: None,
             emoji: None,
+            help_topic: None,
         }),
         setup_command: input.setup_command,
         teardown_command: input.teardown_command,
@@ -3035,6 +3081,7 @@ fn workspace_reset_layout(
             annotation: None,
             color: None,
             emoji: None,
+            help_topic: None,
         });
     }
     persist(&state)?;
@@ -3125,6 +3172,7 @@ fn backfill_terminal_connections(
             annotation,
             color,
             emoji,
+            help_topic,
         } => {
             let needs_fix =
                 matches!(pane_kind, PaneKind::Terminal) && connection.is_none();
@@ -3147,6 +3195,7 @@ fn backfill_terminal_connections(
                     annotation,
                     color,
                     emoji,
+                    help_topic,
                 },
                 needs_fix,
             )
@@ -3381,6 +3430,9 @@ fn workspace_split(
     // starting URL — falls back to about:blank if absent.
     pane_kind: Option<PaneKind>,
     browser_url: Option<String>,
+    // Phase 33: optional help-topic seed; used when pane_kind = Help.
+    // None means "let split_pane_in pick the default topic".
+    help_topic: Option<String>,
 ) -> Result<WorkspacesFile, String> {
     let kind = pane_kind.unwrap_or(PaneKind::Terminal);
     // Phase 23.C: when the new pane will be a Terminal, derive a
@@ -3421,8 +3473,15 @@ fn workspace_split(
         let mut file = state.workspaces.lock().unwrap();
         if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
             if let Some(layout) = ws.layout.take() {
-                let (new_layout, _) =
-                    split_pane_in(layout, &pane_id, direction, kind, browser_url, fallback_conn);
+                let (new_layout, _) = split_pane_in(
+                    layout,
+                    &pane_id,
+                    direction,
+                    kind,
+                    browser_url,
+                    fallback_conn,
+                    help_topic,
+                );
                 ws.layout = Some(new_layout);
             }
         }

@@ -3111,3 +3111,69 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   margin-top: 10px;
   font-size: 13px;
 }
+.sshkey-offer-buttons { gap: 8px; flex-wrap: wrap; }
+
+/* Phase 33: help pane. Scrollable markdown body with per-code-block
+   copy buttons positioned at the top-right of each <pre>. */
+.help-pane {
+  height: 100%;
+  overflow: auto;
+  background: var(--w-background, #0e1116);
+  color: var(--w-text-primary, #e6edf3);
+}
+.help-pane-body {
+  padding: 18px 22px 32px;
+  max-width: 820px;
+  line-height: 1.55;
+  font-size: 14px;
+}
+.help-pane-body h1 { font-size: 22px; margin: 0 0 12px; }
+.help-pane-body h2 {
+  font-size: 16px;
+  margin: 20px 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--w-border, #21262d);
+}
+.help-pane-body h3 { font-size: 14px; margin: 14px 0 6px; }
+.help-pane-body p { margin: 6px 0; }
+.help-pane-body ul, .help-pane-body ol { margin: 6px 0; padding-inline-start: 24px; }
+.help-pane-body code {
+  font-family: var(--w-mono, "Cascadia Mono", monospace);
+  font-size: 12.5px;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.help-pre-wrap {
+  position: relative;
+  margin: 8px 0;
+}
+.help-pre-wrap pre {
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0;
+}
+.help-pre-wrap pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 12.5px;
+}
+.help-copy-btn {
+  position: absolute;
+  inset-block-start: 6px;
+  inset-inline-end: 6px;
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 4px;
+  background: var(--w-surface, #161b22);
+  color: var(--w-text-secondary, #7d8590);
+  cursor: pointer;
+  opacity: 0.65;
+}
+.help-copy-btn:hover { opacity: 1; color: var(--w-text-primary, #e6edf3); }

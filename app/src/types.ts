@@ -17,7 +17,7 @@ export type SplitDirection = "horizontal" | "vertical";
 // Phase 8.A: pane kind. Default = terminal for legacy panes (server omits the field).
 // Phase 24.D: removed "claudechat" (Phase 22) + "claudelog" (Phase 24.B) — backend
 // aliases those JSON variants back to "terminal" at deserialize time.
-export type PaneKind = "terminal" | "browser" | "filemanager";
+export type PaneKind = "terminal" | "browser" | "filemanager" | "help";
 
 export type BrowserState = {
   url: string;
@@ -93,6 +93,10 @@ export type LayoutNode =
       // = inherit from the parent workspace.
       color?: string;
       emoji?: string;
+      // Phase 33: in-app help topic (only meaningful when
+      // pane_kind === "help"). Picks which markdown document the
+      // HelpPane renders.
+      help_topic?: string;
     }
   | {
       kind: "split";

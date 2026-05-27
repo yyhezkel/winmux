@@ -302,6 +302,11 @@
   "sshKey.offer.installing": "جارٍ التثبيت…",
   "sshKey.offer.skip": "ليس الآن",
   "sshKey.offer.success": "تم تثبيت المفتاح — الاتصال التالي سيستخدمه.",
+  "help.manualGuide.button": "دليل الإعداد اليدوي",
+  "help.copyCode": "نسخ",
+  "help.copied": "تم النسخ",
+  "help.title.sshKeySetup": "إعداد مفتاح SSH يدويًا",
+  "help.openHelp.menu": "فتح المساعدة",
 
   "settings.tab.shortcuts": "اختصارات",
   "settings.shortcuts.title": "اختصارات لوحة المفاتيح",

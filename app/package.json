@@ -20,6 +20,7 @@
     "@xterm/xterm": "^6.0.0",
     "bidi-js": "^1.0.3",
     "html2canvas": "^1.4.1",
+    "marked": "^18.0.4",
     "solid-js": "^1.9.3"
   },
   "devDependencies": {

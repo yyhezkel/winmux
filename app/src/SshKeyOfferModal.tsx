@@ -80,6 +80,29 @@ export function SshKeyOfferModal() {
     close();
   };
 
+  // Phase 33: open the manual setup guide as a horizontal split
+  // alongside the originating pane. Closes this modal (the user is
+  // committing to the manual flow; the offer banner will pop again
+  // if they reconnect via password later, unless they tick "Don't
+  // show again" first).
+  const openManualGuide = async () => {
+    const o = offer();
+    if (!o) return;
+    try {
+      await invoke("workspace_split", {
+        workspaceId: o.workspace_id,
+        paneId: o.pane_id,
+        direction: "horizontal",
+        paneKind: "help",
+        browserUrl: null,
+        helpTopic: "ssh-key-setup",
+      });
+    } catch (e) {
+      console.warn("workspace_split (help) failed", e);
+    }
+    close();
+  };
+
   return (
     <Show when={offer()}>
       <div class="modal-backdrop" onClick={dismiss}>
@@ -122,9 +145,12 @@ export function SshKeyOfferModal() {
               <div class="sshkey-offer-success">{success()}</div>
             </Show>
           </div>
-          <div class="modal-buttons">
+          <div class="modal-buttons sshkey-offer-buttons">
             <button onClick={dismiss} disabled={busy()}>
               {t("sshKey.offer.skip")}
+            </button>
+            <button onClick={() => void openManualGuide()} disabled={busy()}>
+              {t("help.manualGuide.button")}
             </button>
             <button
               class="primary"

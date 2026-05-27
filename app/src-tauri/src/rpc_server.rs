@@ -184,6 +184,7 @@ async fn dispatch(
                     annotation: None,
                     color: None,
                     emoji: None,
+                    help_topic: None,
                 }),
                 setup_command: input.setup_command,
                 teardown_command: input.teardown_command,
@@ -532,8 +533,15 @@ async fn dispatch(
                 let mut file = state.workspaces.lock().unwrap();
                 if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
                     if let Some(layout) = ws.layout.take() {
-                        let (new_layout, _) =
-                            split_pane_in(layout, &pane_id, direction, kind, url, fallback_conn);
+                        let (new_layout, _) = split_pane_in(
+                            layout,
+                            &pane_id,
+                            direction,
+                            kind,
+                            url,
+                            fallback_conn,
+                            None,
+                        );
                         ws.layout = Some(new_layout);
                     }
                 }
@@ -1460,6 +1468,7 @@ async fn dispatch(
                     annotation: None,
                     color: None,
                     emoji: None,
+                    help_topic: None,
                 });
             }
             persist(state)?;

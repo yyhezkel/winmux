@@ -302,6 +302,11 @@
   "sshKey.offer.installing": "מתקין…",
   "sshKey.offer.skip": "לא עכשיו",
   "sshKey.offer.success": "המפתח הותקן — החיבור הבא ישתמש בו.",
+  "help.manualGuide.button": "מדריך הקמה ידני",
+  "help.copyCode": "העתק",
+  "help.copied": "הועתק",
+  "help.title.sshKeySetup": "הקמה ידנית של מפתח SSH",
+  "help.openHelp.menu": "פתח עזרה",
 
   "settings.tab.shortcuts": "קיצורי דרך",
   "settings.shortcuts.title": "קיצורי מקלדת",

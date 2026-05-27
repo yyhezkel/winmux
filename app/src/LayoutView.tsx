@@ -2,6 +2,8 @@ import { Match, Show, Switch } from "solid-js";
 import { Divider } from "./Divider";
 import { BrowserPane } from "./BrowserPane";
 import { FileManagerPane } from "./FileManagerPane";
+import { HelpPane } from "./HelpPane";
+import { t } from "./i18n";
 // Phase 24.D: ClaudeChatPane (Phase 22) + ClaudeLogPane (Phase 24.B)
 // removed. Files deleted, Match arms below stripped.
 import {
@@ -173,6 +175,39 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
               hasSsh={workspaceIsSsh()}
               hasActiveSession={props.all.connectedPaneIds.size > 0}
             />
+          </div>
+        </div>
+      </Match>
+      <Match when={kind() === "help"}>
+        {/* Phase 33: in-app help pane. Self-contained — no SSH/PTY,
+            no remote state. The header title comes from i18n keyed by
+            the topic (e.g. "help.title.sshKeySetup"). */}
+        <div
+          class={`pane ${isActive() ? "active" : ""}`}
+          onClick={() => props.all.onFocus(props.pane.pane_id)}
+        >
+          <div class="pane-header">
+            <span class="pane-conn">
+              {t(`help.title.${
+                (props.pane.help_topic ?? "ssh-key-setup")
+                  .split("-")
+                  .map((s, i) => (i === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1)))
+                  .join("")
+              }`)}
+            </span>
+            <button
+              class="pane-btn pane-close"
+              title={t("common.close")}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.all.onClose(props.pane.pane_id);
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div class="pane-body">
+            <HelpPane topic={props.pane.help_topic ?? "ssh-key-setup"} />
           </div>
         </div>
       </Match>

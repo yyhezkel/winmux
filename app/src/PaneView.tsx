@@ -458,6 +458,27 @@ export function PaneView(p: Props) {
         </Show>
         <button class="pane-btn" title="Split right (Ctrl+Shift+D)" onClick={() => p.onSplit(p.pane.pane_id, "horizontal")}>↔</button>
         <button class="pane-btn" title="Split down (Ctrl+Shift+E)" onClick={() => p.onSplit(p.pane.pane_id, "vertical")}>↕</button>
+        {/* Phase 33: "Open help" splits a help pane to the right
+            with the default ssh-key-setup topic. Calls workspace_split
+            directly with paneKind=help; bypasses the regular onSplit
+            (which always creates a terminal). */}
+        <button
+          class="pane-btn"
+          title={t("help.openHelp.menu")}
+          onClick={(e) => {
+            e.stopPropagation();
+            void invoke("workspace_split", {
+              workspaceId: p.workspaceId,
+              paneId: p.pane.pane_id,
+              direction: "horizontal",
+              paneKind: "help",
+              browserUrl: null,
+              helpTopic: "ssh-key-setup",
+            });
+          }}
+        >
+          ?
+        </button>
         <button class="pane-btn pane-close" title="Close pane (Ctrl+Shift+W)" onClick={() => p.onClose(p.pane.pane_id)}>×</button>
       </div>
       <Show when={editingMeta()}>

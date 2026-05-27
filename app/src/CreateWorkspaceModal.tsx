@@ -59,6 +59,12 @@ interface Props {
   // fields are read-only (deleting + recreating is required to change).
   editing: Workspace | null;
   onClose: () => void;
+  // Phase 34: open the SSH-key-setup HelpPane as a side-by-side split.
+  // Optional — when omitted (e.g. tests, embedded usage), the `?` icon
+  // next to the key field still renders but the click is a no-op. The
+  // parent (App.tsx) wires this to workspace_split with paneKind=help
+  // on the currently-active workspace.
+  onOpenSshHelp?: () => void;
   onCreate: (input: {
     name: string;
     connection: Connection;
@@ -679,7 +685,25 @@ export function CreateWorkspaceModal(p: Props) {
               />
             </label>
             <label>
-              <span>{t("ws.create.field.key")}</span>
+              <span class="ws-key-label">
+                {t("ws.create.field.key")}
+                {/* Phase 34: single contextual entry point to the
+                    SSH-key-setup HelpPane. Tooltip explains; click
+                    splits a Help pane next to whatever the user was
+                    last working in. */}
+                <button
+                  type="button"
+                  class="help-hint-btn"
+                  title={t("help.sshKey.tooltip")}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    p.onOpenSshHelp?.();
+                  }}
+                >
+                  ?
+                </button>
+              </span>
               <select
                 value={keyMode()}
                 disabled={isEdit()}

@@ -1226,6 +1226,24 @@ function App() {
         }}
         onCreate={handleCreate}
         onUpdate={handleUpdate}
+        onOpenSshHelp={() => {
+          // Phase 34: split a Help pane off the currently-active
+          // workspace's focused pane. No-op when no workspace exists
+          // (fresh-launch state) — Yossi can extend later if the
+          // common case becomes "from-the-create-modal with nothing
+          // open yet".
+          const ws = activeWs();
+          const pid = activePaneId();
+          if (!ws || !pid) return;
+          void invoke("workspace_split", {
+            workspaceId: ws.id,
+            paneId: pid,
+            direction: "horizontal",
+            paneKind: "help",
+            browserUrl: null,
+            helpTopic: "ssh-key-setup",
+          });
+        }}
       />
 
       <button

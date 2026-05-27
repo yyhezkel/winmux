@@ -306,7 +306,7 @@
   "help.copyCode": "העתק",
   "help.copied": "הועתק",
   "help.title.sshKeySetup": "הקמה ידנית של מפתח SSH",
-  "help.openHelp.menu": "פתח עזרה",
+  "help.sshKey.tooltip": "צריך עזרה? פתח מדריך",
 
   "settings.tab.shortcuts": "קיצורי דרך",
   "settings.shortcuts.title": "קיצורי מקלדת",

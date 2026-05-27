@@ -3177,3 +3177,31 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   opacity: 0.65;
 }
 .help-copy-btn:hover { opacity: 1; color: var(--w-text-primary, #e6edf3); }
+
+/* Phase 34: small contextual "?" hint button. Sits inline with a
+   field label and opens the relevant HelpPane on click. */
+.ws-key-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.help-hint-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--w-border, #21262d);
+  background: transparent;
+  color: var(--w-text-secondary, #7d8590);
+  font-size: 10px;
+  line-height: 1;
+  padding: 0;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.help-hint-btn:hover {
+  color: var(--w-text-primary, #e6edf3);
+  border-color: var(--w-accent, #7aa2f7);
+}

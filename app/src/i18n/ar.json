@@ -306,7 +306,7 @@
   "help.copyCode": "نسخ",
   "help.copied": "تم النسخ",
   "help.title.sshKeySetup": "إعداد مفتاح SSH يدويًا",
-  "help.openHelp.menu": "فتح المساعدة",
+  "help.sshKey.tooltip": "تحتاج مساعدة؟ افتح الدليل",
 
   "settings.tab.shortcuts": "اختصارات",
   "settings.shortcuts.title": "اختصارات لوحة المفاتيح",

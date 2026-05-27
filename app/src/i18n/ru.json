@@ -306,7 +306,7 @@
   "help.copyCode": "Копировать",
   "help.copied": "Скопировано",
   "help.title.sshKeySetup": "Ручная настройка SSH-ключа",
-  "help.openHelp.menu": "Открыть справку",
+  "help.sshKey.tooltip": "Нужна помощь? Открыть руководство",
 
   "settings.tab.shortcuts": "горячие клавиши",
   "settings.shortcuts.title": "Горячие клавиши",

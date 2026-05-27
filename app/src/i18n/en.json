@@ -286,7 +286,7 @@
   "help.copyCode": "Copy",
   "help.copied": "Copied",
   "help.title.sshKeySetup": "Manual SSH Key Setup",
-  "help.openHelp.menu": "Open help",
+  "help.sshKey.tooltip": "Need help? Open guide",
   "settings.tab.shortcuts": "shortcuts",
   "settings.shortcuts.title": "Keyboard shortcuts",
   "settings.shortcuts.hint": "Click a binding to record a new combination. Esc cancels. Modifier-only chords (Ctrl alone, etc.) are rejected.",

@@ -25,18 +25,22 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-05-27 — Full LLM control of the app (= scan #2.1, HTTP Automation API)
+- **Context:** Selected as the next major focus. Today Claude runs *inside* winmux panes; goal is to also let Claude *drive* winmux from the outside — "open me a pane on server X and run cargo build", "read me the scrollback of pane #3", "screenshot the workspace", etc.
+- **Foundation already in place:** `rpc_server.rs` (JSON-RPC v2 over Named Pipe), 15 browser-automation tools in `winmux-mcp.exe`, methods for list-workspaces / tree / send / send-key / feed.push.
+- **Gap to close:**
+  - New RPC methods: `pane.scrollback`, `pane.screenshot`, `ui.tree`, `action.split`, `action.connect`
+  - Expose via `winmux-mcp.exe` as new tools: `read_pane`, `take_screenshot`, `list_panes`, `split_pane`, `connect_workspace`
+  - Optional: HTTP endpoint on 127.0.0.1 with auth token for scripters who don't want MCP
+- **Effort:** ~5-7 days (per scan estimate).
+- **Sources:** `docs/COMPETITIVE-SCAN.md` §2.1 (full design borrowed from editnori/WinMux's `NativeAutomationServer.cs`), `docs/IDEAS-RANKING.md` row 2.1 (✅ MUST).
+- **Status:** Awaiting kickoff. Yossi greenlit as next focus 2026-05-27 after triage.
+
 ### 2026-05-27 — Competitive-scan ideas inventory (triage in progress)
 - **Context:** Survey of 8 winmux GitHub projects produced an inventory of ~25 ideas to potentially adopt. Highest-impact triple: HTTP Automation API for LLM control (#2.1), Auto port forwarding (#2.2), Secrets Vault (#3.2).
 - **Source docs:** `docs/COMPETITIVE-SCAN.md` (full report + Secrets Vault design), `docs/IDEAS-RANKING.md` (decision table).
 - **Status:** Going through together with Yossi to triage MUST / SHOULD / COULD / SKIP. As individual items are decided, move them to their own Decided / Open entries with phase + commit references. Master inventory stays here until fully triaged.
 - **Also flagged:** the `winmux` name is taken by 8 projects on GitHub — rebrand caveat (see scan doc's "Naming Caveat" section).
-
-### 2026-05-27 — MCP server in browser
-- **Context:** User wants winmux's MCP server reachable from the browser tab.
-- **Options:**
-  - A. Auto-register `winmux-mcp` in claude's local MCP config on install
-  - B. Remote bridge over SSH tunnel
-- **Status:** Awaiting user choice. Raised mid-session, deferred multiple times.
 
 ### 2026-05-27 — Bidi mixed-content rendering
 - **Context:** Hebrew + Latin tokens (DEV, MAIN) in Claude Code CLI output mislead readers visually in xterm.js. User confirmed approach 1+2.
@@ -50,25 +54,35 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 - **Proposal:** Settings → Logs row with "Open logs folder" + "Copy log path" buttons (uses existing `tauri-plugin-opener`). ~30 lines.
 - **Status:** Awaiting user confirmation.
 
-### 2026-05-27 — winget submission
-- **Context:** Publish winmux to `winget-pkgs` for corporate-machine compatibility and CLI install/upgrade.
-- **Status:** Deferred — user said "wait with winget" after v0.2.3 ruled it not urgent.
-
 ### 2026-05-27 — README "Shipped" refresh
 - **Context:** README "Shipped in v0.1.0" line is two major releases stale (Phases 16–34 unrostered).
 - **Status:** Open, ~30 min refresh task.
 
-### Long-standing — Roadmap items carried over from v0.1.0 README
-- PATH auto-registration in WiX installer
-- Code-signing for MSI / NSIS (SmartScreen warning today)
-- Auto-update via signed manifest + delta downloads (currently unsigned, full-download)
-- ARM64 Windows build
-- aarch64-linux CLI
-- Scoop manifest
+### 2026-05-27 — PATH auto-registration in the WiX/NSIS installer
+- **Context:** v0.1.0 README "Coming next" item. Splits off from the now-closed long-standing roadmap block because it's small and in scope (everything else in that block went to out-of-scope).
+- **Effort:** ~1 hour. Modify the NSIS installer script to add winmux's install dir to PATH on install, remove on uninstall.
+- **Status:** Open, low priority but cheap to ship.
 
 ---
 
 ## Decided
+
+### 2026-05-27 — Rebrand, winget, Scoop, ARM64 Windows, aarch64-linux, code-signing, delta-downloads — all out of scope
+- **Context:** Distribution-scale items inherited from the v0.1.0 README "Coming next" list and discovered via the competitive scan (naming caveat).
+- **Decision:** All out of scope for now. winmux is an open-source project Yossi builds for his own working convenience — not investing in broad distribution mechanics.
+  - Rebrand: 8 winmux projects on GitHub, but namespace collision isn't a problem at the current scale.
+  - winget submission: was useful for fast updates, but the v0.2.3 native-HTTP updater already covers Yossi's actual update path.
+  - Scoop: same as winget.
+  - ARM64 Windows: no ARM users in scope.
+  - aarch64-linux CLI: no ARM Linux servers in scope.
+  - Code-signing: SmartScreen warning is a distribution problem, not a personal-use problem.
+  - Delta downloads: optimization for high-volume releases, not relevant at current scale.
+- **Outcome:** All seven items closed. Revisit individually if the project's purpose shifts toward wider distribution.
+
+### 2026-05-27 — MCP server in browser (deferred — separate parallel project)
+- **Context:** Original ask was to make winmux's MCP server reachable from the browser. Two options were on the table (auto-register winmux-mcp in claude config, OR remote bridge over SSH tunnel).
+- **Decision:** Deferred. Yossi is rebuilding MCP from scratch in a separate project; integration with winmux may happen later, but the existing local browser MCP work isn't being continued in winmux right now.
+- **Outcome:** No further work in this repo. Revisit if/when the external MCP project is ready to merge.
 
 ### 2026-05-27 — Updater HTTP via native client (v0.2.3, `4e38ad4`)
 - **Context:** v0.2.1/v0.2.2 updater shelled out to PowerShell for manifest fetch. AV / Constrained Language Mode on a corporate machine caused parser errors swallowing the request.

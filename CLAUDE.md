@@ -8,6 +8,8 @@ This file is read at the start of every Claude session working on winmux. Keep i
 - `docs/CONTRIBUTING.md` — recipes, style, commit conventions
 - `docs/RELEASING.md` — version cut process
 - `docs/DECISIONS.md` — **READ FIRST**: open threads + decisions log
+- `docs/COMPETITIVE-SCAN.md` — survey of 8 winmux projects, ideas inventory, Secrets Vault design
+- `docs/IDEAS-RANKING.md` — decision table for the ideas inventory (MUST / SHOULD / COULD)
 
 ## Decisions & open threads
 

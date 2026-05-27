@@ -10,9 +10,11 @@
 //! placeholder URL will return 404 / DNS-fail; the failure is silent and
 //! never blocks startup.
 //!
-//! Fetch path: shell out to PowerShell `Invoke-WebRequest` so we get TLS
-//! / proxy / CRL handling for free without pulling reqwest + tokio-rustls
-//! into the dep tree (Tauri's binary size is already 60 MB+).
+//! Fetch path: v0.2.3 switched to `ureq` + rustls (native HTTPS in
+//! process). The previous version shelled out to PowerShell, which
+//! broke on machines where powershell.exe is intercepted by AV/EDR or
+//! locked down by Constrained Language Mode — the parser-error output
+//! (script source echoed back) surfaced as the user-facing error.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -120,30 +122,29 @@ fn cmp_versions(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 async fn fetch_manifest(url: &str) -> Result<Manifest, String> {
-    let req_url = url.to_string();
+    // v0.2.3: native HTTPS client via `ureq` + rustls. Previously this
+    // shelled out to `powershell.exe -Command 'Invoke-WebRequest ...'`,
+    // which works on most Windows machines but breaks on installs where
+    // PowerShell is locked down (Constrained Language Mode, AV/EDR that
+    // intercept and mangle powershell.exe command lines, etc.). The
+    // failure mode was opaque — PowerShell's parser-error output
+    // (script source echoed back) became the user-visible error
+    // message. Doing the HTTPS GET in-process eliminates that whole
+    // class of breakage.
+    let url = url.to_string();
     let body = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        let out = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                // PowerShell handles HTTPS + redirects + system proxy / CA store
-                // for us. -UseBasicParsing avoids the IE engine dependency on
-                // Windows Server / fresh Win11 installs.
-                "$ProgressPreference = 'SilentlyContinue'; \
-                 try { (Invoke-WebRequest -Uri $env:WINMUX_MANIFEST_URL -UseBasicParsing -TimeoutSec 8).Content } \
-                 catch { Write-Error $_.Exception.Message; exit 1 }",
-            ])
-            .env("WINMUX_MANIFEST_URL", &req_url)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .map_err(|e| format!("spawn powershell: {e}"))?;
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr).to_string();
-            return Err(err.lines().next().unwrap_or("powershell error").to_string());
+        let resp = ureq::get(&url)
+            .set(
+                "User-Agent",
+                &format!("winmux/{}", env!("CARGO_PKG_VERSION")),
+            )
+            .timeout(std::time::Duration::from_secs(8))
+            .call()
+            .map_err(|e| format!("fetch manifest: {e}"))?;
+        if resp.status() < 200 || resp.status() >= 300 {
+            return Err(format!("manifest HTTP {}", resp.status()));
         }
-        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+        resp.into_string().map_err(|e| format!("read body: {e}"))
     })
     .await
     .map_err(|e| format!("join: {e}"))??;
@@ -429,33 +430,36 @@ pub(crate) async fn rpc_check_now(state: &AppState, app: &AppHandle) -> serde_js
 
 // ─── Phase 27: one-click auto-install ──────────────────────────────────────
 
-/// Download a URL to a local path using PowerShell's Invoke-WebRequest.
-/// Mirrors the manifest-fetch path (TLS / proxy / CA store handled by
-/// PowerShell, no reqwest dep) but writes to disk instead of capturing
-/// to stdout — necessary for multi-MB installer downloads.
-async fn powershell_download(url: &str, dest: &std::path::Path) -> Result<(), String> {
-    let req_url = url.to_string();
-    let dest_path = dest.to_string_lossy().to_string();
+/// v0.2.3: native HTTPS download via `ureq` (rustls). Replaces the
+/// previous `powershell.exe -Command 'Invoke-WebRequest -OutFile ...'`
+/// shell-out for the same reason as `fetch_manifest`: opaque failures
+/// on machines where PowerShell is locked down. Streams the response
+/// body to disk so multi-MB installer downloads don't sit in memory.
+async fn http_download_to_file(
+    url: &str,
+    dest: &std::path::Path,
+) -> Result<(), String> {
+    let url = url.to_string();
+    let dest = dest.to_path_buf();
     tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let out = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "$ProgressPreference = 'SilentlyContinue'; \
-                 try { Invoke-WebRequest -Uri $env:WINMUX_DL_URL -OutFile $env:WINMUX_DL_DEST -UseBasicParsing -TimeoutSec 120 } \
-                 catch { Write-Error $_.Exception.Message; exit 1 }",
-            ])
-            .env("WINMUX_DL_URL", &req_url)
-            .env("WINMUX_DL_DEST", &dest_path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .map_err(|e| format!("spawn powershell: {e}"))?;
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr).to_string();
-            return Err(err.lines().next().unwrap_or("powershell error").to_string());
+        let resp = ureq::get(&url)
+            .set(
+                "User-Agent",
+                &format!("winmux/{}", env!("CARGO_PKG_VERSION")),
+            )
+            // Installer is ~5 MB; 180s tolerates slow networks /
+            // corporate proxies without surfacing a confusing timeout.
+            .timeout(std::time::Duration::from_secs(180))
+            .call()
+            .map_err(|e| format!("download {url}: {e}"))?;
+        if resp.status() < 200 || resp.status() >= 300 {
+            return Err(format!("download HTTP {}", resp.status()));
         }
+        let mut reader = resp.into_reader();
+        let mut file = std::fs::File::create(&dest)
+            .map_err(|e| format!("create {}: {e}", dest.display()))?;
+        std::io::copy(&mut reader, &mut file)
+            .map_err(|e| format!("write {}: {e}", dest.display()))?;
         Ok(())
     })
     .await
@@ -526,7 +530,7 @@ pub(crate) async fn download_and_install_update(
         "updater: downloading {} -> {:?} (expected sha256 {expected_sha})",
         nsis_url, dest
     ));
-    powershell_download(&nsis_url, &dest)
+    http_download_to_file(&nsis_url, &dest)
         .await
         .map_err(|e| format!("download failed: {e}"))?;
 

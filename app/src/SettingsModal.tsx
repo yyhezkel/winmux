@@ -11,6 +11,7 @@ import {
   saveSettings,
   listSystemFonts,
   checkForUpdates,
+  loadSettings,
   DEFAULT_SHORTCUTS,
   DEFAULT_CLAUDE_SETTINGS,
 } from "./settings";
@@ -101,6 +102,15 @@ export function SettingsModal(p: Props) {
     try {
       const info = await checkForUpdates();
       setUpdateInfo(info);
+      // v0.2.3: re-pull settings so the "Last check" line in this
+      // modal reflects the timestamp the backend just wrote. Without
+      // this, the modal shows the stale value it loaded on open.
+      try {
+        const fresh = await loadSettings();
+        p.onChange(fresh);
+      } catch (e) {
+        console.warn("refresh settings after check failed", e);
+      }
     } catch (e) {
       console.error("check updates failed", e);
     } finally {

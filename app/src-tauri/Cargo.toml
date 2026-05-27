@@ -12,7 +12,7 @@ strip = "symbols"
 
 [package]
 name = "app"
-version = "0.2.2"
+version = "0.2.3"
 description = "winmux"
 authors = ["yossi"]
 edition = "2021"
@@ -52,3 +52,7 @@ notify-rust = "4"
 whoami = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 base64 = "0.22"
+# v0.2.3: native HTTPS client for the updater. Pure-Rust TLS via rustls
+# (default) — avoids SChannel which some AV/EDR products intercept and
+# break (root cause of the v0.2.2 "Check now" parser-error symptom).
+ureq = { version = "2", features = ["tls", "json"] }

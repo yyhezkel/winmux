@@ -365,6 +365,12 @@ pub(crate) struct Settings {
     /// Phase 18. Hooks-outdated banner show/skip state.
     #[serde(default)]
     pub hooks_updates: HooksUpdates,
+    /// Phase 32.B. When true, suppress the "set up SSH key
+    /// authentication?" offer after a password-auth connect. Persisted
+    /// when the user ticks "Don't show again" in the offer modal.
+    /// `#[serde(default)]` so older settings.json loads cleanly.
+    #[serde(default)]
+    pub ssh_key_offer_disabled: bool,
 }
 
 impl Default for Theme {
@@ -463,6 +469,7 @@ impl Default for Settings {
             shortcuts: Shortcuts::default(),
             claude: ClaudeOptions::default(),
             hooks_updates: HooksUpdates::default(),
+            ssh_key_offer_disabled: false,
         }
     }
 }

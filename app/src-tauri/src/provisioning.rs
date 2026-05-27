@@ -448,6 +448,47 @@ pub(crate) struct ProvisionInput {
     pub existing_workspace_id: Option<String>,
 }
 
+// Phase 32.A: structured error variant. Carried inside StepProgress
+// alongside the legacy `message` field — old frontends keep working;
+// new ones switch on `error.kind` for dedicated UIs. Tag/content
+// representation gives clean TS unions (kind: "SudoRequired" | …).
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(tag = "kind", content = "details")]
+pub(crate) enum ProvisioningError {
+    /// Preflight detected the login user is neither root nor a
+    /// passwordless sudoer. Provisioning aborts before any step runs.
+    SudoRequired {
+        user: String,
+        raw_stderr: String,
+    },
+    /// A privileged step exited non-zero. `stderr` is the raw remote
+    /// output (concatenation of stdout+stderr from exec_capture), NOT
+    /// flattened into a "exit N: …" string — the frontend renders it
+    /// expanded so the user can see exactly what went wrong.
+    StepFailed {
+        step: String,
+        exit_code: i32,
+        stderr: String,
+    },
+    /// Fallback for failures that don't fit the structured cases
+    /// (SSH connect, local key generation, etc.).
+    Generic(String),
+}
+
+impl ProvisioningError {
+    pub fn user_message(&self) -> String {
+        match self {
+            ProvisioningError::SudoRequired { user, .. } => format!(
+                "User '{user}' needs passwordless sudo. Log in as root or add a NOPASSWD sudoers entry."
+            ),
+            ProvisioningError::StepFailed { step, exit_code, .. } => {
+                format!("Step '{step}' failed (exit {exit_code})")
+            }
+            ProvisioningError::Generic(s) => s.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub(crate) struct StepProgress {
     pub run_id: String,
@@ -457,6 +498,11 @@ pub(crate) struct StepProgress {
     pub log_chunk: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    // Phase 32.A: structured error. When present, takes precedence
+    // over `message` in the UI — frontend switches on `error.kind`
+    // for dedicated rendering (SudoRequired modal, StepFailed pre).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ProvisioningError>,
     pub timestamp_iso: String,
 }
 
@@ -545,10 +591,20 @@ async fn run_provisioning(
                 "failed",
                 String::new(),
                 Some(format!("SSH connect failed: {e}")),
+                Some(ProvisioningError::Generic(format!("SSH connect failed: {e}"))),
             );
             return;
         }
     };
+
+    // Phase 32.A: sudo preflight. Fails fast with a dedicated
+    // SudoRequired event if the login user lacks passwordless sudo
+    // and isn't root — saves the user from a confusing "exit 1" on
+    // the first apt-get step.
+    if let Err(err) = preflight_sudo(&mut handle, &input.initial_user).await {
+        emit_preflight_failure(&app, &run_id, err);
+        return;
+    }
 
     // Detect package manager once and cache.
     let pm = exec_capture(
@@ -582,7 +638,7 @@ async fn run_provisioning(
     let mut claude_installed = false;
 
     for (idx, kind) in profile.steps.iter().enumerate() {
-        emit(&app, &run_id, idx, kind, "running", String::new(), None);
+        emit(&app, &run_id, idx, kind, "running", String::new(), None, None);
         let result = match kind {
             StepKind::UpdatePackages => {
                 let cmd = match pm.as_str() {
@@ -626,11 +682,12 @@ async fn run_provisioning(
                 let r = local_step_generate_keypair(&local_key_path, &input.new_user).await;
                 match r {
                     Ok(out) => {
-                        emit(&app, &run_id, idx, kind, "done", out, None);
+                        emit(&app, &run_id, idx, kind, "done", out, None, None);
                         Ok(())
                     }
                     Err(e) => {
-                        emit(&app, &run_id, idx, kind, "failed", String::new(), Some(e));
+                        let err = ProvisioningError::Generic(e.clone());
+                        emit(&app, &run_id, idx, kind, "failed", String::new(), Some(e), Some(err));
                         Err(())
                     }
                 }
@@ -650,6 +707,8 @@ async fn run_provisioning(
                         run_step(&mut handle, &app, &run_id, idx, kind, &cmd).await
                     }
                     Err(e) => {
+                        let msg = format!("read {pub_path}: {e}");
+                        let err = ProvisioningError::Generic(msg.clone());
                         emit(
                             &app,
                             &run_id,
@@ -657,7 +716,8 @@ async fn run_provisioning(
                             kind,
                             "failed",
                             String::new(),
-                            Some(format!("read {pub_path}: {e}")),
+                            Some(msg),
+                            Some(err),
                         );
                         Err(())
                     }
@@ -685,11 +745,13 @@ async fn run_provisioning(
                             "done",
                             format!("connected as {who}"),
                             None,
+                            None,
                         );
                         Ok(())
                     }
                     Err(e) => {
-                        emit(&app, &run_id, idx, kind, "failed", String::new(), Some(e));
+                        let err = ProvisioningError::Generic(e.clone());
+                        emit(&app, &run_id, idx, kind, "failed", String::new(), Some(e), Some(err));
                         Err(())
                     }
                 }
@@ -801,11 +863,12 @@ async fn run_provisioning(
                         } else {
                             raw.trim().to_string()
                         };
-                        emit(&app, &run_id, idx, kind, "done", pretty, None);
+                        emit(&app, &run_id, idx, kind, "done", pretty, None, None);
                         Ok(())
                     }
                     Err(e) => {
-                        emit(&app, &run_id, idx, kind, "failed", String::new(), Some(e));
+                        let err = ProvisioningError::Generic(e.clone());
+                        emit(&app, &run_id, idx, kind, "failed", String::new(), Some(e), Some(err));
                         Err(())
                     }
                 };
@@ -873,6 +936,7 @@ async fn run_provisioning(
         "done",
         String::new(),
         Some("provisioning complete".into()),
+        None,
     );
     let _ = app.emit(
         "provisioning:complete",
@@ -1084,21 +1148,37 @@ async fn run_step(
     kind: &StepKind,
     cmd: &str,
 ) -> Result<(), ()> {
-    match exec_capture(handle, cmd).await {
-        Ok(out) => {
-            emit(app, run_id, idx, kind, "done", out, None);
+    // Phase 32.A: use exec_status so we get the exit code separately
+    // and can emit StepFailed { step, exit_code, stderr } instead of
+    // the flattened "exit N: <stderr>" string.
+    match exec_status(handle, cmd).await {
+        Ok((0, out)) => {
+            emit(app, run_id, idx, kind, "done", out, None, None);
             Ok(())
         }
-        Err(e) => {
+        Ok((exit_code, stderr)) => {
+            let err = ProvisioningError::StepFailed {
+                step: format!("{kind:?}"),
+                exit_code,
+                stderr: stderr.clone(),
+            };
+            let msg = err.user_message();
             emit(
                 app,
                 run_id,
                 idx,
                 kind,
                 "failed",
-                String::new(),
-                Some(e),
+                stderr,
+                Some(msg),
+                Some(err),
             );
+            Err(())
+        }
+        Err(e) => {
+            // SSH channel itself failed — bucket as Generic.
+            let err = ProvisioningError::Generic(e.clone());
+            emit(app, run_id, idx, kind, "failed", String::new(), Some(e), Some(err));
             Err(())
         }
     }
@@ -1112,6 +1192,7 @@ fn emit(
     state: &'static str,
     log_chunk: String,
     message: Option<String>,
+    error: Option<ProvisioningError>,
 ) {
     let _ = app.emit(
         "provisioning:progress",
@@ -1122,6 +1203,30 @@ fn emit(
             state,
             log_chunk,
             message,
+            error,
+            timestamp_iso: iso_now(),
+        },
+    );
+}
+
+/// Phase 32.A: emit a non-step preflight failure. Used by sudo
+/// preflight before any actual step runs. Reuses the StepProgress
+/// channel so the wizard's existing event listener handles it.
+fn emit_preflight_failure(
+    app: &AppHandle,
+    run_id: &str,
+    err: ProvisioningError,
+) {
+    let _ = app.emit(
+        "provisioning:progress",
+        StepProgress {
+            run_id: run_id.to_string(),
+            step_index: 0,
+            step_kind: "Preflight".to_string(),
+            state: "failed",
+            log_chunk: String::new(),
+            message: Some(err.user_message()),
+            error: Some(err),
             timestamp_iso: iso_now(),
         },
     );
@@ -1184,6 +1289,22 @@ async fn exec_capture(
     handle: &mut client::Handle<crate::SshClient>,
     cmd: &str,
 ) -> Result<String, String> {
+    let (code, text) = exec_status(handle, cmd).await?;
+    if code != 0 {
+        return Err(format!("exit {code}: {text}"));
+    }
+    Ok(text)
+}
+
+/// Phase 32.A: like `exec_capture`, but always returns (exit_code, output)
+/// — even on non-zero exit. The Err arm is reserved for SSH channel
+/// failures (lost connection, channel open refused). Callers that need
+/// to distinguish "command ran and reported X" from "couldn't talk to
+/// the host" use this; everything else stays on `exec_capture`.
+async fn exec_status(
+    handle: &mut client::Handle<crate::SshClient>,
+    cmd: &str,
+) -> Result<(i32, String), String> {
     let mut chan = handle
         .channel_open_session()
         .await
@@ -1201,10 +1322,41 @@ async fn exec_capture(
         }
     }
     let text = String::from_utf8_lossy(&out).to_string();
-    if exit_code != 0 {
-        return Err(format!("exit {exit_code}: {text}"));
+    Ok((exit_code, text))
+}
+
+/// Phase 32.A: probe whether the login user can run privileged
+/// commands. Returns Ok(()) if root OR passwordless sudo works.
+/// Returns SudoRequired with the exact stderr from `sudo -n true` so
+/// the frontend can surface "incorrect password attempts will be logged"
+/// vs "sudo: a password is required" vs "user not in sudoers".
+async fn preflight_sudo(
+    handle: &mut client::Handle<crate::SshClient>,
+    user: &str,
+) -> Result<(), ProvisioningError> {
+    // Already root? sudo is irrelevant.
+    if let Ok((code, out)) = exec_status(handle, "id -u").await {
+        if code == 0 && out.trim() == "0" {
+            dlog("provisioning: preflight — user is root, skipping sudo check");
+            return Ok(());
+        }
     }
-    Ok(text)
+    // Try passwordless sudo. The 2>&1 keeps stderr (the actual
+    // diagnostic) on the same stream we capture.
+    match exec_status(handle, "sudo -n true 2>&1").await {
+        Ok((0, _)) => {
+            dlog("provisioning: preflight — passwordless sudo works");
+            Ok(())
+        }
+        Ok((_, stderr)) => Err(ProvisioningError::SudoRequired {
+            user: user.to_string(),
+            raw_stderr: stderr.trim().to_string(),
+        }),
+        Err(e) => Err(ProvisioningError::SudoRequired {
+            user: user.to_string(),
+            raw_stderr: format!("ssh channel error while probing sudo: {e}"),
+        }),
+    }
 }
 
 // ─── Tauri profile management ─────────────────────────────────────────────

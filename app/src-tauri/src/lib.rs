@@ -1796,13 +1796,24 @@ async fn try_agent_auth(
     }
 }
 
+/// Phase 32.B: which method authenticated the SSH session. Surfaced
+/// to spawn_ssh so a successful Password auth can prompt the user to
+/// convert to key auth (faster + reliable + no password-typing on
+/// future connects).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AuthMethod {
+    Agent,
+    Key,
+    Password,
+}
+
 async fn try_authenticate(
     handle: &mut client::Handle<SshClient>,
     user: &str,
     key_path: Option<&str>,
     key_passphrase: Option<&str>,
     password: Option<&str>,
-) -> Result<bool, String> {
+) -> Result<Option<AuthMethod>, String> {
     dlog(&format!(
         "ssh.auth: begin user={} key_path={:?} key_passphrase={} password={}",
         user,
@@ -1815,7 +1826,7 @@ async fn try_authenticate(
     dlog("ssh.auth: step 1 — try_agent_auth");
     if let Some(true) = try_agent_auth(handle, user).await {
         dlog("ssh.auth: step 1 OK (agent)");
-        return Ok(true);
+        return Ok(Some(AuthMethod::Agent));
     }
 
     // 2) Explicit key file (with optional passphrase).
@@ -1862,7 +1873,7 @@ async fn try_authenticate(
                     .map_err(|e| e.to_string())?;
                 dlog(&format!("ssh.auth: step 2 publickey result = {r}"));
                 if r {
-                    return Ok(true);
+                    return Ok(Some(AuthMethod::Key));
                 }
             }
             Err(e) => {
@@ -1906,7 +1917,7 @@ async fn try_authenticate(
                     .map_err(|e| e.to_string())?;
                 dlog(&format!("ssh.auth: step 3 {p} result = {r}"));
                 if r {
-                    return Ok(true);
+                    return Ok(Some(AuthMethod::Key));
                 }
             }
         }
@@ -1921,12 +1932,215 @@ async fn try_authenticate(
             .map_err(|e| e.to_string())?;
         dlog(&format!("ssh.auth: step 4 password result = {r}"));
         if r {
-            return Ok(true);
+            return Ok(Some(AuthMethod::Password));
         }
     }
 
     dlog("ssh.auth: ALL methods exhausted, no auth succeeded");
-    Ok(false)
+    Ok(None)
+}
+
+// ─── Phase 32.B: SSH key offer + install ─────────────────────────────────
+
+/// Path of the winmux-managed private key for a workspace.
+fn winmux_key_path(workspace_id: &str) -> Result<PathBuf, String> {
+    let mut p = config_dir()?;
+    p.push("keys");
+    std::fs::create_dir_all(&p).map_err(|e| format!("create {:?}: {e}", p))?;
+    p.push(format!("{workspace_id}.key"));
+    Ok(p)
+}
+
+/// True if the workspace already has a winmux-managed private key on
+/// disk — we don't re-offer in that case.
+fn winmux_managed_key_exists(workspace_id: &str) -> bool {
+    winmux_key_path(workspace_id)
+        .map(|p| p.exists())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+async fn ssh_key_offer_dismiss(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    dont_show_again: bool,
+) -> Result<(), String> {
+    if dont_show_again {
+        {
+            let mut s = state.settings.lock().map_err(|e| e.to_string())?;
+            s.ssh_key_offer_disabled = true;
+        }
+        // Persist via the existing settings save path. We touch the
+        // file directly instead of going through settings_save to
+        // avoid needing the full Settings argument from the frontend.
+        if let Ok(dir) = config_dir() {
+            let path = dir.join("settings.json");
+            if let Ok(snapshot) = state.settings.lock().map(|s| s.clone()) {
+                if let Ok(text) = serde_json::to_string_pretty(&snapshot) {
+                    let _ = std::fs::write(&path, text);
+                }
+            }
+        }
+        let _ = app.emit("settings:changed", ());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn ssh_key_generate_and_install(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+    ssh_user: String,
+    ssh_host: String,
+    ssh_port: u16,
+    password: String,
+    dont_show_again: bool,
+) -> Result<String, String> {
+    let _ = pane_id;
+    let priv_path = winmux_key_path(&workspace_id)?;
+    let pub_path: PathBuf = {
+        let mut p = priv_path.clone();
+        let mut s = p.file_name().unwrap().to_os_string();
+        s.push(".pub");
+        p.set_file_name(s);
+        p
+    };
+
+    // 1) Generate ed25519 keypair via ssh-keygen.exe (ships with
+    //    Windows 10+ OpenSSH). Same approach as the provisioning
+    //    wizard's GenerateKeypair step.
+    if priv_path.exists() {
+        std::fs::remove_file(&priv_path).map_err(|e| format!("remove old key: {e}"))?;
+    }
+    if pub_path.exists() {
+        std::fs::remove_file(&pub_path).map_err(|e| format!("remove old pubkey: {e}"))?;
+    }
+    let priv_str = priv_path.to_string_lossy().to_string();
+    let out = tokio::process::Command::new("ssh-keygen")
+        .args([
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            &format!("winmux-{workspace_id}"),
+            "-f",
+            &priv_str,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("spawn ssh-keygen: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "ssh-keygen failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    let pub_line =
+        std::fs::read_to_string(&pub_path).map_err(|e| format!("read pubkey: {e}"))?;
+    let pub_line_trim = pub_line.trim();
+
+    // 2) Open a fresh SSH session using the password that just worked
+    //    (the original handle isn't easily reusable here — opening a
+    //    new short-lived one is simpler and the user already typed
+    //    the password once for this flow).
+    let target = format!("{ssh_host}:{ssh_port}");
+    let mut handle = client::connect(
+        Arc::new(client::Config::default()),
+        (ssh_host.as_str(), ssh_port),
+        SshClient::new_anonymous(target.clone()),
+    )
+    .await
+    .map_err(|e| format!("ssh connect {target}: {e}"))?;
+    let ok = handle
+        .authenticate_password(&ssh_user, &password)
+        .await
+        .map_err(|e| format!("authenticate: {e}"))?;
+    if !ok {
+        return Err("authentication failed (password rejected)".into());
+    }
+
+    // 3) Append the public key to ~/.ssh/authorized_keys. No sudo —
+    //    writes only to the user's own home, so this works even for
+    //    a non-root user with no sudo at all.
+    let install_cmd = format!(
+        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+         touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && \
+         (grep -qxF '{key}' ~/.ssh/authorized_keys || echo '{key}' >> ~/.ssh/authorized_keys)",
+        key = pub_line_trim.replace('\'', "'\\''"),
+    );
+    let mut chan = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| e.to_string())?;
+    chan.exec(true, install_cmd.as_str())
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut out_buf = Vec::new();
+    let mut exit_code: i32 = 0;
+    loop {
+        match chan.wait().await {
+            Some(russh::ChannelMsg::Data { data }) => out_buf.extend_from_slice(&data[..]),
+            Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
+                out_buf.extend_from_slice(&data[..])
+            }
+            Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                exit_code = exit_status as i32
+            }
+            Some(russh::ChannelMsg::Close)
+            | Some(russh::ChannelMsg::Eof)
+            | None => break,
+            _ => {}
+        }
+    }
+    if exit_code != 0 {
+        let stderr = String::from_utf8_lossy(&out_buf).to_string();
+        return Err(format!(
+            "install pubkey failed (exit {exit_code}): {stderr}"
+        ));
+    }
+
+    // 4) Update the workspace's stored Connection — switch from
+    //    password to key. The next pane_connect will use the key path
+    //    and skip the password prompt.
+    {
+        let mut file = state.workspaces.lock().map_err(|e| e.to_string())?;
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            // The Connection::Ssh variant has no `password` field —
+            // passwords are transient (passed per-connect, not
+            // persisted). Setting the key_path is all that's needed
+            // so future pane_connect calls use the key.
+            if let Some(Connection::Ssh { key_path: kp, .. }) = ws.connection.as_mut() {
+                *kp = Some(priv_str.clone());
+            }
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+
+    // 5) Persist "don't show again" if requested.
+    if dont_show_again {
+        {
+            let mut s = state.settings.lock().map_err(|e| e.to_string())?;
+            s.ssh_key_offer_disabled = true;
+        }
+        if let Ok(dir) = config_dir() {
+            let path = dir.join("settings.json");
+            if let Ok(snapshot) = state.settings.lock().map(|s| s.clone()) {
+                if let Ok(text) = serde_json::to_string_pretty(&snapshot) {
+                    let _ = std::fs::write(&path, text);
+                }
+            }
+        }
+        let _ = app.emit("settings:changed", ());
+    }
+
+    dlog(&format!(
+        "ssh_key_generate_and_install: installed key for ws={workspace_id} user={ssh_user} host={ssh_host}"
+    ));
+    Ok(priv_str)
 }
 
 /// Run `echo $HOME` over a fresh exec channel. Returns (stdout, exit_code).
@@ -2016,7 +2230,7 @@ async fn spawn_ssh(
     };
 
     dlog("spawn_ssh: try_authenticate begin");
-    let auth_ok = try_authenticate(
+    let auth_method = try_authenticate(
         &mut handle,
         &user,
         key_path.as_deref(),
@@ -2024,9 +2238,35 @@ async fn spawn_ssh(
         password.as_deref(),
     )
     .await?;
-    dlog(&format!("spawn_ssh: try_authenticate returned ok={auth_ok}"));
-    if !auth_ok {
-        return Err("authentication failed (agent, key, and password all failed)".into());
+    dlog(&format!("spawn_ssh: try_authenticate returned method={auth_method:?}"));
+    let auth_method = match auth_method {
+        Some(m) => m,
+        None => return Err("authentication failed (agent, key, and password all failed)".into()),
+    };
+
+    // Phase 32.B: offer to convert a password-auth connection to key
+    // auth. Skipped when the user previously ticked "don't show again",
+    // when auth already uses a key/agent, or when the workspace
+    // already has a winmux-managed key on disk for this user@host.
+    if auth_method == AuthMethod::Password {
+        let suppressed = state
+            .settings
+            .lock()
+            .ok()
+            .map(|s| s.ssh_key_offer_disabled)
+            .unwrap_or(false);
+        if !suppressed && !winmux_managed_key_exists(&workspace_id) {
+            let _ = app.emit(
+                "ssh-key-offer",
+                serde_json::json!({
+                    "workspace_id": workspace_id,
+                    "pane_id": pane_id,
+                    "ssh_user": user,
+                    "ssh_host": host,
+                    "ssh_port": port,
+                }),
+            );
+        }
     }
 
     // Phase 6.2: best-effort bootstrap of the winmux Linux binary on the remote.
@@ -4872,6 +5112,8 @@ pub fn run() {
             workspace_rename,
             workspace_set_identity,
             pane_set_identity,
+            ssh_key_offer_dismiss,
+            ssh_key_generate_and_install,
             workspace_delete,
             workspace_set_active,
             workspace_split,

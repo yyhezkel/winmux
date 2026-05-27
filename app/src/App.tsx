@@ -9,6 +9,7 @@ import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
 import { ProvisioningWizard } from "./ProvisioningWizard";
 import { SettingsModal } from "./SettingsModal";
+import { SshKeyOfferModal } from "./SshKeyOfferModal";
 import {
   TerminalInstance,
   copyTerminalSelection,
@@ -1278,6 +1279,10 @@ function App() {
           onChange={(next) => setSettings(next)}
         />
       </Show>
+
+      {/* Phase 32.B: SSH key offer. Self-contained — listens for the
+          `ssh-key-offer` event on its own, no props needed. */}
+      <SshKeyOfferModal />
 
       <Show when={updateBanner()}>
         <div class="update-banner" role="status">

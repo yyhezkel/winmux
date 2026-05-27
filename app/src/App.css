@@ -3006,3 +3006,108 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   vertical-align: middle;
   margin-inline-end: 2px;
 }
+
+/* Phase 32.A: provisioning error UIs.
+   .prov-error-sudo is the preflight banner; .prov-step-failed is the
+   per-step expanded stderr block. Both use mono fonts for the line
+   and stderr so users can read shell text without it wrapping
+   unexpectedly. */
+.prov-error-card {
+  border: 1px solid var(--w-error, #f7768e);
+  background: color-mix(in srgb, var(--w-error, #f7768e) 8%, transparent);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.prov-error-title {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+.prov-error-body { margin: 0 0 8px 0; }
+.prov-error-hint { margin: 6px 0 4px 0; font-size: 12px; opacity: 0.85; }
+.prov-error-line {
+  display: block;
+  font-family: var(--w-mono, "Cascadia Mono", monospace);
+  font-size: 13px;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin: 4px 0 10px 0;
+  user-select: all;
+  word-break: break-all;
+}
+.prov-error-actions { display: flex; gap: 8px; }
+.prov-error-raw {
+  margin-top: 10px;
+  font-size: 12px;
+}
+.prov-error-raw pre {
+  background: var(--w-surface, #161b22);
+  padding: 8px;
+  border-radius: 4px;
+  overflow: auto;
+  max-height: 200px;
+}
+.prov-step-failed {
+  background: color-mix(in srgb, var(--w-error, #f7768e) 6%, transparent);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+.prov-step-failed-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.prov-step-exit {
+  font-family: var(--w-mono, "Cascadia Mono", monospace);
+  font-size: 12px;
+  opacity: 0.7;
+}
+.prov-step-stderr {
+  font-family: var(--w-mono, "Cascadia Mono", monospace);
+  font-size: 12px;
+  background: var(--w-surface, #161b22);
+  padding: 8px;
+  border-radius: 4px;
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Phase 32.B: SSH key offer modal. */
+.sshkey-offer { max-width: 480px; }
+.sshkey-offer-body { padding: 8px 16px 4px; }
+.sshkey-offer-target {
+  font-family: var(--w-mono, "Cascadia Mono", monospace);
+  font-size: 13px;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 6px 0 10px;
+}
+.sshkey-offer-warning {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 4px 0 12px;
+}
+.sshkey-offer-pw { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.sshkey-offer-pw input { padding: 6px 8px; }
+.sshkey-offer-checkbox { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.sshkey-offer-error {
+  color: var(--w-error, #f7768e);
+  margin-top: 10px;
+  font-size: 13px;
+}
+.sshkey-offer-success {
+  color: var(--w-success, #4ec9b0);
+  margin-top: 10px;
+  font-size: 13px;
+}

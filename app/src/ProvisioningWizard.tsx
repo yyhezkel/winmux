@@ -27,6 +27,17 @@ interface ProfilesFile {
   profiles: ProvisioningProfile[];
 }
 
+// Phase 32.A: structured error variant carried alongside `message`.
+// When present, drives a dedicated UI (sudo-required modal, step
+// stderr block) instead of the generic message line.
+type ProvisioningError =
+  | { kind: "SudoRequired"; details: { user: string; raw_stderr: string } }
+  | {
+      kind: "StepFailed";
+      details: { step: string; exit_code: number; stderr: string };
+    }
+  | { kind: "Generic"; details: string };
+
 interface StepProgress {
   run_id: string;
   step_index: number;
@@ -34,6 +45,7 @@ interface StepProgress {
   state: "running" | "done" | "failed" | "skipped";
   log_chunk: string;
   message?: string | null;
+  error?: ProvisioningError | null;
   timestamp_iso: string;
 }
 
@@ -108,6 +120,10 @@ export function ProvisioningWizard(p: Props) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_logLines, setLogLines] = createSignal<StepProgress[]>([]);
   const [stepStates, setStepStates] = createSignal<Record<number, StepProgress>>({});
+  // Phase 32.A: when the preflight failed with SudoRequired, capture
+  // it so we can render the dedicated modal block above the step list
+  // instead of silently failing at the first step.
+  const [preflightError, setPreflightError] = createSignal<ProvisioningError | null>(null);
   // Phase 14.A.2 — completion payload from the backend's
   // `provisioning:complete` event. When this carries a workspace_id
   // the Done step renders the "Open it now" buttons.
@@ -131,6 +147,16 @@ export function ProvisioningWizard(p: Props) {
     unlisten = await listen<StepProgress>("provisioning:progress", (e) => {
       setLogLines((prev) => [...prev, e.payload]);
       setStepStates((prev) => ({ ...prev, [e.payload.step_index]: e.payload }));
+      // Phase 32.A: the preflight failure rides on the same event
+      // channel with step_kind === "Preflight". Hoist it to a
+      // dedicated banner so the user gets the actionable
+      // /etc/sudoers hint immediately, not buried in step 0.
+      if (
+        e.payload.state === "failed" &&
+        e.payload.error?.kind === "SudoRequired"
+      ) {
+        setPreflightError(e.payload.error);
+      }
     });
     // Phase 14.A.2: the backend fires this once after the per-step
     // loop finishes. We snapshot the payload and auto-advance to the
@@ -183,6 +209,7 @@ export function ProvisioningWizard(p: Props) {
     setLogLines([]);
     setStepStates({});
     setResult(null);
+    setPreflightError(null);
     try {
       const handle = await invoke<RunHandle>("provisioning_start", {
         input: {
@@ -449,6 +476,56 @@ export function ProvisioningWizard(p: Props) {
                   host: host(),
                 })}
               </p>
+              {/* Phase 32.A: SudoRequired banner. Renders BEFORE the
+                  step list so the user sees the actionable hint
+                  immediately. The /etc/sudoers line is copy-pasteable
+                  so they don't have to type it. */}
+              <Show when={preflightError()?.kind === "SudoRequired"}>
+                {(() => {
+                  const err = preflightError() as Extract<
+                    ProvisioningError,
+                    { kind: "SudoRequired" }
+                  >;
+                  const line = `${err.details.user} ALL=(ALL) NOPASSWD: ALL`;
+                  return (
+                    <div class="prov-error-card prov-error-sudo">
+                      <div class="prov-error-title">{t("prov.error.sudoRequired.title")}</div>
+                      <p class="prov-error-body">{t("prov.error.sudoRequired.body")}</p>
+                      <p class="prov-error-hint">{t("prov.error.sudoRequired.hint")}</p>
+                      <code class="prov-error-line">{line}</code>
+                      <div class="prov-error-actions">
+                        <button
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(line);
+                            } catch (e) {
+                              console.warn("clipboard write failed", e);
+                            }
+                          }}
+                        >
+                          {t("prov.error.copy")}
+                        </button>
+                        <button
+                          class="primary"
+                          onClick={() => {
+                            setPreflightError(null);
+                            setStepStates({});
+                            void startRun();
+                          }}
+                        >
+                          {t("prov.error.retry")}
+                        </button>
+                      </div>
+                      <Show when={err.details.raw_stderr}>
+                        <details class="prov-error-raw">
+                          <summary>raw sudo stderr</summary>
+                          <pre>{err.details.raw_stderr}</pre>
+                        </details>
+                      </Show>
+                    </div>
+                  );
+                })()}
+              </Show>
               <div class="provisioning-step-list">
                 <For each={effectiveSteps()}>
                   {(stepId, idx) => {
@@ -461,11 +538,37 @@ export function ProvisioningWizard(p: Props) {
                           <span class={`provisioning-step-icon ${b().cls}`}>{b().icon}</span>
                           <span class="provisioning-step-label">{labelFor}</span>
                         </div>
-                        <Show when={s()?.message || s()?.log_chunk}>
-                          <pre class="provisioning-step-log">
-                            {s()?.message ? `${s()?.message}\n` : ""}
-                            {s()?.log_chunk ?? ""}
-                          </pre>
+                        {/* Phase 32.A: StepFailed gets a dedicated
+                            block with the step name, exit code, and
+                            stderr expanded (not behind "show details"). */}
+                        <Show
+                          when={
+                            s()?.error?.kind === "StepFailed"
+                          }
+                          fallback={
+                            <Show when={s()?.message || s()?.log_chunk}>
+                              <pre class="provisioning-step-log">
+                                {s()?.message ? `${s()?.message}\n` : ""}
+                                {s()?.log_chunk ?? ""}
+                              </pre>
+                            </Show>
+                          }
+                        >
+                          {(() => {
+                            const sf = s()!.error as Extract<
+                              ProvisioningError,
+                              { kind: "StepFailed" }
+                            >;
+                            return (
+                              <div class="prov-step-failed">
+                                <div class="prov-step-failed-head">
+                                  {t("prov.error.stepFailed.title", { step: sf.details.step })}
+                                  <span class="prov-step-exit">exit {sf.details.exit_code}</span>
+                                </div>
+                                <pre class="prov-step-stderr">{sf.details.stderr}</pre>
+                              </div>
+                            );
+                          })()}
                         </Show>
                       </div>
                     );

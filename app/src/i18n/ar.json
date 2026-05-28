@@ -264,6 +264,7 @@
   "settings.updates.logs.copyPath": "نسخ المسار",
   "settings.updates.logs.copied": "تم النسخ",
   "sidebar.notes.tooltip": "ملاحظات",
+  "sidebar.ports.tooltip": "المنافذ",
   "settings.tab.logs": "السجلات",
   "settings.logs.recent": "النشاط الأخير",
   "settings.logs.refresh": "تحديث",

@@ -128,10 +128,30 @@ pub async fn bridge_to_pipe(
     dlog("tunnel: handshake OK");
 
     // Open a fresh client connection to the local pipe server.
+    // Phase 39.A: on ERROR_PIPE_NOT_AVAILABLE (231) — all server
+    // instances momentarily busy — retry with bounded exponential
+    // backoff instead of failing the bridge. After the rpc_server cap
+    // lift + parallel-accept fixes this path should be effectively
+    // unreachable, but a remote agent that races a hair ahead of the
+    // server no longer turns a transient busy into a hard error +
+    // log spam. Per-attempt waits are silent (tracing::debug only);
+    // a genuine give-up surfaces via spawn_bridge's dlog.
     let pipe_name = crate::rpc_server::pipe_name();
-    let mut pipe = tokio::net::windows::named_pipe::ClientOptions::new()
-        .open(&pipe_name)
-        .map_err(|e| format!("open pipe {}: {}", pipe_name, e))?;
+    let mut backoff_ms = 25u64;
+    let mut pipe = loop {
+        match tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe_name) {
+            Ok(c) => break c,
+            Err(e) if e.raw_os_error() == Some(231) && backoff_ms <= 800 => {
+                tracing::debug!(
+                    "tunnel: pipe busy (231), retrying in {}ms",
+                    backoff_ms
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                backoff_ms *= 2;
+            }
+            Err(e) => return Err(format!("open pipe {}: {}", pipe_name, e)),
+        }
+    };
 
     dlog("tunnel: bridging channel <-> pipe");
     match tokio::io::copy_bidirectional(&mut bs, &mut pipe).await {

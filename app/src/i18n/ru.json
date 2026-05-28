@@ -264,6 +264,7 @@
   "settings.updates.logs.copyPath": "Копировать путь",
   "settings.updates.logs.copied": "Скопировано",
   "sidebar.notes.tooltip": "Заметки",
+  "sidebar.ports.tooltip": "Порты",
   "settings.tab.logs": "журналы",
   "settings.logs.recent": "Недавняя активность",
   "settings.logs.refresh": "Обновить",

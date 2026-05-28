@@ -264,6 +264,7 @@
   "settings.updates.logs.copyPath": "העתק נתיב",
   "settings.updates.logs.copied": "הועתק",
   "sidebar.notes.tooltip": "הערות",
+  "sidebar.ports.tooltip": "פורטים",
   "settings.tab.logs": "לוגים",
   "settings.logs.recent": "פעילות אחרונה",
   "settings.logs.refresh": "רענון",

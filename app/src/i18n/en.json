@@ -247,6 +247,7 @@
   "settings.updates.logs.copyPath": "Copy path",
   "settings.updates.logs.copied": "Copied",
   "sidebar.notes.tooltip": "Notes",
+  "sidebar.ports.tooltip": "Ports",
   "settings.tab.logs": "logs",
   "settings.logs.recent": "Recent activity",
   "settings.logs.refresh": "Refresh",

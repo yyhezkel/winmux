@@ -39,6 +39,9 @@ interface Props {
   // window scoped to that workspace.
   allForwards: ForwardRow[];
   onOpenPorts: (workspaceId: string) => void;
+  // Phase 39.A: global Ports button (opens the window on the "All
+  // workspaces" tab, no workspace context).
+  onOpenPortsGlobal: () => void;
 }
 
 export function Sidebar(p: Props) {
@@ -176,6 +179,9 @@ export function Sidebar(p: Props) {
         </button>
         <button class="ws-action-half" onClick={p.onOpenSettings} title={t("sidebar.settings.tooltip")}>
           ⚙ {t("sidebar.settings.tooltip")}
+        </button>
+        <button class="ws-action-half" onClick={p.onOpenPortsGlobal} title={t("sidebar.ports.tooltip")}>
+          🌐 {t("sidebar.ports.tooltip")}
         </button>
       </div>
       <button class="ws-add" onClick={p.onCreate}>

@@ -31,27 +31,71 @@ pub fn pipe_name() -> String {
 pub async fn run(state: AppState, app: AppHandle) {
     let name = pipe_name();
     tracing::info!("rpc: listening on {}", name);
-    loop {
-        let server = match ServerOptions::new()
+
+    // Phase 39.A: removed the 8-cap that caused ERROR_PIPE_NOT_AVAILABLE
+    // storms under concurrent RPC. 255 is the practical Windows max for
+    // a single pipe (PIPE_UNLIMITED_INSTANCES semantics in the tokio
+    // wrapper).
+    let make_listener = |name: &str| {
+        ServerOptions::new()
             .pipe_mode(tokio::net::windows::named_pipe::PipeMode::Byte)
             .first_pipe_instance(false)
-            .max_instances(8)
-            .create(&name)
-        {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!("rpc: create pipe failed: {e}");
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                continue;
-            }
-        };
-        if let Err(e) = server.connect().await {
+            .max_instances(255)
+            .create(name)
+    };
+
+    // Phase 39.A: keep a listening instance ready at ALL times. We
+    // pre-create the NEXT instance before spawning the handler for the
+    // current connection — so there's never the brief 1-listener gap
+    // (between `.connect()` returning and the next `.create()`) where a
+    // racing client would hit 231.
+    let mut listener = match make_listener(&name) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("rpc: create pipe failed: {e}");
+            return;
+        }
+    };
+    loop {
+        if let Err(e) = listener.connect().await {
             tracing::error!("rpc: connect failed: {e}");
+            // Recreate and keep going.
+            match make_listener(&name) {
+                Ok(s) => listener = s,
+                Err(e2) => {
+                    tracing::error!("rpc: recreate pipe failed: {e2}");
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    match make_listener(&name) {
+                        Ok(s) => listener = s,
+                        Err(e3) => {
+                            tracing::error!("rpc: recreate pipe failed twice: {e3}");
+                            return;
+                        }
+                    }
+                }
+            }
             continue;
         }
+        // Hand the connected instance to the handler and immediately
+        // open a fresh listener for the next client.
+        let conn = listener;
+        listener = match make_listener(&name) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("rpc: create next pipe failed: {e}");
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                match make_listener(&name) {
+                    Ok(s) => s,
+                    Err(e2) => {
+                        tracing::error!("rpc: create next pipe failed twice: {e2}");
+                        return;
+                    }
+                }
+            }
+        };
         let state2 = state.clone();
         let app2 = app.clone();
-        tokio::spawn(handle_client(server, state2, app2));
+        tokio::spawn(handle_client(conn, state2, app2));
     }
 }
 

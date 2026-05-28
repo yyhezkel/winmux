@@ -1190,6 +1190,10 @@ function App() {
             setPortsWindowWs(workspaceId);
             setShowPortsWindow(true);
           }}
+          onOpenPortsGlobal={() => {
+            setPortsWindowWs(null);
+            setShowPortsWindow(true);
+          }}
         />
       </ErrorBoundary>
       <div class="main">

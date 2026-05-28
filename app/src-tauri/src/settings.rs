@@ -383,6 +383,22 @@ pub(crate) struct Settings {
     /// `#[serde(default)]` so older settings.json loads cleanly.
     #[serde(default)]
     pub ssh_key_offer_disabled: bool,
+    /// Phase 39.B. One-time data migrations that have already run.
+    #[serde(default)]
+    pub migrations: MigrationFlags,
+}
+
+/// Phase 39.B: tracks one-time data migrations so they run exactly
+/// once. Each field is a "has-run" boolean defaulting to false.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct MigrationFlags {
+    /// Phase 39: the auto_port_forward default flipped true→false. This
+    /// migration flips all EXISTING workspaces' value to false to stop
+    /// the post-connect auto-forward storm. Users re-enable per
+    /// workspace; the flag keeps that choice from being undone.
+    #[serde(default)]
+    pub phase_39_auto_port_forward_default_flipped: bool,
 }
 
 impl Default for Theme {
@@ -482,6 +498,7 @@ impl Default for Settings {
             claude: ClaudeOptions::default(),
             hooks_updates: HooksUpdates::default(),
             ssh_key_offer_disabled: false,
+            migrations: MigrationFlags::default(),
         }
     }
 }
@@ -914,4 +931,34 @@ fn insert_at_path(root: &mut Value, path: &str, leaf: Value) -> Result<(), Strin
             .or_insert_with(|| Value::Object(Default::default()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MigrationFlags, Settings};
+
+    #[test]
+    fn migration_flags_default_is_not_run() {
+        let f = MigrationFlags::default();
+        assert!(!f.phase_39_auto_port_forward_default_flipped);
+        // Settings default carries an un-run MigrationFlags.
+        assert_eq!(Settings::default().migrations, f);
+    }
+
+    #[test]
+    fn migration_flag_round_trips() {
+        let mut s = Settings::default();
+        s.migrations.phase_39_auto_port_forward_default_flipped = true;
+        let json = serde_json::to_string(&s).unwrap();
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert!(back.migrations.phase_39_auto_port_forward_default_flipped);
+    }
+
+    #[test]
+    fn pre_39b_settings_json_defaults_flag_false() {
+        // A settings.json written before 39.B has no `migrations` key.
+        let json = r##"{"version":1,"theme":{"preset":"x","accent":"#000","background":"#000","surface":"#000","border":"#000","text_primary":"#000","text_secondary":"#000","success":"#000","warning":"#000","error":"#000","ansi":{"black":"#000","red":"#000","green":"#000","yellow":"#000","blue":"#000","magenta":"#000","cyan":"#000","white":"#000","bright_black":"#000","bright_red":"#000","bright_green":"#000","bright_yellow":"#000","bright_blue":"#000","bright_magenta":"#000","bright_cyan":"#000","bright_white":"#000"}},"font":{"ui_family":"x","ui_size_pt":13,"terminal_family":"x","terminal_size_pt":13},"terminal":{"cursor_style":"bar","scrollback_lines":1000,"bidi_enabled":true,"allow_proposed_api":true},"hooks":{"enabled":true,"agents":[],"policy_preset":"default"},"notifications":{"toast_enabled":true,"sound_enabled":false},"updates":{"check_on_startup":true,"auto_download":false}}"##;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert!(!s.migrations.phase_39_auto_port_forward_default_flipped);
+    }
 }

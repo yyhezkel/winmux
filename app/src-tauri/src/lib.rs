@@ -748,6 +748,21 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
 // Tauri/RPC handler that triggered each save. Helpful while chasing autosave
 // loops; safe to remove once the regression is closed out.
 #[track_caller]
+/// Phase 39.B: flip every workspace whose `auto_port_forward` is true
+/// to false. Returns how many were changed (0 on a second run — the
+/// migration is idempotent at the data level too, independent of the
+/// settings flag).
+pub(crate) fn disable_all_auto_port_forward(file: &mut WorkspacesFile) -> usize {
+    let mut n = 0;
+    for ws in file.workspaces.iter_mut() {
+        if ws.auto_port_forward {
+            ws.auto_port_forward = false;
+            n += 1;
+        }
+    }
+    n
+}
+
 pub(crate) fn persist(state: &AppState) -> Result<(), String> {
     let caller = std::panic::Location::caller();
     dlog(&format!(
@@ -5580,6 +5595,50 @@ pub fn run() {
                     dlog(&format!("setup: settings load failed: {e} (using defaults)"));
                 }
             }
+            // Phase 39.B: one-time migration. Workspaces created before
+            // Phase 39 flipped the auto_port_forward default still have
+            // `true` saved and keep auto-forwarding on every connect
+            // (the WINMUX-CHALLENGE / pipe-storm path). Flip them to
+            // false once; users re-enable per workspace. The flag on
+            // Settings keeps this from re-running and undoing a later
+            // opt-in. Skipped if workspaces failed to load (load_state
+            // != Loaded) so we never persist over a clobbered file.
+            {
+                let load_ok =
+                    *state.load_state.lock().unwrap() == Some(LoadState::Loaded);
+                let already_done = state
+                    .settings
+                    .lock()
+                    .unwrap()
+                    .migrations
+                    .phase_39_auto_port_forward_default_flipped;
+                if load_ok && !already_done {
+                    let changed = {
+                        let mut f = state.workspaces.lock().unwrap();
+                        disable_all_auto_port_forward(&mut f)
+                    };
+                    if changed > 0 {
+                        match persist(&state) {
+                            Ok(()) => dlog(&format!(
+                                "migration phase_39: flipped {changed} workspace(s) auto_port_forward to false"
+                            )),
+                            Err(e) => dlog(&format!("migration phase_39: save failed: {e}")),
+                        }
+                    } else {
+                        dlog("migration phase_39: no workspaces needed flipping");
+                    }
+                    // Mark done + persist settings (do this regardless of
+                    // `changed` so the migration never re-runs).
+                    let snapshot = {
+                        let mut s = state.settings.lock().unwrap();
+                        s.migrations.phase_39_auto_port_forward_default_flipped = true;
+                        s.clone()
+                    };
+                    if let Err(e) = settings::save_to_disk_pub(&snapshot) {
+                        dlog(&format!("migration phase_39: settings save failed: {e}"));
+                    }
+                }
+            }
             // Phase 9.B: spawn the update checker if enabled. Fully best-effort —
             // never blocks startup; failures (offline, manifest missing, repo
             // private) just log to debug.log and emit nothing.
@@ -5768,5 +5827,53 @@ mod port_forward_tests {
             m.lock().unwrap().get(&("b".to_string(), 8080)).map(|e| e.local_port),
             Some(49777)
         );
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    // Phase 39.B: the auto_port_forward flip. MigrationFlags default
+    // is exercised in settings.rs; here we test the data-level flip +
+    // its idempotency.
+    use super::{disable_all_auto_port_forward, Workspace, WorkspacesFile};
+
+    fn ws(id: &str, apf: bool) -> Workspace {
+        Workspace {
+            id: id.to_string(),
+            name: id.to_string(),
+            color: None,
+            emoji: None,
+            cwd: None,
+            connection: None,
+            layout: None,
+            setup_command: None,
+            teardown_command: None,
+            env: Vec::new(),
+            auto_port_forward: apf,
+        }
+    }
+
+    #[test]
+    fn flips_only_true_workspaces_and_is_idempotent() {
+        let mut file = WorkspacesFile {
+            workspaces: vec![ws("a", true), ws("b", false), ws("c", true)],
+            ..Default::default()
+        };
+        // First run flips the two `true` ones.
+        assert_eq!(disable_all_auto_port_forward(&mut file), 2);
+        assert!(file.workspaces.iter().all(|w| !w.auto_port_forward));
+        // Second run is a no-op — nothing left to flip.
+        assert_eq!(disable_all_auto_port_forward(&mut file), 0);
+    }
+
+    #[test]
+    fn empty_or_all_false_changes_nothing() {
+        let mut empty = WorkspacesFile::default();
+        assert_eq!(disable_all_auto_port_forward(&mut empty), 0);
+        let mut all_off = WorkspacesFile {
+            workspaces: vec![ws("a", false), ws("b", false)],
+            ..Default::default()
+        };
+        assert_eq!(disable_all_auto_port_forward(&mut all_off), 0);
     }
 }

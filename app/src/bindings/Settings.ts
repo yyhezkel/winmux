@@ -4,6 +4,7 @@ import type { Font } from "./Font";
 import type { Hooks } from "./Hooks";
 import type { HooksUpdates } from "./HooksUpdates";
 import type { I18n } from "./I18n";
+import type { MigrationFlags } from "./MigrationFlags";
 import type { Notifications } from "./Notifications";
 import type { Shortcuts } from "./Shortcuts";
 import type { TerminalSettings } from "./TerminalSettings";
@@ -30,4 +31,8 @@ hooks_updates: HooksUpdates,
  * when the user ticks "Don't show again" in the offer modal.
  * `#[serde(default)]` so older settings.json loads cleanly.
  */
-ssh_key_offer_disabled: boolean, };
+ssh_key_offer_disabled: boolean, 
+/**
+ * Phase 39.B. One-time data migrations that have already run.
+ */
+migrations: MigrationFlags, };

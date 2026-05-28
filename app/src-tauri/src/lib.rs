@@ -6,6 +6,7 @@ mod dev;
 mod file_manager;
 mod local_wizard;
 mod notes;
+mod osc_notify;
 mod provisioning;
 mod remote_bootstrap;
 mod rpc_server;
@@ -129,7 +130,8 @@ pub(crate) struct NotificationItem {
     pub(crate) timestamp_ms: u128,
 }
 
-#[derive(Clone, Serialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum FeedItemState {
     Pending,
@@ -139,7 +141,8 @@ pub(crate) enum FeedItemState {
     Passive,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct FeedItem {
     pub(crate) request_id: String,
     pub(crate) kind: String,
@@ -150,8 +153,12 @@ pub(crate) struct FeedItem {
     pub(crate) workspace_id: Option<String>,
     pub(crate) title: String,
     pub(crate) summary: String,
+    // serde_json::Value has no fixed shape; surface it as `unknown` on
+    // the TS side (caller narrows) rather than ts-rs's default `any`.
+    #[ts(type = "unknown")]
     pub(crate) payload: serde_json::Value,
     pub(crate) state: FeedItemState,
+    #[ts(type = "number")]
     pub(crate) created_ms: u128,
     pub(crate) blocking: bool,
 }
@@ -215,7 +222,8 @@ struct PtyExitEvent {
 
 // ─── Workspace data model ────────────────────────────────────────────────────
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(crate) enum Connection {
     Local {
@@ -231,7 +239,8 @@ pub(crate) enum Connection {
     },
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SplitDirection {
     Horizontal,
@@ -241,7 +250,8 @@ pub(crate) enum SplitDirection {
 // Phase 8.A: pane kind. Defaults to Terminal so older workspaces.json (no `pane_kind`
 // field) deserialize unchanged. `is_terminal_kind` lets serde elide the field on
 // terminal panes, keeping legacy round-trips byte-identical.
-#[derive(Clone, Copy, Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Serialize, Deserialize, Default, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum PaneKind {
     /// Phase 24.D: the removed ClaudeChat / ClaudeLog variants
@@ -289,7 +299,8 @@ fn is_terminal_kind(k: &PaneKind) -> bool {
 // Terminal, and `backfill_terminal_connections` rescues their
 // connection field.
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct BrowserState {
     pub(crate) url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -329,7 +340,8 @@ fn is_true(b: &bool) -> bool {
 
 const BROWSER_HISTORY_MAX: usize = 50;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub(crate) enum LayoutNode {
     Pane {
@@ -381,13 +393,15 @@ pub(crate) enum LayoutNode {
     },
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct EnvVar {
     pub(crate) key: String,
     pub(crate) value: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct Workspace {
     pub(crate) id: String,
     pub(crate) name: String,
@@ -1395,7 +1409,31 @@ fn pick_default_shell(requested: Option<String>) -> String {
     "cmd.exe".into()
 }
 
-fn emit_data(app: &AppHandle, session_id: &str, bytes: &[u8], leftover: &mut Vec<u8>) {
+fn emit_data(
+    app: &AppHandle,
+    session_id: &str,
+    bytes: &[u8],
+    leftover: &mut Vec<u8>,
+    // Phase 35 (#1.2): OSC-notification side channel. The parser
+    // observes the RAW bytes (OSC sequences are ASCII, so this is
+    // independent of the utf8 reassembly below) and emits an
+    // `osc-notification` event per detected sequence. The byte stream
+    // forwarded to xterm.js is untouched.
+    pane_id: &str,
+    osc: &mut osc_notify::OscNotifyParser,
+) {
+    for n in osc.feed(bytes) {
+        let _ = app.emit(
+            "osc-notification",
+            serde_json::json!({
+                "pane_id": pane_id,
+                "title": n.title,
+                "body": n.body,
+                "kind": n.kind.as_str(),
+            }),
+        );
+    }
+
     leftover.extend_from_slice(bytes);
     let valid_up_to = match std::str::from_utf8(leftover) {
         Ok(_) => leftover.len(),
@@ -1509,11 +1547,19 @@ fn spawn_local_pty(
     let pane_sessions_for_thread = state.pane_sessions.clone();
     thread::spawn(move || {
         let mut leftover: Vec<u8> = Vec::new();
+        let mut osc = osc_notify::OscNotifyParser::new();
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
-                Ok(n) => emit_data(&app_for_thread, &id_for_thread, &buf[..n], &mut leftover),
+                Ok(n) => emit_data(
+                    &app_for_thread,
+                    &id_for_thread,
+                    &buf[..n],
+                    &mut leftover,
+                    &pane_for_thread,
+                    &mut osc,
+                ),
                 Err(_) => break,
             }
         }
@@ -2455,16 +2501,17 @@ async fn spawn_ssh(
     let workspace_for_task = workspace_id.clone();
     tokio::spawn(async move {
         let mut leftover: Vec<u8> = Vec::new();
+        let mut osc = osc_notify::OscNotifyParser::new();
         let mut exit_reason: Option<String> = None;
         loop {
             tokio::select! {
                 msg = channel.wait() => {
                     match msg {
                         Some(ChannelMsg::Data { data }) => {
-                            emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover);
+                            emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover, &pane_for_task, &mut osc);
                         }
                         Some(ChannelMsg::ExtendedData { data, ext: _ }) => {
-                            emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover);
+                            emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover, &pane_for_task, &mut osc);
                         }
                         Some(ChannelMsg::ExitStatus { exit_status }) => {
                             exit_reason = Some(format!("exit {exit_status}"));

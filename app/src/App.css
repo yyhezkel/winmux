@@ -3178,6 +3178,55 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 }
 .help-copy-btn:hover { opacity: 1; color: var(--w-text-primary, #e6edf3); }
 
+/* Phase 35 (#1.3): command palette. Centered near the top, VSCode-style. */
+.command-palette {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 90vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 10px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.command-palette-input {
+  border: none;
+  border-bottom: 1px solid var(--w-border, #21262d);
+  background: transparent;
+  color: var(--w-text-primary, #e6edf3);
+  font-size: 15px;
+  padding: 14px 16px;
+  outline: none;
+}
+.command-palette-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+.command-palette-item {
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--w-text-primary, #e6edf3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.command-palette-item.selected {
+  background: var(--w-accent, #3b82f6);
+  color: #fff;
+}
+.command-palette-empty {
+  padding: 14px 16px;
+  color: var(--w-text-secondary, #7d8590);
+  font-size: 13px;
+}
+
 /* Phase 34: small contextual "?" hint button. Sits inline with a
    field label and opens the relevant HelpPane on click. */
 .ws-key-label {

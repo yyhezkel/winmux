@@ -40,3 +40,18 @@ When starting a new session, scan the **Open** section. Don't let threads die si
 - User: Yossi (`yyhezkel@gmail.com`). Prefers Hebrew, terse, action-oriented replies.
 - Phase numbering: stable in commit history. Sub-numbers (`23.J`) for follow-ups. No reuse.
 - Commit format per `docs/CONTRIBUTING.md`.
+
+## Absolute Rules — Do Not Violate
+
+1. **Never log PTY input or output content.** Only metadata (pane ID, byte counts, error kinds). User shell content is private.
+2. **Never store SSH passphrases or sudo passwords in plaintext at rest.** Use DPAPI (`CryptProtectData`) when persistence is necessary; otherwise keep in memory only.
+3. **Never build shell commands by string concatenation.** Use `Command::new(...).arg(...)` arrays. The agent and provisioning paths are the only places this is enforced repeatedly — don't drift from it.
+4. **No `unwrap()` or `expect()` in non-test Rust** outside the `main()` boot path. Use `?` or `.map_err(...)` and surface a clean error.
+5. **No `any` in TypeScript.** Use `unknown` and narrow, or define a type. Tauri command return types are always explicit.
+6. **All Tauri commands return `Result<_, String>`.** The frontend handles the error; don't `panic!`.
+7. **Workspace persistence is atomic.** Write to `<file>.tmp` then `rename` to the target. Never partial writes to `workspaces.json` / `settings.json`.
+8. **Never expose the tunnel HMAC token to logs.** Treat it like a password.
+9. **`dlog()` is user-visible** (lands in `%APPDATA%\winmux\debug.log`). `tracing::*` is engineer-only (only emitted in dev builds). Pick the right one based on audience.
+10. **Don't push a half-done release.** If any step in RELEASING.md fails for a real reason (not the `os error 32` NSIS cleanup false-alarm), stop and report.
+11. **Don't touch `backup-phase23-*/` or repo-root `.bat` / `.ps1` helper scripts.** Don't commit `release_notes.md`.
+12. **`remote-manifest.json` timestamp churn is cosmetic.** Discard unless the embedded SHA actually changed.

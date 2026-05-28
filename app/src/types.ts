@@ -1,6 +1,27 @@
-export type Connection =
-  | { type: "local"; shell?: string }
-  | { type: "ssh"; host: string; user: string; port: number; key_path?: string };
+// Phase 35 (#1.5): the data-model types below are generated from the
+// Rust structs by ts-rs and re-exported here so existing imports
+// (`from "./types"`) keep working. Regenerate after a Rust struct
+// change with `cd app/src-tauri && cargo test`. Do not hand-edit
+// `src/bindings/*.ts`.
+//
+// Note: ts-rs renders `Option<T>` as `T | null` (a required, nullable
+// key) rather than the optional `T?` the hand-written mirror used.
+// Helpers that accept these structurally (e.g. effectiveIdentity)
+// widen their params to `T | null | undefined` accordingly.
+export type { Connection } from "./bindings/Connection";
+export type { SplitDirection } from "./bindings/SplitDirection";
+export type { PaneKind } from "./bindings/PaneKind";
+export type { BrowserState } from "./bindings/BrowserState";
+export type { EnvVar } from "./bindings/EnvVar";
+export type { LayoutNode } from "./bindings/LayoutNode";
+export type { Workspace } from "./bindings/Workspace";
+export type { FeedItem } from "./bindings/FeedItem";
+export type { FeedItemState } from "./bindings/FeedItemState";
+
+import type { Connection } from "./bindings/Connection";
+import type { LayoutNode } from "./bindings/LayoutNode";
+import type { PaneKind } from "./bindings/PaneKind";
+import type { Workspace } from "./bindings/Workspace";
 
 // Phase 23.F: shape returned by pane_list_tmux_sessions. Used by
 // the Connect (tmux) picker.
@@ -11,23 +32,6 @@ export interface TmuxSessionInfo {
   windows: number;
   last_attached: number;
 }
-
-export type SplitDirection = "horizontal" | "vertical";
-
-// Phase 8.A: pane kind. Default = terminal for legacy panes (server omits the field).
-// Phase 24.D: removed "claudechat" (Phase 22) + "claudelog" (Phase 24.B) — backend
-// aliases those JSON variants back to "terminal" at deserialize time.
-export type PaneKind = "terminal" | "browser" | "filemanager" | "help";
-
-export type BrowserState = {
-  url: string;
-  home_url?: string;
-  history: string[];
-  // Phase 8.B: when true (default), localhost:N URLs in this pane are
-  // transparently routed through an SSH local port forward to the remote
-  // workspace. Persisted; toggle via pane_browser_set_forward.
-  forward_localhost?: boolean;
-};
 
 // Phase 24.D: ChatRole / MessageStatus / ChatMessage / ClaudeChatState
 // (Phase 22) removed alongside the ClaudeChat pane. The
@@ -74,63 +78,13 @@ export interface ClaudeLogState {
   filter?: string;
 }
 
-export type LayoutNode =
-  | {
-      kind: "pane";
-      pane_id: string;
-      // Optional in JSON for backward-compat; treat absent as "terminal".
-      pane_kind?: PaneKind;
-      // Required for terminal panes; absent for browser panes.
-      connection?: Connection;
-      browser?: BrowserState;
-      // Phase 24.D: removed `chat` / `claudelog` fields with the
-      // ClaudeChat (Phase 22) + ClaudeLog (Phase 24.B) panes.
-      // Legacy JSON that still has those keys deserializes cleanly
-      // (TS is structural; missing keys here are ignored).
-      title?: string;
-      annotation?: string;
-      // Phase 31: per-pane identity overrides the workspace's. Absent
-      // = inherit from the parent workspace.
-      color?: string;
-      emoji?: string;
-      // Phase 33: in-app help topic (only meaningful when
-      // pane_kind === "help"). Picks which markdown document the
-      // HelpPane renders.
-      help_topic?: string;
-    }
-  | {
-      kind: "split";
-      split_id: string;
-      direction: SplitDirection;
-      first: LayoutNode;
-      second: LayoutNode;
-      ratio: number;
-    };
-
+// Phase 35: pane_kind is now non-optional in the generated binding
+// (ts-rs emits the serde default-elided field as required). The
+// `?? "terminal"` is kept as a defensive fallback for any legacy
+// object that still lacks it at runtime.
 export function paneKindOf(p: LayoutNode & { kind: "pane" }): PaneKind {
   return p.pane_kind ?? "terminal";
 }
-
-export type EnvVar = { key: string; value: string };
-
-export type Workspace = {
-  id: string;
-  name: string;
-  color?: string;
-  // Phase 30: per-workspace emoji glyph, shown as a sidebar prefix
-  // and in the OS window title. Free-form (up to 16 UTF-8 bytes).
-  emoji?: string;
-  cwd?: string;
-  // Phase 23.D: canonical workspace-level connection. Set on create
-  // and back-filled on load from the first Terminal pane. Drives the
-  // Connect dropdown's SSH-vs-Local options via PaneView.isSsh().
-  connection?: Connection;
-  layout?: LayoutNode;
-  // Phase 7.C
-  setup_command?: string;
-  teardown_command?: string;
-  env?: EnvVar[];
-};
 
 export type WorkspacesFile = {
   version: 1;
@@ -140,22 +94,6 @@ export type WorkspacesFile = {
 
 export type PtyDataEvent = { session_id: string; data: string };
 export type PtyExitEvent = { session_id: string; reason: string | null };
-
-export type FeedItemState = "pending" | "allowed" | "denied" | "timedout" | "passive";
-
-export type FeedItem = {
-  request_id: string;
-  kind: string;
-  subkind: string;
-  pane_id?: string | null;
-  workspace_id?: string | null;
-  title: string;
-  summary: string;
-  payload: unknown;
-  state: FeedItemState;
-  created_ms: number;
-  blocking: boolean;
-};
 
 export type FeedResolvedEvent = { request_id: string; decision: string };
 
@@ -195,12 +133,12 @@ export function findPane(
 // back to its workspace's. Used by the pane header, the rename dialog's
 // "inheriting" hint, and the OS window title.
 export function effectiveIdentity(
-  pane: { color?: string; emoji?: string } | null | undefined,
-  ws: { color?: string; emoji?: string } | null | undefined,
+  pane: { color?: string | null; emoji?: string | null } | null | undefined,
+  ws: { color?: string | null; emoji?: string | null } | null | undefined,
 ): { color?: string; emoji?: string } {
   return {
-    color: pane?.color ?? ws?.color,
-    emoji: pane?.emoji ?? ws?.emoji,
+    color: pane?.color ?? ws?.color ?? undefined,
+    emoji: pane?.emoji ?? ws?.emoji ?? undefined,
   };
 }
 

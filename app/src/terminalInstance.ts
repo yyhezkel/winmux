@@ -160,6 +160,14 @@ export class TerminalInstance {
   // ~140ms after the resize storm ends, guaranteeing the final
   // dimensions are always applied.
   private resizeSettleTimer: number | null = null;
+  // Phase 35 (#1.1): rAF-coalesced PTY writer. During fast streaming
+  // (Claude generating, a noisy build), the backend fires many small
+  // pty:data events per frame. Calling term.write() on each one forces
+  // xterm to reflow/repaint per chunk and starves the event loop —
+  // the window shows "(Not Responding)". Instead we accumulate chunks
+  // and flush a single merged write per animation frame.
+  private pendingChunks: string[] = [];
+  private flushRafId: number | null = null;
 
   constructor(paneId: string) {
     this.paneId = paneId;
@@ -416,13 +424,28 @@ export class TerminalInstance {
   }
 
   writeData(data: string) {
+    // Phase 35: queue and coalesce. Merging chunks before the reorder
+    // pipeline is also more correct than per-chunk — a chunk boundary
+    // that splits a line or escape sequence now gets reassembled before
+    // reorderRtlForDisplay sees it.
+    this.pendingChunks.push(data);
+    if (this.flushRafId === null) {
+      this.flushRafId = requestAnimationFrame(() => this.flushPending());
+    }
+  }
+
+  private flushPending() {
+    this.flushRafId = null;
+    if (this.pendingChunks.length === 0) return;
+    const merged = this.pendingChunks.join("");
+    this.pendingChunks = [];
     // The reorder pipeline keys off the LIVE rtl mode (g_rtlMode), so
-    // a settings change takes effect on the very next write — no
+    // a settings change takes effect on the very next flush — no
     // need to wait for a new pane.
     if (g_rtlMode === "bidi_reorder") {
-      this.term.write(reorderRtlForDisplay(data));
+      this.term.write(reorderRtlForDisplay(merged));
     } else {
-      this.term.write(data);
+      this.term.write(merged);
     }
   }
 
@@ -435,6 +458,16 @@ export class TerminalInstance {
   }
 
   dispose() {
+    // Phase 35: flush any queued PTY chunks synchronously before the
+    // rAF can fire, so the last bytes aren't lost when a pane closes
+    // mid-stream. Then cancel the pending frame.
+    if (this.flushRafId != null) {
+      cancelAnimationFrame(this.flushRafId);
+      this.flushRafId = null;
+    }
+    try {
+      this.flushPending();
+    } catch {}
     if (this.resizeRafId != null) {
       cancelAnimationFrame(this.resizeRafId);
       this.resizeRafId = null;

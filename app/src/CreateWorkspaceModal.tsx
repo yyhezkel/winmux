@@ -412,7 +412,9 @@ export function CreateWorkspaceModal(p: Props) {
       } else {
         cmd = shell().trim() || undefined;
       }
-      connection = { type: "local", shell: cmd };
+      // ts-rs binding renders Option<String> as `string | null`, so
+      // these absent values are null, not undefined.
+      connection = { type: "local", shell: cmd ?? null };
       workspaceCwd = cwd().trim() || undefined;
     } else {
       if (!host().trim() || !user().trim()) return;
@@ -421,7 +423,7 @@ export function CreateWorkspaceModal(p: Props) {
         host: host().trim(),
         user: user().trim(),
         port: port(),
-        key_path: keyPath() || undefined,
+        key_path: keyPath() || null,
       };
     }
     p.onCreate({

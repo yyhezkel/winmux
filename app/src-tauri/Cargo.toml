@@ -56,3 +56,7 @@ base64 = "0.22"
 # (default) — avoids SChannel which some AV/EDR products intercept and
 # break (root cause of the v0.2.2 "Check now" parser-error symptom).
 ureq = { version = "2", features = ["tls", "json"] }
+# Phase 35 (#1.5): generate TypeScript type bindings from Rust structs.
+# `cargo test` regenerates app/src/bindings/*.ts; the frontend imports
+# from there instead of hand-mirroring the data model.
+ts-rs = "8"

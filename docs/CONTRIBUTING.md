@@ -96,6 +96,17 @@ If you need a new on-disk config file beyond `workspaces.json` and
    on parse error.
 4. Document the schema in [`docs/CONFIG.md`](./CONFIG.md).
 
+## Type synchronization
+
+The frontend data-model types (`Workspace`, `LayoutNode`, `Connection`,
+`PaneKind`, `FeedItem`, `Settings`, …) are generated from the Rust structs
+by [ts-rs](https://github.com/Aleph-Alpha/ts-rs). To regenerate after
+changing a Rust struct: `cd app/src-tauri && cargo test`. The bindings
+land in `app/src/bindings/` and are re-exported from `app/src/types.ts`.
+Don't hand-edit `app/src/bindings/*.ts`. Note: ts-rs renders `Option<T>`
+as `T | null`, and `app/src/settings.ts` keeps a richer hand-tuned mirror
+(literal unions for the UI) rather than the generated `Settings`.
+
 ## Logging conventions
 
 We have two logging mechanisms:

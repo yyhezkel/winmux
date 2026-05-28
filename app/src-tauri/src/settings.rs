@@ -14,7 +14,8 @@ use crate::{config_dir_pub, dlog, AppState};
 
 // ─── data model ────────────────────────────────────────────────────────────
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct AnsiPalette {
     pub black: String,
     pub red: String,
@@ -137,7 +138,8 @@ impl AnsiPalette {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct Theme {
     pub preset: String,
     pub accent: String,
@@ -152,7 +154,8 @@ pub(crate) struct Theme {
     pub ansi: AnsiPalette,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct Font {
     pub ui_family: String,
     pub ui_size_pt: u32,
@@ -166,7 +169,8 @@ pub(crate) struct Font {
     pub web_font_url: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct TerminalSettings {
     pub cursor_style: String,
     pub scrollback_lines: u32,
@@ -195,7 +199,8 @@ fn default_rtl_mode() -> String {
     "auto_per_line".to_string()
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct Hooks {
     pub enabled: bool,
     pub agents: Vec<String>,
@@ -215,13 +220,15 @@ fn default_matcher_mode() -> String {
     "restrictive".to_string()
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct Notifications {
     pub toast_enabled: bool,
     pub sound_enabled: bool,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct Updates {
     pub check_on_startup: bool,
     pub auto_download: bool,
@@ -233,7 +240,8 @@ pub(crate) struct Updates {
     pub last_seen_version: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct I18n {
     pub language: String,
     pub direction: String,
@@ -252,7 +260,8 @@ impl Default for I18n {
 /// `Ctrl+Shift+X` strings — parsed in the frontend (see
 /// `src/shortcuts.ts`) so users can hand-edit settings.json and the
 /// next launch picks up the change.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct Shortcuts {
     pub copy: String,
     pub paste: String,
@@ -278,7 +287,8 @@ fn default_summarize_claude() -> String {
 }
 
 /// Phase 17: Claude-specific options.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct ClaudeOptions {
     pub auto_summarize_on_stop: bool,
     pub summary_history_count: u32,
@@ -304,7 +314,8 @@ impl Default for ClaudeOptions {
 /// Phase 18: per-user state for the hooks-outdated banner. Tracked
 /// separately from `Hooks` (which is per-agent enablement) because
 /// the dismiss list belongs to the UI layer, not to the hook spec.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct HooksUpdates {
     pub show_banners: bool,
     /// `agent → [version-strings-the-user-said-skip]`. Empty entries
@@ -342,7 +353,8 @@ impl Default for Shortcuts {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct Settings {
     pub version: u32,
     pub theme: Theme,

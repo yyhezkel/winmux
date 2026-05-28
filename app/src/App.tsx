@@ -2,6 +2,7 @@ import { createEffect, createSignal, ErrorBoundary, onCleanup, onMount, Show } f
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { LayoutView } from "./LayoutView";
@@ -10,6 +11,7 @@ import { NotesModal } from "./NotesModal";
 import { ProvisioningWizard } from "./ProvisioningWizard";
 import { SettingsModal } from "./SettingsModal";
 import { SshKeyOfferModal } from "./SshKeyOfferModal";
+import { CommandPalette, type Command } from "./CommandPalette";
 import {
   TerminalInstance,
   copyTerminalSelection,
@@ -104,6 +106,15 @@ function App() {
   };
   // Phase 14.A: server provisioning wizard.
   const [showProvision, setShowProvision] = createSignal(false);
+  // Phase 35 (#1.3): command palette (Ctrl+Shift+P).
+  const [showPalette, setShowPalette] = createSignal(false);
+  // Phase 35: webview zoom factor for view.zoom.* palette commands.
+  const [zoomFactor, setZoomFactor] = createSignal(1);
+  const applyZoom = (f: number) => {
+    const clamped = Math.max(0.3, Math.min(3, f));
+    setZoomFactor(clamped);
+    void getCurrentWebview().setZoom(clamped).catch((e) => console.warn("setZoom failed", e));
+  };
   // Phase 18: hooks-outdated banners — at most one banner per agent
   // at a time; the user dismisses (skip-this-version persists), defers
   // (banner gone until next connect), or triggers an in-place update.
@@ -266,6 +277,52 @@ function App() {
 
   const activeWs = (): Workspace | null =>
     file().workspaces.find((w) => w.id === file().active_workspace_id) ?? null;
+
+  // Phase 35 (#1.3): cycle focus through the active workspace's panes.
+  const focusAdjacentPane = (delta: number) => {
+    const ws = activeWs();
+    if (!ws?.layout) return;
+    const panes = collectPanes(ws.layout);
+    if (panes.length === 0) return;
+    const cur = activePaneId();
+    const idx = cur ? panes.indexOf(cur) : -1;
+    const next = panes[(idx + delta + panes.length) % panes.length];
+    if (next) setActivePaneId(next);
+  };
+
+  // Phase 35 (#1.3): the command-palette catalog. Each command reuses
+  // the same handler the existing UI calls. `enabled` hides commands
+  // that need context they don't have (no active workspace / pane).
+  const paletteCommands = (): Command[] => {
+    const ws = activeWs();
+    const pid = activePaneId();
+    const hasWs = !!ws;
+    const hasPane = !!pid;
+    return [
+      { id: "workspace.new", label: t("cmd.workspace.new"), handler: () => setShowCreate(true) },
+      { id: "workspace.rename", label: t("cmd.workspace.rename"), enabled: () => hasWs, handler: () => { if (ws) { setEditingWorkspace(ws); setShowCreate(true); } } },
+      { id: "workspace.disconnect", label: t("cmd.workspace.disconnect"), enabled: () => hasWs, handler: () => { if (ws) void handleDisconnectWorkspace(ws.id); } },
+      { id: "workspace.delete", label: t("cmd.workspace.delete"), enabled: () => hasWs, handler: () => { if (ws) void handleDelete(ws.id); } },
+      { id: "pane.split.right", label: t("cmd.pane.split.right"), enabled: () => hasPane, handler: () => { if (pid) void splitPane(pid, "horizontal"); } },
+      { id: "pane.split.down", label: t("cmd.pane.split.down"), enabled: () => hasPane, handler: () => { if (pid) void splitPane(pid, "vertical"); } },
+      { id: "pane.close", label: t("cmd.pane.close"), enabled: () => hasPane, handler: () => { if (pid) void closePane(pid); } },
+      { id: "pane.focus.next", label: t("cmd.pane.focus.next"), enabled: () => hasPane, handler: () => focusAdjacentPane(1) },
+      { id: "pane.focus.prev", label: t("cmd.pane.focus.prev"), enabled: () => hasPane, handler: () => focusAdjacentPane(-1) },
+      { id: "pane.rename", label: t("cmd.pane.rename"), enabled: () => hasPane, handler: () => { if (pid) window.dispatchEvent(new CustomEvent("winmux:pane-rename", { detail: pid })); } },
+      { id: "ssh.connect", label: t("cmd.ssh.connect"), enabled: () => hasPane, handler: () => { if (pid) void connectPane(pid); } },
+      { id: "ssh.disconnect", label: t("cmd.ssh.disconnect"), enabled: () => hasPane, handler: () => { if (pid) void disconnectPane(pid); } },
+      { id: "ssh.provision", label: t("cmd.ssh.provision"), handler: () => setShowProvision(true) },
+      { id: "settings.open", label: t("cmd.settings.open"), handler: () => setShowSettings(true) },
+      { id: "settings.language", label: t("cmd.settings.language"), handler: () => setShowSettings(true) },
+      { id: "settings.theme", label: t("cmd.settings.theme"), handler: () => setShowSettings(true) },
+      { id: "view.zoom.in", label: t("cmd.view.zoom.in"), handler: () => applyZoom(zoomFactor() + 0.1) },
+      { id: "view.zoom.out", label: t("cmd.view.zoom.out"), handler: () => applyZoom(zoomFactor() - 0.1) },
+      { id: "view.zoom.reset", label: t("cmd.view.zoom.reset"), handler: () => applyZoom(1) },
+      { id: "fm.open", label: t("cmd.fm.open"), enabled: () => hasPane && hasWs, handler: () => {
+        if (ws && pid) void invoke("workspace_split", { workspaceId: ws.id, paneId: pid, direction: "horizontal", paneKind: "filemanager", browserUrl: null, helpTopic: null });
+      } },
+    ];
+  };
 
   const connectedPanes = (): Set<string> => {
     void tick();
@@ -754,6 +811,13 @@ function App() {
     // hardcoded for now — they're pane-relative and bound to the
     // active pane, not a global "action", so they don't fit the
     // shortcut-table model. Everything else flows through the table.
+    // Phase 35 (#1.3): Ctrl+Shift+P opens the command palette. Hardcoded
+    // (not in the shortcut table) — it's a global app action.
+    if (e.ctrlKey && e.shiftKey && (e.key === "P" || e.key === "p")) {
+      e.preventDefault();
+      setShowPalette((v) => !v);
+      return;
+    }
     const sc = shortcutTable();
     if (matches(e, sc.toggle_notes)) {
       e.preventDefault();
@@ -908,6 +972,37 @@ function App() {
         );
         scheduleFeedDismiss(e.payload.request_id);
       })
+    );
+    // Phase 35 (#1.2): OSC 9/99/777 terminal notifications. The
+    // backend's PTY reader detects the escape sequence and emits this
+    // event; we surface it as a passive feed item (same rendering as
+    // agent-hook passive items). Universal complement to the
+    // Claude-specific hooks — works for cargo, pytest, any tool that
+    // prints the escape sequence.
+    unlistens.push(
+      await listen<{ pane_id: string; title: string; body: string; kind: string }>(
+        "osc-notification",
+        (e) => {
+          const { title, body, kind } = e.payload;
+          const hasTitle = title.trim().length > 0;
+          const item: FeedItem = {
+            request_id:
+              (globalThis.crypto?.randomUUID?.() ?? `osc-${Date.now()}-${Math.random()}`),
+            kind: "notification",
+            subkind: kind,
+            pane_id: e.payload.pane_id,
+            workspace_id: null,
+            title: hasTitle ? title : body,
+            summary: hasTitle ? body : "",
+            payload: e.payload,
+            state: "passive",
+            created_ms: Date.now(),
+            blocking: false,
+          };
+          setFeedItems((prev) => [item, ...prev]);
+          scheduleFeedDismiss(item.request_id);
+        },
+      ),
     );
     // Phase 7.B: notes
     await refreshNotes();
@@ -1139,10 +1234,10 @@ function App() {
                     activePaneId={activePaneId()}
                     connectedPaneIds={connectedPanes()}
                     waitingPaneIds={waitingPaneIds()}
-                    workspaceConnection={activeWs()?.connection}
+                    workspaceConnection={activeWs()?.connection ?? undefined}
                     workspaceName={activeWs()?.name}
-                    workspaceColor={activeWs()?.color}
-                    workspaceEmoji={activeWs()?.emoji}
+                    workspaceColor={activeWs()?.color ?? undefined}
+                    workspaceEmoji={activeWs()?.emoji ?? undefined}
                     workspaceIsSsh={
                       // Phase 16: walk the active workspace's layout looking for
                       // any pane with an SSH connection. We pre-compute this
@@ -1301,6 +1396,13 @@ function App() {
       {/* Phase 32.B: SSH key offer. Self-contained — listens for the
           `ssh-key-offer` event on its own, no props needed. */}
       <SshKeyOfferModal />
+
+      {/* Phase 35 (#1.3): command palette (Ctrl+Shift+P). */}
+      <CommandPalette
+        open={showPalette()}
+        commands={paletteCommands()}
+        onClose={() => setShowPalette(false)}
+      />
 
       <Show when={updateBanner()}>
         <div class="update-banner" role="status">

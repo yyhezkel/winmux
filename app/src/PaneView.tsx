@@ -316,6 +316,15 @@ export function PaneView(p: Props) {
     setEditingMeta(false);
   };
 
+  // Phase 35 (#1.3): command-palette "pane.rename" dispatches this
+  // window event with the target pane id; the matching pane opens its
+  // title/annotation editor. Lightweight cross-component trigger that
+  // avoids prop-drilling a rename request down from App.
+  const onRenameRequest = (e: Event) => {
+    const detail = (e as CustomEvent).detail;
+    if (detail === p.pane.pane_id) openMeta();
+  };
+
   onMount(() => {
     ti = p.ensureTerm(p.pane.pane_id);
     if (ti.container.parentElement !== slotRef) {
@@ -323,9 +332,11 @@ export function PaneView(p: Props) {
     }
     ti.container.style.display = "block";
     requestAnimationFrame(() => ti?.fitAndResize());
+    window.addEventListener("winmux:pane-rename", onRenameRequest);
   });
 
   onCleanup(() => {
+    window.removeEventListener("winmux:pane-rename", onRenameRequest);
     if (ti && ti.container.parentElement === slotRef) {
       ti.container.parentElement.removeChild(ti.container);
     }

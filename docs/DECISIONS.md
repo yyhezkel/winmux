@@ -67,6 +67,11 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Decided
 
+### 2026-05-28 — Workspace creation: password-only mode genuinely allowed (Phase 37, `f8a8ebe`)
+- **Context:** Form UX implied an SSH key was mandatory; the backend accepted `None` but users couldn't tell. The edit flow also locked connection fields. Bug found post-v0.2.4.
+- **Decision:** UI radio between "SSH Key" / "Password (prompted on connect)". Password mode saves no credential (`key_path = null`) — prompted interactively at every connect; the password is never persisted (CLAUDE.md Rule 2; the Connection struct is unchanged, no password field, no DPAPI for SSH passwords). Edit flow now opens host/user/port/key/auth-mode for change: `workspace_update` gained an optional `connection` param that replaces `ws.connection` and rewrites every Terminal pane's connection. The keyless→interactive-password connect path already worked and was left as-is.
+- **Outcome:** Phase 37 shipped `f8a8ebe` (build green, app.exe ~30.8 MB). Released in v0.2.5 — cut TBD when Yossi greenlights.
+
 ### 2026-05-28 — Auto port forwarding shipped (#2.2, Phase 36, `95de6f1`)
 - **Context:** Selected after Sprint 1 as a parallel track to the Secrets Vault research session (separate worktree).
 - **Decision:** Linux CLI watcher scans `/proc/net/tcp(6)` every 500ms, diffs LISTEN ports, and reports `port.opened` / `port.closed` over the existing tunnel RPC. The Windows backend opens a russh local-forward bound to the SAME local port as the remote (fallback +1..+9) so `localhost:3000` just works. Per-workspace `auto_port_forward` toggle (default on). Ports panel in the sidebar; one passive FeedItem per opened forward.

@@ -257,6 +257,12 @@
 
   "sidebar.provision_server": "☁ הקם שרת",
   "sidebar.provision_server_tooltip": "הקמת שרת חדש עם משתמשים, מפתחות וכלים",
+  "sidebar.settings.tooltip": "הגדרות",
+  "settings.updates.logs.title": "לוגים",
+  "settings.updates.logs.path": "נתיב:",
+  "settings.updates.logs.openFolder": "פתח תיקייה",
+  "settings.updates.logs.copyPath": "העתק נתיב",
+  "settings.updates.logs.copied": "הועתק",
 
   "ws.create.mode.wizard": "אשף",
   "ws.create.mode.custom": "פקודה מותאמת",

@@ -257,6 +257,12 @@
 
   "sidebar.provision_server": "☁ Подготовить сервер",
   "sidebar.provision_server_tooltip": "Подготовка нового сервера: пользователи, ключи, утилиты",
+  "sidebar.settings.tooltip": "Настройки",
+  "settings.updates.logs.title": "Журналы",
+  "settings.updates.logs.path": "Путь:",
+  "settings.updates.logs.openFolder": "Открыть папку",
+  "settings.updates.logs.copyPath": "Копировать путь",
+  "settings.updates.logs.copied": "Скопировано",
 
   "ws.create.mode.wizard": "Мастер",
   "ws.create.mode.custom": "Своя команда",

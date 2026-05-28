@@ -1,4 +1,6 @@
 import { createSignal, For, Show, onMount, createMemo } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   Settings,
   PresetEntry,
@@ -36,6 +38,9 @@ export function SettingsModal(p: Props) {
   const [lastSaved, setLastSaved] = createSignal<number>(0);
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfo | null>(null);
   const [checking, setChecking] = createSignal(false);
+  // Phase 38: resolved debug.log path + "Copied" flash state.
+  const [logPath, setLogPath] = createSignal<string>("");
+  const [logCopied, setLogCopied] = createSignal(false);
 
   // Debounced save: live-preview every change locally, persist 500ms after
   // the last edit so a slider drag doesn't write 60 files/sec.
@@ -72,7 +77,25 @@ export function SettingsModal(p: Props) {
   onMount(async () => {
     try { setPresets(await getPresets()); } catch (e) { console.warn(e); }
     try { setFonts(await listSystemFonts()); } catch (e) { console.warn(e); }
+    // Phase 38: resolve the debug.log path for the Logs section.
+    try { setLogPath(await invoke<string>("log_dir_path")); } catch (e) { console.warn(e); }
   });
+
+  // Phase 38: Logs section actions.
+  const onOpenLogFolder = () => {
+    if (!logPath()) return;
+    void revealItemInDir(logPath()).catch((e) => console.warn("revealItemInDir failed", e));
+  };
+  const onCopyLogPath = async () => {
+    if (!logPath()) return;
+    try {
+      await navigator.clipboard.writeText(logPath());
+      setLogCopied(true);
+      setTimeout(() => setLogCopied(false), 1500);
+    } catch (e) {
+      console.warn("clipboard write failed", e);
+    }
+  };
 
   const onPickPreset = async (id: string) => {
     try {
@@ -606,6 +629,22 @@ export function SettingsModal(p: Props) {
                       </Show>
                     </div>
                   </Show>
+
+                  {/* Phase 38: Logs — resolved debug.log path + open/copy. */}
+                  <hr class="modal-sep" />
+                  <h4>{t("settings.updates.logs.title")}</h4>
+                  <div class="settings-logs-row">
+                    <span class="settings-logs-label">{t("settings.updates.logs.path")}</span>
+                    <code class="settings-logs-path">{logPath()}</code>
+                  </div>
+                  <div class="settings-logs-actions">
+                    <button onClick={onOpenLogFolder} disabled={!logPath()}>
+                      {t("settings.updates.logs.openFolder")}
+                    </button>
+                    <button onClick={() => void onCopyLogPath()} disabled={!logPath()}>
+                      {logCopied() ? t("settings.updates.logs.copied") : t("settings.updates.logs.copyPath")}
+                    </button>
+                  </div>
                 </section>
               </Show>
 

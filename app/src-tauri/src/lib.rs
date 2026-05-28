@@ -536,6 +536,14 @@ pub(crate) fn config_dir_pub() -> Result<PathBuf, String> {
     config_dir()
 }
 
+/// Phase 38: absolute path to the debug log, for the Settings → Logs
+/// UI ("Open folder" / "Copy path"). Single source of truth — matches
+/// exactly what `dlog` writes to.
+#[tauri::command]
+fn log_dir_path() -> Result<String, String> {
+    Ok(config_dir()?.join("debug.log").to_string_lossy().to_string())
+}
+
 fn config_path() -> Result<PathBuf, String> {
     Ok(config_dir()?.join("workspaces.json"))
 }
@@ -2149,8 +2157,14 @@ async fn ssh_key_generate_and_install(
     //    new short-lived one is simpler and the user already typed
     //    the password once for this flow).
     let target = format!("{ssh_host}:{ssh_port}");
+    // Phase 38: keepalive (see spawn_ssh) — short-lived key-install
+    // session, but keep it consistent with the rest.
+    let config = Arc::new(client::Config {
+        keepalive_interval: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
     let mut handle = client::connect(
-        Arc::new(client::Config::default()),
+        config,
         (ssh_host.as_str(), ssh_port),
         SshClient::new_anonymous(target.clone()),
     )
@@ -2292,7 +2306,14 @@ async fn spawn_ssh(
         "spawn_ssh: entry ws={} pane={} target={}@{}:{}",
         workspace_id, pane_id, user, host, port
     ));
-    let config = Arc::new(client::Config::default());
+    // Phase 38: SSH-level keepalive every 30s. Without it, an idle
+    // connection's NAT/firewall mapping (typically 5-15 min) expires and
+    // the link silently dies. keepalive_max stays at the default 3 →
+    // ~90s dead-peer detection.
+    let config = Arc::new(client::Config {
+        keepalive_interval: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
     let target = format!("{}:{}", host, port);
     let outcome_arc = Arc::new(Mutex::new(HostCheckOutcome::default()));
     let token = Arc::new(tunnel::generate_token());
@@ -2579,20 +2600,46 @@ async fn spawn_ssh(
         let mut leftover: Vec<u8> = Vec::new();
         let mut osc = osc_notify::OscNotifyParser::new();
         let mut exit_reason: Option<String> = None;
+        // Phase 38: track last inbound data so disconnect logs carry a
+        // "how long was it idle before dropping" age — distinguishes a
+        // keepalive/NAT timeout (long idle) from an active-session drop.
+        let mut last_data_at = std::time::Instant::now();
+        // Phase 38: stable ids for the disconnect log line.
+        let ch_id = channel.id();
         loop {
             tokio::select! {
                 msg = channel.wait() => {
                     match msg {
                         Some(ChannelMsg::Data { data }) => {
+                            last_data_at = std::time::Instant::now();
                             emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover, &pane_for_task, &mut osc);
                         }
                         Some(ChannelMsg::ExtendedData { data, ext: _ }) => {
+                            last_data_at = std::time::Instant::now();
                             emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover, &pane_for_task, &mut osc);
                         }
                         Some(ChannelMsg::ExitStatus { exit_status }) => {
                             exit_reason = Some(format!("exit {exit_status}"));
                         }
-                        Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => {
+                        Some(ChannelMsg::Eof) => {
+                            dlog(&format!(
+                                "ssh-disconnect: clean Eof, workspace={} pane={} channel={:?} last_activity_ms={}",
+                                workspace_for_task, pane_for_task, ch_id, last_data_at.elapsed().as_millis()
+                            ));
+                            break;
+                        }
+                        Some(ChannelMsg::Close) => {
+                            dlog(&format!(
+                                "ssh-disconnect: clean Close, workspace={} pane={} channel={:?} last_activity_ms={}",
+                                workspace_for_task, pane_for_task, ch_id, last_data_at.elapsed().as_millis()
+                            ));
+                            break;
+                        }
+                        None => {
+                            dlog(&format!(
+                                "ssh-disconnect: transport dropped (likely network/keepalive timeout), workspace={} pane={} channel={:?} last_activity_ms={}",
+                                workspace_for_task, pane_for_task, ch_id, last_data_at.elapsed().as_millis()
+                            ));
                             break;
                         }
                         _ => {}
@@ -5490,6 +5537,7 @@ pub fn run() {
             workspace_set_identity,
             workspace_set_auto_port_forward,
             port_forward_stop,
+            log_dir_path,
             pane_set_identity,
             ssh_key_offer_dismiss,
             ssh_key_generate_and_install,

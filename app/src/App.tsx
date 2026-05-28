@@ -1167,6 +1167,7 @@ function App() {
           onActivate={handleSetActive}
           onCreate={() => setShowCreate(true)}
           onProvision={() => setShowProvision(true)}
+          onOpenSettings={() => setShowSettings(true)}
           onAction={(id, action) => {
             if (action === "rename") handleRename(id);
             else if (action === "edit") {

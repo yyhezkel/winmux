@@ -3333,6 +3333,36 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .ws-auth-opt { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .ws-auth-hint { margin-top: 2px; }
 
+/* Phase 38: sidebar settings gear — matches .ws-provision / .ws-add. */
+.ws-settings {
+  display: block;
+  width: 100%;
+  text-align: start;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--w-text-secondary, #7d8590);
+  border: none;
+  border-top: 1px solid var(--w-border, #21262d);
+  cursor: pointer;
+  font-size: 13px;
+}
+.ws-settings:hover { color: var(--w-text-primary, #e6edf3); background: var(--w-surface-hover, #1f2630); }
+
+/* Phase 38: Settings → Logs section. */
+.settings-logs-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+.settings-logs-label { color: var(--w-text-secondary, #7d8590); }
+.settings-logs-path {
+  font-family: var(--w-mono, "Cascadia Mono", monospace);
+  font-size: 12px;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 4px;
+  padding: 4px 8px;
+  user-select: all;
+  word-break: break-all;
+}
+.settings-logs-actions { display: flex; gap: 8px; margin-top: 4px; }
+
 /* Phase 34: small contextual "?" hint button. Sits inline with a
    field label and opens the relevant HelpPane on click. */
 .ws-key-label {

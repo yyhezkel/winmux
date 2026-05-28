@@ -1248,7 +1248,12 @@ async fn open_ssh(
     key_path: &Option<String>,
     key_passphrase: &Option<String>,
 ) -> Result<client::Handle<crate::SshClient>, String> {
-    let config = Arc::new(client::Config::default());
+    // Phase 38: keepalive every 30s — provisioning sessions can sit
+    // idle between steps; don't let a NAT timeout drop them.
+    let config = Arc::new(client::Config {
+        keepalive_interval: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
     let target = format!("{host}:{port}");
     let connect = client::connect(
         config,

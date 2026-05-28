@@ -257,6 +257,12 @@
 
   "sidebar.provision_server": "☁ إعداد خادم",
   "sidebar.provision_server_tooltip": "إعداد خادم جديد بمستخدمين ومفاتيح وأدوات",
+  "sidebar.settings.tooltip": "الإعدادات",
+  "settings.updates.logs.title": "السجلات",
+  "settings.updates.logs.path": "المسار:",
+  "settings.updates.logs.openFolder": "فتح المجلد",
+  "settings.updates.logs.copyPath": "نسخ المسار",
+  "settings.updates.logs.copied": "تم النسخ",
 
   "ws.create.mode.wizard": "معالج",
   "ws.create.mode.custom": "أمر مخصص",

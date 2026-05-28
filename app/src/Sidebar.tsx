@@ -30,6 +30,8 @@ interface Props {
   onCreate: () => void;
   /** Phase 14.A — open the server provisioning wizard. */
   onProvision: () => void;
+  /** Phase 38 — open the settings modal from the sidebar gear. */
+  onOpenSettings: () => void;
   onAction: (id: string, action: "rename" | "edit" | "delete" | "disconnect") => void;
   // Phase 36 (#2.2): live auto port-forwards for the ACTIVE workspace,
   // shown in the Ports panel below the workspace list.
@@ -175,6 +177,10 @@ export function Sidebar(p: Props) {
       <PortsPanel forwards={p.activeForwards} onStop={p.onStopForward} />
       <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
         {t("sidebar.provision_server")}
+      </button>
+      {/* Phase 38: discoverable Settings entry point above New workspace. */}
+      <button class="ws-settings" onClick={p.onOpenSettings} title={t("sidebar.settings.tooltip")}>
+        ⚙ {t("sidebar.settings.tooltip")}
       </button>
       <button class="ws-add" onClick={p.onCreate}>
         {t("sidebar.new_workspace")}

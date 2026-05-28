@@ -500,7 +500,11 @@ pub(crate) async fn test_ssh_connect(
     // server key — this is a TEST, not a real session; TOFU enforcement
     // is the real `try_authenticate` path's concern.
     use russh::client;
-    let config = std::sync::Arc::new(client::Config::default());
+    // Phase 38: keepalive on the test connection too (consistency).
+    let config = std::sync::Arc::new(client::Config {
+        keepalive_interval: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
     let connect_fut = client::connect(config, (host.as_str(), port), TestClient);
     let mut handle = match tokio::time::timeout(std::time::Duration::from_secs(10), connect_fut)
         .await

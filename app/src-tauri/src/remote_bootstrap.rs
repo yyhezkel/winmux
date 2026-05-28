@@ -130,12 +130,23 @@ async fn upload_via_sftp(
     handle: &mut Handle<SshClient>,
     abs_remote_path: &str,
     bytes: &[u8],
+    expected_hash: &str,
 ) -> Result<(), String> {
     use tokio::io::AsyncWriteExt;
 
+    // Phase 39.D: write to a sibling `.tmp` then atomically `mv -f` it onto the
+    // final name. Truncating a currently-executing binary in place returns
+    // ETXTBSY, which OpenSSH SFTP reports as the generic SSH_FX_FAILURE
+    // ("Failure: Failure"); rename(2) instead swaps the directory entry to a
+    // fresh inode, so a still-running old binary never blocks the replace.
+    let tmp_path = format!("{abs_remote_path}.tmp");
+    dlog(&format!(
+        "remote bootstrap: uploading to {tmp_path} then atomic-rename to {abs_remote_path} (sha256 {expected_hash})"
+    ));
+
     dlog(&format!(
         "bootstrap: opening sftp subsystem for {} ({} bytes)",
-        abs_remote_path,
+        tmp_path,
         bytes.len()
     ));
     let chan = handle
@@ -162,11 +173,11 @@ async fn upload_via_sftp(
 
     {
         let mut file = sftp
-            .create(abs_remote_path)
+            .create(&tmp_path)
             .await
             .map_err(|e| {
-                dlog(&format!("bootstrap: sftp.create {abs_remote_path} failed: {e}"));
-                format!("sftp create {abs_remote_path}: {e}")
+                dlog(&format!("bootstrap: sftp.create {tmp_path} failed: {e}"));
+                format!("sftp create {tmp_path}: {e}")
             })?;
         file.write_all(bytes)
             .await
@@ -177,9 +188,27 @@ async fn upload_via_sftp(
         file.flush().await.ok();
         file.shutdown().await.ok();
     }
-    dlog("bootstrap: sftp upload complete");
+    dlog("bootstrap: sftp temp upload complete");
 
     let _ = sftp.close().await;
+
+    // Atomic-replace the final path with the freshly-uploaded temp file.
+    let mv_cmd = format!(
+        "mv -f {} {}",
+        crate::shell_quote(&tmp_path),
+        crate::shell_quote(abs_remote_path)
+    );
+    let (_, mv_code) = ssh_exec(handle, &mv_cmd).await?;
+    if mv_code != 0 {
+        dlog(&format!(
+            "bootstrap: atomic rename {tmp_path} -> {abs_remote_path} failed (exit {mv_code})"
+        ));
+        return Err(format!(
+            "rename {tmp_path} -> {abs_remote_path}: exit {mv_code}"
+        ));
+    }
+    dlog("bootstrap: sftp upload complete (atomic rename done)");
+
     Ok(())
 }
 
@@ -260,8 +289,14 @@ pub async fn bootstrap(
     // Make dir, upload, chmod, symlink.
     ssh_exec(handle, &format!("mkdir -p {remote_dir_abs}")).await?;
 
+    // Phase 39.D: reap any zombie port-watch from a prior session that may
+    // still hold the binary's inode (e.g. orphaned by the pre-39.C pipe
+    // crash). Non-fatal — pkill exits 1 when nothing matches, which is the
+    // normal case; the trailing `true` keeps the channel exit clean.
+    let _ = ssh_exec(handle, "pkill -f winmux-linux-x64 2>/dev/null; sleep 0.1; true").await;
+
     let bytes = read_resource_bytes(app, &entry.path)?;
-    upload_via_sftp(handle, &remote_bin_abs, &bytes).await?;
+    upload_via_sftp(handle, &remote_bin_abs, &bytes, &entry.sha256).await?;
     ssh_exec(handle, &format!("chmod 0755 {remote_bin_abs}")).await?;
     ssh_exec(
         handle,
@@ -360,7 +395,7 @@ async fn ensure_tmux_conf(
             return;
         }
     };
-    if let Err(e) = upload_via_sftp(handle, &remote_conf, &bytes).await {
+    if let Err(e) = upload_via_sftp(handle, &remote_conf, &bytes, &entry.sha256).await {
         dlog(&format!("bootstrap: upload tmux-conf failed: {e}"));
         return;
     }

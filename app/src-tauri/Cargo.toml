@@ -12,7 +12,7 @@ strip = "symbols"
 
 [package]
 name = "app"
-version = "0.2.3"
+version = "0.2.4"
 description = "winmux"
 authors = ["yossi"]
 edition = "2021"

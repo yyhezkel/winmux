@@ -28,7 +28,7 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 ### 2026-05-27 — Competitive-scan ideas inventory (triage in progress)
 - **Context:** Survey of 8 winmux GitHub projects produced an inventory of ~25 ideas to potentially adopt. Highest-impact triple: HTTP Automation API for LLM control (#2.1), Auto port forwarding (#2.2), Secrets Vault (#3.2).
 - **Source docs:** `docs/COMPETITIVE-SCAN.md` (full report + Secrets Vault design), `docs/IDEAS-RANKING.md` (decision table).
-- **Status:** 5 MUST items closed in Phase 35 (`bddc0b0`); 4 MUST + 10 SHOULD + 6 COULD remain. As individual items are decided, move them to their own Decided / Open entries with phase + commit references. Master inventory stays here until fully triaged.
+- **Status:** 5 MUST closed in Phase 35 (`bddc0b0`), auto port forwarding closed in Phase 36 (`95de6f1`). 3 MUST remain after Phase 36 (Pipe hardening deferred, Secrets Vault under research in a parallel worktree, Full LLM control on the roadmap), plus 10 SHOULD + 6 COULD. As individual items are decided, move them to their own Decided / Open entries with phase + commit references. Master inventory stays here until fully triaged.
 - **Also flagged:** the `winmux` name is taken by 8 projects on GitHub — rebrand caveat (see scan doc's "Naming Caveat" section).
 
 ### 2026-05-27 — Bidi mixed-content rendering
@@ -66,6 +66,13 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 ---
 
 ## Decided
+
+### 2026-05-28 — Auto port forwarding shipped (#2.2, Phase 36, `95de6f1`)
+- **Context:** Selected after Sprint 1 as a parallel track to the Secrets Vault research session (separate worktree).
+- **Decision:** Linux CLI watcher scans `/proc/net/tcp(6)` every 500ms, diffs LISTEN ports, and reports `port.opened` / `port.closed` over the existing tunnel RPC. The Windows backend opens a russh local-forward bound to the SAME local port as the remote (fallback +1..+9) so `localhost:3000` just works. Per-workspace `auto_port_forward` toggle (default on). Ports panel in the sidebar; one passive FeedItem per opened forward.
+- **Watcher launch:** fire-and-forget `winmux port-watch` exec channel per workspace (deduped via `state.port_watchers`), tied to the SSH session lifetime. Idempotent `open_forward_matched` absorbs duplicate opens from multiple panes.
+- **Known v1 edge:** if the pane whose SSH session hosts the watcher disconnects while another pane stays connected, auto-forward pauses until reconnect. Acceptable for v1; revisit if it bites.
+- **Outcome:** Phase 36 shipped (build green, app.exe ~30.8 MB). Tests: `/proc/net/tcp` parser (5) + forwards-map (2).
 
 ### 2026-05-28 — Sprint 1 quick wins shipped (Phase 35, `bddc0b0`)
 The first 5 MUST items from the competitive-scan triage, in one phase + build (app.exe 30.6 MB, exit 0):

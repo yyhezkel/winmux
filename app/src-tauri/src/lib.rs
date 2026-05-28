@@ -209,6 +209,14 @@ pub(crate) struct AppState {
     // workspace even when multiple panes connect. Cleared when the
     // workspace's last SSH session ends.
     pub(crate) port_watchers: Arc<Mutex<std::collections::HashSet<String>>>,
+    // Phase 39: per-workspace set of REMOTE ports that winmux's own
+    // reverse tunnels listen on (from `tcpip_forward`). The auto-port
+    // watcher sees these as LISTEN sockets and would otherwise forward
+    // them — exposing winmux's internal HMAC endpoint to the browser
+    // ("WINMUX-CHALLENGE / WINMUX-DENIED bad-format"). The port.opened
+    // handler skips any port in this set.
+    pub(crate) internal_reverse_tunnel_remote_ports:
+        Arc<Mutex<HashMap<String, std::collections::HashSet<u16>>>>,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -442,11 +450,13 @@ pub(crate) struct Workspace {
     pub(crate) teardown_command: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) env: Vec<EnvVar>,
-    // Phase 36 (#2.2): when true (default), winmux auto-opens SSH
+    // Phase 36 (#2.2) → 39: when true, winmux auto-opens SSH
     // local-forwards for listening ports the remote watcher reports.
-    // `#[serde(default = "default_true")]` so older workspaces.json
-    // without the field load as ON.
-    #[serde(default = "default_true")]
+    // Phase 39: default flipped to FALSE — users opt in per-workspace
+    // (Settings / Ports window). Avoids a flood of forwards on connect
+    // and the WINMUX-CHALLENGE foot-gun. `#[serde(default)]` → bool
+    // false, so older workspaces.json without the field load as OFF.
+    #[serde(default)]
     pub(crate) auto_port_forward: bool,
 }
 
@@ -542,6 +552,40 @@ pub(crate) fn config_dir_pub() -> Result<PathBuf, String> {
 #[tauri::command]
 fn log_dir_path() -> Result<String, String> {
     Ok(config_dir()?.join("debug.log").to_string_lossy().to_string())
+}
+
+/// Phase 39: last `n` lines of debug.log for the Logs tab viewer. Only
+/// the tail end of the file is read (seek from EOF, ~256 KB window) so
+/// a multi-MB log doesn't get slurped whole on every 5s refresh.
+#[tauri::command]
+fn read_log_tail(n: usize) -> Result<String, String> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let path = config_dir()?.join("debug.log");
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    let mut f = std::fs::File::open(&path).map_err(|e| format!("open log: {e}"))?;
+    let len = f.metadata().map_err(|e| e.to_string())?.len();
+    // Read at most the last 256 KB — comfortably more than 200 lines.
+    const WINDOW: u64 = 256 * 1024;
+    let start = len.saturating_sub(WINDOW);
+    f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).map_err(|e| format!("read log: {e}"))?;
+    let text = String::from_utf8_lossy(&buf);
+    // If we started mid-file, drop the first (likely partial) line.
+    let text = if start > 0 {
+        text.splitn(2, '\n').nth(1).unwrap_or("")
+    } else {
+        &text
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    let tail = if lines.len() > n {
+        &lines[lines.len() - n..]
+    } else {
+        &lines[..]
+    };
+    Ok(tail.join("\n"))
 }
 
 fn config_path() -> Result<PathBuf, String> {
@@ -2438,6 +2482,18 @@ async fn spawn_ssh(
         }
     };
 
+    // Phase 39: record winmux's own reverse-tunnel remote port so the
+    // auto-port watcher skips it (it's an HMAC endpoint, not a web app).
+    if remote_port != 0 {
+        state
+            .internal_reverse_tunnel_remote_ports
+            .lock()
+            .unwrap()
+            .entry(workspace_id.clone())
+            .or_default()
+            .insert(remote_port as u16);
+    }
+
     if remote_port != 0 {
         // Best-effort: write the env file so the CLI can dial back even if sshd
         // refuses our `set_env` requests on the shell channel.
@@ -2596,6 +2652,10 @@ async fn spawn_ssh(
     let pane_sessions_for_task = state.pane_sessions.clone();
     let forwards_for_task = state.forwards.clone();
     let workspace_for_task = workspace_id.clone();
+    // Phase 39: clean up this session's reverse-tunnel remote port from
+    // the internal-ports set when the session ends.
+    let internal_ports_for_task = state.internal_reverse_tunnel_remote_ports.clone();
+    let reverse_port_for_task = remote_port as u16;
     tokio::spawn(async move {
         let mut leftover: Vec<u8> = Vec::new();
         let mut osc = osc_notify::OscNotifyParser::new();
@@ -2670,6 +2730,18 @@ async fn spawn_ssh(
             &pane_for_task,
             &id_for_task,
         );
+        // Phase 39: drop this session's reverse-tunnel remote port from
+        // the internal-ports set.
+        if reverse_port_for_task != 0 {
+            if let Ok(mut m) = internal_ports_for_task.lock() {
+                if let Some(set) = m.get_mut(&workspace_for_task) {
+                    set.remove(&reverse_port_for_task);
+                    if set.is_empty() {
+                        m.remove(&workspace_for_task);
+                    }
+                }
+            }
+        }
         // Phase 8.B: if this was the last SSH session for the workspace, tear
         // down all of its port forwards.
         let still_alive = sessions_for_task
@@ -3274,7 +3346,7 @@ fn workspace_create(
         setup_command: input.setup_command,
         teardown_command: input.teardown_command,
         env: input.env.unwrap_or_default(),
-        auto_port_forward: true,
+        auto_port_forward: false,
     };
     {
         let mut file = state.workspaces.lock().unwrap();
@@ -3737,6 +3809,7 @@ async fn pane_set_identity(
 #[tauri::command]
 fn workspace_delete(
     state: State<'_, AppState>,
+    app: AppHandle,
     workspace_id: String,
 ) -> Result<WorkspacesFile, String> {
     let panes_to_kill: Vec<String> = {
@@ -3761,6 +3834,9 @@ fn workspace_delete(
     }
     // Phase 8.B: tear down any port forwards for the workspace.
     close_workspace_forwards(&state.forwards, &workspace_id);
+    // Phase 39: drop the workspace's notes (the UI warns first when any
+    // exist). Best-effort — failure here shouldn't block the delete.
+    notes::delete_for_workspace(&state, &app, &workspace_id);
     {
         let mut file = state.workspaces.lock().unwrap();
         file.workspaces.retain(|w| w.id != workspace_id);
@@ -5538,6 +5614,7 @@ pub fn run() {
             workspace_set_auto_port_forward,
             port_forward_stop,
             log_dir_path,
+            read_log_tail,
             pane_set_identity,
             ssh_key_offer_dismiss,
             ssh_key_generate_and_install,

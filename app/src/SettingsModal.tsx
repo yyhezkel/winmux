@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onMount, createMemo } from "solid-js";
+import { createSignal, For, Show, onMount, createMemo, createEffect, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
@@ -27,7 +27,7 @@ interface Props {
   onChange: (next: Settings) => void;
 }
 
-type Tab = "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "updates" | "language";
+type Tab = "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "updates" | "logs" | "language";
 
 export function SettingsModal(p: Props) {
   const [tab, setTab] = createSignal<Tab>("theme");
@@ -38,9 +38,17 @@ export function SettingsModal(p: Props) {
   const [lastSaved, setLastSaved] = createSignal<number>(0);
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfo | null>(null);
   const [checking, setChecking] = createSignal(false);
-  // Phase 38: resolved debug.log path + "Copied" flash state.
+  // Phase 38/39: resolved debug.log path + "Copied" flash + live tail.
   const [logPath, setLogPath] = createSignal<string>("");
   const [logCopied, setLogCopied] = createSignal(false);
+  const [logTail, setLogTail] = createSignal<string>("");
+  const refreshLogTail = async () => {
+    try {
+      setLogTail(await invoke<string>("read_log_tail", { n: 200 }));
+    } catch (e) {
+      console.warn("read_log_tail failed", e);
+    }
+  };
 
   // Debounced save: live-preview every change locally, persist 500ms after
   // the last edit so a slider drag doesn't write 60 files/sec.
@@ -96,6 +104,15 @@ export function SettingsModal(p: Props) {
       console.warn("clipboard write failed", e);
     }
   };
+
+  // Phase 39: poll the log tail every 5s while the Logs tab is open;
+  // stop when the user navigates away or closes the modal.
+  createEffect(() => {
+    if (!p.open || tab() !== "logs") return;
+    void refreshLogTail();
+    const id = setInterval(() => void refreshLogTail(), 5000);
+    onCleanup(() => clearInterval(id));
+  });
 
   const onPickPreset = async (id: string) => {
     try {
@@ -176,7 +193,7 @@ export function SettingsModal(p: Props) {
 
           <div class="settings-body">
             <nav class="settings-tabs">
-              <For each={["theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "updates", "language"] as Tab[]}>
+              <For each={["theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "updates", "logs", "language"] as Tab[]}>
                 {(name) => (
                   <button
                     class={`settings-tab ${tab() === name ? "active" : ""}`}
@@ -630,9 +647,20 @@ export function SettingsModal(p: Props) {
                     </div>
                   </Show>
 
-                  {/* Phase 38: Logs — resolved debug.log path + open/copy. */}
+                </section>
+              </Show>
+
+              {/* Phase 39: Logs tab — live tail viewer + path + open/copy. */}
+              <Show when={tab() === "logs"}>
+                <section>
+                  <h4>{t("settings.logs.recent")}</h4>
+                  <pre class="settings-logs-viewer">{logTail()}</pre>
+                  <div class="settings-logs-actions">
+                    <button onClick={() => void refreshLogTail()}>
+                      {t("settings.logs.refresh")}
+                    </button>
+                  </div>
                   <hr class="modal-sep" />
-                  <h4>{t("settings.updates.logs.title")}</h4>
                   <div class="settings-logs-row">
                     <span class="settings-logs-label">{t("settings.updates.logs.path")}</span>
                     <code class="settings-logs-path">{logPath()}</code>

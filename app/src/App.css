@@ -3348,9 +3348,76 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 }
 .ws-settings:hover { color: var(--w-text-primary, #e6edf3); background: var(--w-surface-hover, #1f2630); }
 
-/* Phase 38: Settings → Logs section. */
+/* Phase 38/39: Settings → Logs section + tab. */
 .settings-logs-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
 .settings-logs-label { color: var(--w-text-secondary, #7d8590); }
+.settings-logs-viewer {
+  height: 400px;
+  overflow: auto;
+  background: var(--w-background, #0e1116);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: var(--w-mono, "Cascadia Mono", monospace);
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 6px 0;
+}
+
+/* Phase 39: sidebar paired action row (Notes + Settings). */
+.sidebar-actions-row { display: flex; gap: 1px; border-top: 1px solid var(--w-border, #21262d); }
+.ws-action-half {
+  flex: 1;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--w-text-secondary, #7d8590);
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: center;
+}
+.ws-action-half:hover { color: var(--w-text-primary, #e6edf3); background: var(--w-surface-hover, #1f2630); }
+
+/* Phase 39: floating Ports window. */
+.ports-window { width: min(520px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
+.ports-window-head-actions { display: flex; align-items: center; gap: 8px; }
+.ports-window-settings {
+  background: transparent;
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 5px;
+  color: var(--w-text-secondary, #7d8590);
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.ports-window-settings:hover { color: var(--w-text-primary, #e6edf3); }
+.ports-window-tabs { display: flex; gap: 4px; padding: 0 4px 8px; border-bottom: 1px solid var(--w-border, #21262d); }
+.ports-window-tabs button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--w-text-secondary, #7d8590);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.ports-window-tabs button.active { color: var(--w-text-primary, #e6edf3); border-bottom-color: var(--w-accent, #3b82f6); }
+.ports-window-tabs button:disabled { opacity: 0.4; cursor: default; }
+.ports-window-body { overflow-y: auto; padding: 8px 4px; }
+.ports-row-actions { display: flex; gap: 6px; margin-inline-start: auto; }
+.ports-row-actions button {
+  background: transparent;
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 4px;
+  color: var(--w-text-secondary, #7d8590);
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.ports-row-actions button:hover { color: var(--w-text-primary, #e6edf3); }
+.ports-row-label { cursor: pointer; }
 .settings-logs-path {
   font-family: var(--w-mono, "Cascadia Mono", monospace);
   font-size: 12px;

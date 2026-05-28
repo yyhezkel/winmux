@@ -189,7 +189,7 @@ async fn dispatch(
                 setup_command: input.setup_command,
                 teardown_command: input.teardown_command,
                 env: input.env.unwrap_or_default(),
-                auto_port_forward: true,
+                auto_port_forward: false,
             };
             let cloned = ws.clone();
             {
@@ -1722,6 +1722,17 @@ async fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("127.0.0.1")
                 .to_string();
+            // Phase 39: never forward winmux's own reverse-tunnel remote
+            // port — it's an HMAC endpoint, not a web app. Forwarding it
+            // would surface "WINMUX-CHALLENGE / WINMUX-DENIED" in the
+            // user's browser.
+            let is_internal = {
+                let m = state.internal_reverse_tunnel_remote_ports.lock().unwrap();
+                m.get(&workspace_id).map(|s| s.contains(&port)).unwrap_or(false)
+            };
+            if is_internal {
+                return Ok(json!({ "ok": true, "skipped": "winmux internal port" }));
+            }
             let enabled = {
                 let file = state.workspaces.lock().unwrap();
                 file.workspaces

@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { LayoutView } from "./LayoutView";
@@ -13,6 +12,7 @@ import { ProvisioningWizard } from "./ProvisioningWizard";
 import { SettingsModal } from "./SettingsModal";
 import { SshKeyOfferModal } from "./SshKeyOfferModal";
 import { CommandPalette, type Command } from "./CommandPalette";
+import { PortsWindow } from "./PortsWindow";
 import {
   TerminalInstance,
   copyTerminalSelection,
@@ -110,17 +110,14 @@ function App() {
   const [showProvision, setShowProvision] = createSignal(false);
   // Phase 35 (#1.3): command palette (Ctrl+Shift+P).
   const [showPalette, setShowPalette] = createSignal(false);
-  // Phase 36 (#2.2): live auto port-forwards (all workspaces). The
-  // Ports panel shows the slice for the active workspace.
+  // Phase 36 (#2.2): live auto port-forwards (all workspaces).
   const [portForwards, setPortForwards] = createSignal<ForwardRow[]>([]);
-  const activeForwards = (): ForwardRow[] => {
-    const id = file().active_workspace_id;
-    return id ? portForwards().filter((f) => f.workspace_id === id) : [];
-  };
-  const stopForward = (remotePort: number) => {
-    const id = file().active_workspace_id;
-    if (!id) return;
-    void invoke("port_forward_stop", { workspaceId: id, remotePort });
+  // Phase 39: floating Ports window state — which workspace's badge
+  // was clicked.
+  const [portsWindowWs, setPortsWindowWs] = createSignal<string | null>(null);
+  const [showPortsWindow, setShowPortsWindow] = createSignal(false);
+  const stopForward = (workspaceId: string, remotePort: number) => {
+    void invoke("port_forward_stop", { workspaceId, remotePort });
   };
   // Phase 35: webview zoom factor for view.zoom.* palette commands.
   const [zoomFactor, setZoomFactor] = createSignal(1);
@@ -496,6 +493,13 @@ function App() {
     const ws = file().workspaces.find((w) => w.id === id);
     if (!ws) return;
     if (!window.confirm(`Delete workspace "${ws.name}"?`)) return;
+    // Phase 39: extra confirm when the workspace has notes (they'll be
+    // deleted with it). Counts notes strictly belonging to this ws —
+    // legacy unassigned (null) notes survive the delete.
+    const noteCount = notes().filter((n) => n.workspace_id === id).length;
+    if (noteCount > 0) {
+      if (!window.confirm(t("workspace.delete.notesWarning", { count: noteCount }))) return;
+    }
     try {
       const f = await invoke<WorkspacesFile>("workspace_delete", {
         workspaceId: id,
@@ -1168,6 +1172,7 @@ function App() {
           onCreate={() => setShowCreate(true)}
           onProvision={() => setShowProvision(true)}
           onOpenSettings={() => setShowSettings(true)}
+          onOpenNotes={() => setShowNotes(true)}
           onAction={(id, action) => {
             if (action === "rename") handleRename(id);
             else if (action === "edit") {
@@ -1180,13 +1185,10 @@ function App() {
             else if (action === "disconnect")
               void handleDisconnectWorkspace(id);
           }}
-          activeForwards={activeForwards()}
-          onStopForward={stopForward}
           allForwards={portForwards()}
-          onOpenForwardUrl={(localPort) => {
-            void openUrl(`http://localhost:${localPort}`).catch((e) =>
-              console.warn("openUrl failed", e),
-            );
+          onOpenPorts={(workspaceId) => {
+            setPortsWindowWs(workspaceId);
+            setShowPortsWindow(true);
           }}
         />
       </ErrorBoundary>
@@ -1486,6 +1488,24 @@ function App() {
         open={showPalette()}
         commands={paletteCommands()}
         onClose={() => setShowPalette(false)}
+      />
+
+      {/* Phase 39: floating Ports window (opened from a workspace's 🌐 badge). */}
+      <PortsWindow
+        open={showPortsWindow()}
+        workspaceId={portsWindowWs()}
+        forwards={portForwards()}
+        workspaces={file().workspaces}
+        onClose={() => setShowPortsWindow(false)}
+        onStop={stopForward}
+        onOpenSettings={(wsId) => {
+          setShowPortsWindow(false);
+          const ws = file().workspaces.find((w) => w.id === wsId);
+          if (ws) {
+            setEditingWorkspace(ws);
+            setShowCreate(true);
+          }
+        }}
       />
 
       <Show when={updateBanner()}>

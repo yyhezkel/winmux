@@ -19,21 +19,30 @@ const TAGS = ["", "idea", "bug", "todo"];
 export function NotesModal(p: Props) {
   const [text, setText] = createSignal("");
   const [tag, setTag] = createSignal<string>("idea");
-  const [attachWs, setAttachWs] = createSignal(true);
   const [filterStatus, setFilterStatus] = createSignal<"open" | "done" | "all">("open");
   const [filterTag, setFilterTag] = createSignal<string>("");
   const [showDoneSection, setShowDoneSection] = createSignal(false);
 
+  // Phase 39: new notes always attach to the active workspace (the
+  // window is scoped to it). No active workspace → unassigned.
   const submit = () => {
     const t = text().trim();
     if (!t) return;
-    const ws = attachWs() ? p.activeWorkspaceId : null;
-    p.onAdd(t, tag() || null, ws);
+    p.onAdd(t, tag() || null, p.activeWorkspaceId);
     setText("");
   };
 
+  const activeName = createMemo(
+    () => p.workspaces.find((w) => w.id === p.activeWorkspaceId)?.name ?? null,
+  );
+
+  // Phase 39: scope to the active workspace. Legacy notes with no
+  // workspace_id (pre-39 global notes) stay visible in every workspace
+  // so nothing is lost.
   const visible = createMemo(() => {
-    let arr = p.notes.slice();
+    let arr = p.notes.filter(
+      (n) => n.workspace_id == null || n.workspace_id === p.activeWorkspaceId,
+    );
     if (filterTag()) arr = arr.filter((n) => n.tag === filterTag());
     arr.sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
     return arr;
@@ -71,7 +80,7 @@ export function NotesModal(p: Props) {
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <h3>{t("notes.title")}</h3>
+          <h3>{activeName() ? t("notes.window.title", { workspace: activeName()! }) : t("notes.title")}</h3>
 
           <div class="notes-add">
             <textarea
@@ -96,14 +105,6 @@ export function NotesModal(p: Props) {
                   {(t) => <option value={t}>{t || "(no tag)"}</option>}
                 </For>
               </select>
-              <label class="notes-checkbox">
-                <input
-                  type="checkbox"
-                  checked={attachWs()}
-                  onChange={(e) => setAttachWs(e.currentTarget.checked)}
-                />
-                attach to active workspace
-              </label>
               <button class="primary" onClick={submit} disabled={!text().trim()}>
                 Add (Ctrl+Enter)
               </button>
@@ -202,7 +203,7 @@ export function NotesModal(p: Props) {
             </Show>
 
             <Show when={visible().length === 0}>
-              <p class="notes-empty">no notes match the current filter</p>
+              <p class="notes-empty">{t("notes.empty")}</p>
             </Show>
           </div>
 

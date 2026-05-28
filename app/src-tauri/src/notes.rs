@@ -229,6 +229,17 @@ pub(crate) fn notes_delete(
     Ok(())
 }
 
+/// Phase 39: drop every note belonging to a workspace. Called when the
+/// workspace is deleted so its notes don't linger orphaned. Emits
+/// `notes:changed` so an open Notes window refreshes.
+pub(crate) fn delete_for_workspace(state: &AppState, app: &AppHandle, workspace_id: &str) {
+    let _ = mutate_notes(state, app, |nf| {
+        nf.notes
+            .retain(|n| n.workspace_id.as_deref() != Some(workspace_id));
+        Ok(())
+    });
+}
+
 // ─── Helpers exposed to the RPC dispatch ────────────────────────────────────
 
 pub(crate) fn list_filtered(

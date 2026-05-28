@@ -1,6 +1,5 @@
 import { For, Show, createSignal } from "solid-js";
 import { collectPanes, findPane, type Workspace, type ForwardRow } from "./types";
-import { PortsPanel } from "./PortsPanel";
 import { t } from "./i18n";
 
 function workspaceBadge(w: Workspace): { label: string; cls: string; title: string } {
@@ -32,16 +31,14 @@ interface Props {
   onProvision: () => void;
   /** Phase 38 — open the settings modal from the sidebar gear. */
   onOpenSettings: () => void;
+  /** Phase 39 — open the notes window from the sidebar. */
+  onOpenNotes: () => void;
   onAction: (id: string, action: "rename" | "edit" | "delete" | "disconnect") => void;
-  // Phase 36 (#2.2): live auto port-forwards for the ACTIVE workspace,
-  // shown in the Ports panel below the workspace list.
-  activeForwards: ForwardRow[];
-  onStopForward: (remotePort: number) => void;
-  // Phase 36.A: all forwards across workspaces, for the per-workspace
-  // inline badge. onOpenForwardUrl opens a single forward in the
-  // browser (used when a workspace has exactly one forward).
+  // Phase 36.A / 39: all forwards across workspaces, for the per-
+  // workspace inline 🌐 badge. Clicking the badge opens the Ports
+  // window scoped to that workspace.
   allForwards: ForwardRow[];
-  onOpenForwardUrl: (localPort: number) => void;
+  onOpenPorts: (workspaceId: string) => void;
 }
 
 export function Sidebar(p: Props) {
@@ -128,11 +125,7 @@ export function Sidebar(p: Props) {
                       )}
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (fwds.length === 1) {
-                          p.onOpenForwardUrl(fwds[0].local_port);
-                        } else {
-                          p.onActivate(w.id);
-                        }
+                        p.onOpenPorts(w.id);
                       }}
                     >
                       🌐 {fwds.length}
@@ -174,16 +167,22 @@ export function Sidebar(p: Props) {
           )}
         </For>
       </div>
-      <PortsPanel forwards={p.activeForwards} onStop={p.onStopForward} />
-      <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
-        {t("sidebar.provision_server")}
-      </button>
-      {/* Phase 38: discoverable Settings entry point above New workspace. */}
-      <button class="ws-settings" onClick={p.onOpenSettings} title={t("sidebar.settings.tooltip")}>
-        ⚙ {t("sidebar.settings.tooltip")}
-      </button>
+      {/* Phase 39: Notes + Settings paired row, then New workspace,
+          then Provision server. Ports panel removed — reachable via the
+          per-workspace 🌐 badge → floating Ports window. */}
+      <div class="sidebar-actions-row">
+        <button class="ws-action-half" onClick={p.onOpenNotes} title={t("sidebar.notes.tooltip")}>
+          📝 {t("sidebar.notes.tooltip")}
+        </button>
+        <button class="ws-action-half" onClick={p.onOpenSettings} title={t("sidebar.settings.tooltip")}>
+          ⚙ {t("sidebar.settings.tooltip")}
+        </button>
+      </div>
       <button class="ws-add" onClick={p.onCreate}>
         {t("sidebar.new_workspace")}
+      </button>
+      <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
+        {t("sidebar.provision_server")}
       </button>
     </div>
   );

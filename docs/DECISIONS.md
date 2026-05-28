@@ -38,10 +38,6 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
   - 33B — opt-in PTY bidi filter for Claude Code panes (FSI/PDI around Latin runs in plain text lines; leave ANSI escapes and box-drawing untouched)
 - **Status:** Paused while Help discovery (Phase 34) shipped first. Resume next.
 
-### 2026-05-27 — README "Shipped" refresh
-- **Context:** README "Shipped in v0.1.0" line is two major releases stale (Phases 16–34 unrostered).
-- **Status:** Open, ~30 min refresh task.
-
 ### 2026-05-27 — PATH auto-registration in the WiX/NSIS installer
 - **Context:** v0.1.0 README "Coming next" item. Splits off from the now-closed long-standing roadmap block because it's small and in scope (everything else in that block went to out-of-scope).
 - **Effort:** ~1 hour. Modify the NSIS installer script to add winmux's install dir to PATH on install, remove on uninstall.
@@ -61,6 +57,21 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 ---
 
 ## Decided
+
+### 2026-05-28 — Ports default-off + internal-port filter + floating Ports/Notes + Logs tab (Phase 39, `3a5c50b`)
+- **Context:** Live testing of v0.2.4 surfaced six related issues, the headline being a foot-gun: auto port forwarding was on by default and the Phase 36 watcher forwarded EVERY remote LISTEN port — including winmux's own reverse-tunnel HMAC endpoint — so the browser hit `WINMUX-CHALLENGE / WINMUX-DENIED bad-format`.
+- **Decision:**
+  - `auto_port_forward` default flipped true→false (opt-in per workspace).
+  - Backend tracks winmux's reverse-tunnel remote ports (`internal_reverse_tunnel_remote_ports`, inserted on `tcpip_forward`, removed on session end); `port.opened` skips them. CLI watcher also self-excludes the `WINMUX_SOCKET_ADDR` port.
+  - Ports moved from a sidebar panel to a floating PortsWindow (scoped + All-workspaces tabs), opened from the per-workspace 🌐 badge. `PortsPanel.tsx` deleted.
+  - Sidebar bottom reshaped: [Notes][Settings] paired row, then New workspace, then Provision.
+  - Settings gains a Logs tab: live 200-line `debug.log` tail (`read_log_tail` seeks 256 KB from EOF), 5s auto-refresh, path + Open folder + Copy path. The bare Logs row in Updates is removed.
+  - Notes scoped per-workspace. **Implementation deviation:** kept the existing per-note `workspace_id` field (window filters to active ws; legacy null-workspace notes stay visible everywhere; workspace-delete drops the ws's notes and warns first) rather than physically relocating storage into `workspaces.json` as the spec suggested — same behavior, far less migration risk. Flagged for review.
+- **Outcome:** Phase 39 shipped `3a5c50b` (build green, app.exe ~30.8 MB). Ships in v0.2.5 — cut TBD.
+
+### 2026-05-28 — README roadmap refresh shipped (v0.2.4 flow, `990b612`)
+- **Context:** The README "Shipped" section was frozen at v0.1.0 (Phases 16–34 unrostered). Tracked as an Open thread since 2026-05-27.
+- **Decision/Outcome:** Rewritten during the v0.2.4 release flow as a v0.1.0 → v0.2.4 cumulative summary (3 prose paragraphs) with a current "Coming next" list; out-of-scope items removed. Commit `990b612`. Closes the Open thread.
 
 ### 2026-05-28 — SSH keepalive + disconnect logging + Settings/Logs UX (Phase 38, `d4ba544`)
 - **Context:** Users reported SSH dropping after a few minutes idle. Diagnosis: all russh `client::Config` sites used the default `keepalive_interval: None` → no keepalive packets → NAT/firewall idle timeouts (5-15 min) silently killed the TCP link. The read loop's `None`/Close/Eof arms also `break` with no log, so debug.log showed nothing. Plus logs were unreachable for non-technical users (no UI exposed the path).

@@ -25,21 +25,10 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
-### 2026-05-27 — Full LLM control of the app (= scan #2.1, HTTP Automation API)
-- **Context:** Selected as the next major focus. Today Claude runs *inside* winmux panes; goal is to also let Claude *drive* winmux from the outside — "open me a pane on server X and run cargo build", "read me the scrollback of pane #3", "screenshot the workspace", etc.
-- **Foundation already in place:** `rpc_server.rs` (JSON-RPC v2 over Named Pipe), 15 browser-automation tools in `winmux-mcp.exe`, methods for list-workspaces / tree / send / send-key / feed.push.
-- **Gap to close:**
-  - New RPC methods: `pane.scrollback`, `pane.screenshot`, `ui.tree`, `action.split`, `action.connect`
-  - Expose via `winmux-mcp.exe` as new tools: `read_pane`, `take_screenshot`, `list_panes`, `split_pane`, `connect_workspace`
-  - Optional: HTTP endpoint on 127.0.0.1 with auth token for scripters who don't want MCP
-- **Effort:** ~5-7 days (per scan estimate).
-- **Sources:** `docs/COMPETITIVE-SCAN.md` §2.1 (full design borrowed from editnori/WinMux's `NativeAutomationServer.cs`), `docs/IDEAS-RANKING.md` row 2.1 (✅ MUST).
-- **Status:** Awaiting kickoff. Yossi greenlit as next focus 2026-05-27 after triage.
-
 ### 2026-05-27 — Competitive-scan ideas inventory (triage in progress)
 - **Context:** Survey of 8 winmux GitHub projects produced an inventory of ~25 ideas to potentially adopt. Highest-impact triple: HTTP Automation API for LLM control (#2.1), Auto port forwarding (#2.2), Secrets Vault (#3.2).
 - **Source docs:** `docs/COMPETITIVE-SCAN.md` (full report + Secrets Vault design), `docs/IDEAS-RANKING.md` (decision table).
-- **Status:** Going through together with Yossi to triage MUST / SHOULD / COULD / SKIP. As individual items are decided, move them to their own Decided / Open entries with phase + commit references. Master inventory stays here until fully triaged.
+- **Status:** 5 MUST items closed in Phase 35 (`bddc0b0`); 4 MUST + 10 SHOULD + 6 COULD remain. As individual items are decided, move them to their own Decided / Open entries with phase + commit references. Master inventory stays here until fully triaged.
 - **Also flagged:** the `winmux` name is taken by 8 projects on GitHub — rebrand caveat (see scan doc's "Naming Caveat" section).
 
 ### 2026-05-27 — Bidi mixed-content rendering
@@ -63,9 +52,29 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 - **Effort:** ~1 hour. Modify the NSIS installer script to add winmux's install dir to PATH on install, remove on uninstall.
 - **Status:** Open, low priority but cheap to ship.
 
+### 2026-05-27 — Full LLM control of the app (= scan #2.1, HTTP Automation API)
+- **Context:** Today Claude runs *inside* winmux panes; goal is to also let Claude *drive* winmux from the outside — "open me a pane on server X and run cargo build", "read me the scrollback of pane #3", "screenshot the workspace", etc.
+- **Foundation already in place:** `rpc_server.rs` (JSON-RPC v2 over Named Pipe), 15 browser-automation tools in `winmux-mcp.exe`, methods for list-workspaces / tree / send / send-key / feed.push.
+- **Gap to close:**
+  - New RPC methods: `pane.scrollback`, `pane.screenshot`, `ui.tree`, `action.split`, `action.connect`
+  - Expose via `winmux-mcp.exe` as new tools: `read_pane`, `take_screenshot`, `list_panes`, `split_pane`, `connect_workspace`
+  - Optional: HTTP endpoint on 127.0.0.1 with auth token for scripters who don't want MCP
+- **Effort:** ~5-7 days (per scan estimate).
+- **Sources:** `docs/COMPETITIVE-SCAN.md` §2.1 (full design borrowed from editnori/WinMux's `NativeAutomationServer.cs`), `docs/IDEAS-RANKING.md` row 2.1 (✅ MUST).
+- **Status:** Moved to bottom of Open 2026-05-28 — Yossi: "not ready yet, keep on roadmap." The big-ticket next focus once the Sprint 1 quick wins settle.
+
 ---
 
 ## Decided
+
+### 2026-05-28 — Sprint 1 quick wins shipped (Phase 35, `bddc0b0`)
+The first 5 MUST items from the competitive-scan triage, in one phase + build (app.exe 30.6 MB, exit 0):
+
+- **#3.5 CLAUDE.md absolute rules.** Built on top of the existing CLAUDE.md from commit `5774c1a` — added a 12-rule "Do Not Violate" absolute-rules section (no PTY content in logs, no plaintext secrets at rest, no shell-command string concat, no unwrap in prod Rust, no `any` in TS, atomic persistence, …).
+- **#1.5 ts-rs shared types.** 21 Rust structs/enums (Workspace, LayoutNode, Connection, PaneKind, FeedItem, Settings + transitive closure) generate TS into `app/src/bindings/`; `types.ts` re-exports them. `cargo test` regenerates. `settings.ts` kept its richer hand-tuned mirror (literal unions). Note: ts-rs renders `Option<T>` as `T | null`, so a few construction sites moved from `undefined` to `null`.
+- **#1.1 rAF-coalesced xterm writer.** PTY chunks merged into one `requestAnimationFrame` write; flush+cancel on dispose. Fixes "(Not Responding)" during fast streaming.
+- **#1.3 Command Palette.** Ctrl+Shift+P, substring filter over 20 commands, i18n in 4 locales. Reuses existing handlers; `pane.rename` via a window CustomEvent into PaneView.
+- **#1.2 OSC 9/99/777 notification detection.** New `osc_notify.rs` stateful parser (BEL + ST terminators, 4 KB cap, 7 unit tests) wired into `emit_data` on both PTY read loops, observe-only; emits `osc-notification` → frontend passive FeedItem. Universal complement to the Claude-specific hooks.
 
 ### 2026-05-27 — Rebrand, winget, Scoop, ARM64 Windows, aarch64-linux, code-signing, delta-downloads — all out of scope
 - **Context:** Distribution-scale items inherited from the v0.1.0 README "Coming next" list and discovered via the competitive scan (naming caveat).

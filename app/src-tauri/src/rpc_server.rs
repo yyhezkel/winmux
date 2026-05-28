@@ -28,21 +28,41 @@ pub fn pipe_name() -> String {
     format!(r"\\.\pipe\winmux-{}", user)
 }
 
+// Phase 39.A: removed the 8-cap that caused ERROR_PIPE_NOT_AVAILABLE
+// storms under concurrent RPC.
+// Phase 39.C: 254 is the tokio wrapper's hard maximum —
+// `ServerOptions::max_instances(255)` PANICS at construction with
+// "cannot specify more than 254 instances", which left the pipe server
+// dead and every tunnel bridge hitting ERROR_FILE_NOT_FOUND. We also
+// wrap the builder in catch_unwind so a future tokio-version change to
+// the limit degrades to a logged fallback instead of crashing the
+// server task.
+const PIPE_MAX_INSTANCES: usize = 254;
+
+fn make_listener(name: &str) -> Result<NamedPipeServer, String> {
+    use tokio::net::windows::named_pipe::PipeMode;
+    let build = |max: usize| {
+        ServerOptions::new()
+            .pipe_mode(PipeMode::Byte)
+            .first_pipe_instance(false)
+            .max_instances(max)
+            .create(name)
+    };
+    match std::panic::catch_unwind(|| build(PIPE_MAX_INSTANCES)) {
+        Ok(Ok(s)) => Ok(s),
+        Ok(Err(e)) => Err(format!("create pipe: {e}")),
+        Err(_) => {
+            crate::dlog(&format!(
+                "rpc_server: max_instances({PIPE_MAX_INSTANCES}) panicked, falling back to 100"
+            ));
+            build(100).map_err(|e| format!("fallback create pipe: {e}"))
+        }
+    }
+}
+
 pub async fn run(state: AppState, app: AppHandle) {
     let name = pipe_name();
     tracing::info!("rpc: listening on {}", name);
-
-    // Phase 39.A: removed the 8-cap that caused ERROR_PIPE_NOT_AVAILABLE
-    // storms under concurrent RPC. 255 is the practical Windows max for
-    // a single pipe (PIPE_UNLIMITED_INSTANCES semantics in the tokio
-    // wrapper).
-    let make_listener = |name: &str| {
-        ServerOptions::new()
-            .pipe_mode(tokio::net::windows::named_pipe::PipeMode::Byte)
-            .first_pipe_instance(false)
-            .max_instances(255)
-            .create(name)
-    };
 
     // Phase 39.A: keep a listening instance ready at ALL times. We
     // pre-create the NEXT instance before spawning the handler for the
@@ -1963,4 +1983,34 @@ fn fold_pane_kinds(node: &LayoutNode, out: &mut std::collections::HashMap<String
         }
     }
     let _ = collect_panes_with_kind; // keep symbol live for other call sites
+}
+
+#[cfg(test)]
+mod tests {
+    use super::make_listener;
+
+    // Phase 39.C: the regression was max_instances(255) panicking at
+    // construction, which killed the pipe server. Confirm the listener
+    // now builds (254 is within the tokio limit) and that make_listener
+    // returns Ok rather than unwinding. Needs a tokio runtime because
+    // ServerOptions::create registers the pipe with the IO reactor.
+    #[tokio::test]
+    async fn make_listener_builds_without_panic() {
+        // Unique name per run so concurrent test invocations don't clash.
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let name = format!(r"\\.\pipe\winmux-test-39c-{n}");
+        let listener = make_listener(&name);
+        assert!(
+            listener.is_ok(),
+            "make_listener should build at 254: {:?}",
+            listener.err()
+        );
+        // Opening a SECOND instance of the same name must also succeed
+        // (proves max_instances > 1 took effect).
+        let second = make_listener(&name);
+        assert!(second.is_ok(), "second instance: {:?}", second.err());
+    }
 }

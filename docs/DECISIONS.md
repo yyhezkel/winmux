@@ -38,11 +38,6 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
   - 33B — opt-in PTY bidi filter for Claude Code panes (FSI/PDI around Latin runs in plain text lines; leave ANSI escapes and box-drawing untouched)
 - **Status:** Paused while Help discovery (Phase 34) shipped first. Resume next.
 
-### 2026-05-27 — Logs accessibility for end users
-- **Context:** `dlog()` writes to `%APPDATA%\winmux\debug.log` but no UI exposes the path. Non-technical users can't find logs.
-- **Proposal:** Settings → Logs row with "Open logs folder" + "Copy log path" buttons (uses existing `tauri-plugin-opener`). ~30 lines.
-- **Status:** Awaiting user confirmation.
-
 ### 2026-05-27 — README "Shipped" refresh
 - **Context:** README "Shipped in v0.1.0" line is two major releases stale (Phases 16–34 unrostered).
 - **Status:** Open, ~30 min refresh task.
@@ -66,6 +61,15 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 ---
 
 ## Decided
+
+### 2026-05-28 — SSH keepalive + disconnect logging + Settings/Logs UX (Phase 38, `d4ba544`)
+- **Context:** Users reported SSH dropping after a few minutes idle. Diagnosis: all russh `client::Config` sites used the default `keepalive_interval: None` → no keepalive packets → NAT/firewall idle timeouts (5-15 min) silently killed the TCP link. The read loop's `None`/Close/Eof arms also `break` with no log, so debug.log showed nothing. Plus logs were unreachable for non-technical users (no UI exposed the path).
+- **Decision:**
+  - Enable keepalive on all four russh sites (`keepalive_interval: Some(30s)`, default `keepalive_max=3` → ~90s dead-peer detection).
+  - SSH read-loop disconnect paths now `dlog` the reason + channel/pane/workspace ids + `last_activity_ms` (idle age) — distinguishes a keepalive/NAT drop from an active-session close.
+  - Sidebar gains a ⚙ Settings button above "New workspace"; the existing settings FAB stays.
+  - Settings → Updates tab gains a Logs section (new `log_dir_path` command) with "Open folder" (revealItemInDir) + "Copy path". Closes the former "Logs accessibility for end users" Open thread.
+- **Outcome:** Phase 38 shipped `d4ba544` (build green, app.exe ~30.8 MB). Released in v0.2.5 — cut TBD.
 
 ### 2026-05-28 — Workspace creation: password-only mode genuinely allowed (Phase 37, `f8a8ebe`)
 - **Context:** Form UX implied an SSH key was mandatory; the backend accepted `None` but users couldn't tell. The edit flow also locked connection fields. Bug found post-v0.2.4.

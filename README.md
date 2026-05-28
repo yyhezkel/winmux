@@ -203,26 +203,36 @@ narrative version with ASCII state diagrams and module ownership.
 
 ## Roadmap
 
-Shipped in **v0.1.0** (Phases 1 through 15.B):
+**Shipped (v0.1.0 → v0.2.4):**
 
-local PTY · BiDi (UAX #9) · SSH via russh · multi-workspace +
-persistence + splits · CLI + JSON-RPC over Named Pipe + reverse
-SSH tunnel · MSI + NSIS · remote-Linux CLI bootstrap · HMAC-SHA256
-auth · agent feed + permission cards · notes · browser panes ·
-winmux-mcp MCP server · settings panel + 5 themes + live apply ·
-update checker · tmux persistence · localization (en / he / ar / ru) ·
-smart-connect (Claude session browser, ssh_config import, key
-auto-detect, perms fix, connection test) · server provisioning
-wizard · file manager pane (dual local + SFTP).
+The foundation: local PTY · BiDi (UAX #9) · SSH via russh · multi-workspace
+persistence with splits · CLI + JSON-RPC over Named Pipe + reverse SSH
+tunnel · MSI + NSIS installers · remote Linux CLI bootstrap · HMAC-SHA256
+auth · agent feed + permission cards · notes · browser panes · winmux-mcp ·
+settings panel with themes and live apply · tmux persistence · localization
+(en / he / ar / ru).
 
-Coming next:
+Connection + provisioning: smart-connect (Claude session browser,
+ssh_config import, key auto-detect, perms fix, connection test) · server
+provisioning wizard with sudo preflight · SSH key auto-setup wizard ·
+file manager with sort/filter and a side-by-side manual help pane · in-app
+updater (native ureq + rustls) with one-click install.
 
-- 🔮 PATH auto-registration in the WiX installer
-- 🔮 Code-signing for the MSI / NSIS
-- 🔮 Auto-update via signed manifest + delta downloads
-- 🔮 ARM64 Windows build
-- 🔮 aarch64-linux CLI
-- 🔮 winget / Scoop manifests
+Workflow + agent UX: cross-session memory (CLAUDE.md + DECISIONS.md) · a
+12-rule absolute-rules ruleset · ts-rs type sync between Rust and the
+frontend · rAF-coalesced xterm writer · Command Palette (Ctrl+Shift+P) ·
+OSC 9/99/777 desktop-notification detection · per-workspace and per-pane
+identity (color, emoji, dynamic window title) · auto-port-forwarding via a
+`/proc/net/tcp` watcher with kernel-assigned local ports.
+
+**Coming next:**
+
+- 🔮 BiDi-aware rendering for mixed Hebrew/Latin technical content in TUIs (Claude Code, tmux output) — HTML surfaces and an opt-in PTY-stream filter
+- 🔮 Settings → Logs row with "Open logs folder" and "Copy log path"
+- 🔮 PATH auto-registration in the WiX/NSIS installer
+- 🔮 Secrets Vault — in cooperation with a parallel MCP project that holds secrets; winmux exposes egress hooks (SSH env inject, child-process spawn)
+- 🔮 Full LLM control of the app — HTTP automation API so agents can drive winmux from outside (split / screenshot / scrollback / etc.)
+- 🔮 Drag-and-drop to terminal, /doctor diagnostic endpoint, diff/patch review pane, worktree-aware workspaces, and other SHOULD items from `docs/IDEAS-RANKING.md`
 
 ## Documentation
 

@@ -335,7 +335,11 @@
   "ports.panel.empty": "אין פורטים מועברים — הפעל שרת במעטפת כדי לראות אותו כאן",
   "ports.menu.copyUrl": "העתק כתובת",
   "ports.menu.stopForward": "עצור העברה",
-  "ports.notification.opened": "פורט {remote} ← localhost:{local} — לחץ לפתיחה",
+  "ports.notification.opened": "localhost:{local} מוכן (מהמרוחק :{remote}) — לחץ לפתיחה",
+  "ports.row.activeOn": "פעיל ב-localhost:{port}",
+  "ports.row.fromRemote": "מהמרוחק :{remote}",
+  "ports.workspaceBadge.tooltipOne": "פורט אחד פעיל",
+  "ports.workspaceBadge.tooltipMany": "{count} פורטים פעילים",
 
   "settings.tab.shortcuts": "קיצורי דרך",
   "settings.shortcuts.title": "קיצורי מקלדת",

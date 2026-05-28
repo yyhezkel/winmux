@@ -1733,7 +1733,7 @@ async fn dispatch(
             if !enabled {
                 return Ok(json!({ "ok": true, "skipped": "auto_port_forward off" }));
             }
-            match crate::open_forward_matched(state, app, &workspace_id, &addr, port).await {
+            match crate::open_auto_forward(state, app, &workspace_id, &addr, port).await {
                 Ok(local_port) => Ok(json!({ "ok": true, "local_port": local_port })),
                 Err(e) => {
                     let _ = app.emit(

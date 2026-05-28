@@ -335,7 +335,11 @@
   "ports.panel.empty": "Нет проброшенных портов — запустите сервер в терминале, чтобы увидеть его здесь",
   "ports.menu.copyUrl": "Копировать URL",
   "ports.menu.stopForward": "Остановить проброс",
-  "ports.notification.opened": "Порт {remote} → localhost:{local} — нажмите, чтобы открыть",
+  "ports.notification.opened": "localhost:{local} готов (с удалённого :{remote}) — нажмите, чтобы открыть",
+  "ports.row.activeOn": "активен на localhost:{port}",
+  "ports.row.fromRemote": "с удалённого :{remote}",
+  "ports.workspaceBadge.tooltipOne": "1 активный порт",
+  "ports.workspaceBadge.tooltipMany": "{count} активных портов",
 
   "settings.tab.shortcuts": "горячие клавиши",
   "settings.shortcuts.title": "Горячие клавиши",

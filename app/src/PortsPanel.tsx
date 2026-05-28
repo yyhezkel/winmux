@@ -57,7 +57,8 @@ export function PortsPanel(p: Props) {
               >
                 <span class="ports-row-icon">🌐</span>
                 <span class="ports-row-label">
-                  {f.remote_port} → localhost:{f.local_port}
+                  {t("ports.row.activeOn", { port: f.local_port })}
+                  <span class="ports-row-sub">{t("ports.row.fromRemote", { remote: f.remote_port })}</span>
                 </span>
                 <Show when={menuFor() === f.remote_port}>
                   <div class="ports-row-menu" onClick={(e) => e.stopPropagation()}>

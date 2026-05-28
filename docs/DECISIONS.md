@@ -28,7 +28,7 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 ### 2026-05-27 — Competitive-scan ideas inventory (triage in progress)
 - **Context:** Survey of 8 winmux GitHub projects produced an inventory of ~25 ideas to potentially adopt. Highest-impact triple: HTTP Automation API for LLM control (#2.1), Auto port forwarding (#2.2), Secrets Vault (#3.2).
 - **Source docs:** `docs/COMPETITIVE-SCAN.md` (full report + Secrets Vault design), `docs/IDEAS-RANKING.md` (decision table).
-- **Status:** 5 MUST closed in Phase 35 (`bddc0b0`), auto port forwarding closed in Phase 36 (`95de6f1`). 3 MUST remain after Phase 36 (Pipe hardening deferred, Secrets Vault under research in a parallel worktree, Full LLM control on the roadmap), plus 10 SHOULD + 6 COULD. As individual items are decided, move them to their own Decided / Open entries with phase + commit references. Master inventory stays here until fully triaged.
+- **Status:** 5 MUST closed in Phase 35 (`bddc0b0`), auto port forwarding closed in Phase 36 / 36.A (`95de6f1`). 3 MUST remain (Pipe hardening deferred, Secrets Vault deferred → external MCP integration, Full LLM control on the roadmap), plus 10 SHOULD + 6 COULD. As individual items are decided, move them to their own Decided / Open entries with phase + commit references. Master inventory stays here until fully triaged.
 - **Also flagged:** the `winmux` name is taken by 8 projects on GitHub — rebrand caveat (see scan doc's "Naming Caveat" section).
 
 ### 2026-05-27 — Bidi mixed-content rendering
@@ -73,6 +73,13 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 - **Watcher launch:** fire-and-forget `winmux port-watch` exec channel per workspace (deduped via `state.port_watchers`), tied to the SSH session lifetime. Idempotent `open_forward_matched` absorbs duplicate opens from multiple panes.
 - **Known v1 edge:** if the pane whose SSH session hosts the watcher disconnects while another pane stays connected, auto-forward pauses until reconnect. Acceptable for v1; revisit if it bites.
 - **Outcome:** Phase 36 shipped (build green, app.exe ~30.8 MB). Tests: `/proc/net/tcp` parser (5) + forwards-map (2).
+- **Phase 36.A:** switched to kernel-allocated ephemeral local ports (`bind 127.0.0.1:0` + `local_addr().port()`); removed remote-port matching and the +1..+9 fallback (no more cross-workspace collision on shared remote ports, no race). UI shows "active on localhost:<port>"; added an inline `🌐 <count>` badge on the workspace sidebar tab (click opens the browser for 1 forward, surfaces the Ports panel for >1). `open_forward_matched` renamed `open_auto_forward`.
+
+### 2026-05-28 — Secrets Vault deferred — waiting on external MCP integration
+- **Context:** Yossi is building a separate MCP server that will hold secrets; the Vault content moves there. winmux's role becomes "expose egress capabilities" (SSH env inject, child-process spawn with env) which the external MCP composes.
+- **Decision:** Pause all Vault implementation in winmux until the external MCP is ready (Yossi: "hopefully this week"). When ready, plan integration as a separate phase — winmux gets the egress hooks + RPC surface, external MCP holds secrets + does capability protocol.
+- **Research preserved:** `docs/SECRETS-VAULT-RESEARCH.md` lives on branch `research/secrets-vault` (commit `c0ace9a`). Don't merge to main yet — reference material until the integration design settles.
+- **Status:** Resume after external-MCP communication contract is defined.
 
 ### 2026-05-28 — Sprint 1 quick wins shipped (Phase 35, `bddc0b0`)
 The first 5 MUST items from the competitive-scan triage, in one phase + build (app.exe 30.6 MB, exit 0):

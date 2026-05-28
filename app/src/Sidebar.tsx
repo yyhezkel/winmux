@@ -35,6 +35,11 @@ interface Props {
   // shown in the Ports panel below the workspace list.
   activeForwards: ForwardRow[];
   onStopForward: (remotePort: number) => void;
+  // Phase 36.A: all forwards across workspaces, for the per-workspace
+  // inline badge. onOpenForwardUrl opens a single forward in the
+  // browser (used when a workspace has exactly one forward).
+  allForwards: ForwardRow[];
+  onOpenForwardUrl: (localPort: number) => void;
 }
 
 export function Sidebar(p: Props) {
@@ -104,6 +109,35 @@ export function Sidebar(p: Props) {
               />
               <span class="ws-name">{w.emoji ? `${w.emoji} ${w.name}` : w.name}</span>
               <WorkspaceBadge w={w} />
+              {/* Phase 36.A: inline port-forward badge. Click opens the
+                  browser (1 forward) or surfaces the workspace's Ports
+                  panel by activating it (>1). */}
+              {(() => {
+                const fwds = p.allForwards.filter((f) => f.workspace_id === w.id);
+                return (
+                  <Show when={fwds.length > 0}>
+                    <span
+                      class="ws-port-badge"
+                      title={t(
+                        fwds.length === 1
+                          ? "ports.workspaceBadge.tooltipOne"
+                          : "ports.workspaceBadge.tooltipMany",
+                        { count: fwds.length },
+                      )}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (fwds.length === 1) {
+                          p.onOpenForwardUrl(fwds[0].local_port);
+                        } else {
+                          p.onActivate(w.id);
+                        }
+                      }}
+                    >
+                      🌐 {fwds.length}
+                    </span>
+                  </Show>
+                );
+              })()}
               <Show when={p.connectedIds.has(w.id)}>
                 <span class="ws-live" title="connected" />
               </Show>

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { LayoutView } from "./LayoutView";
@@ -1178,6 +1179,12 @@ function App() {
           }}
           activeForwards={activeForwards()}
           onStopForward={stopForward}
+          allForwards={portForwards()}
+          onOpenForwardUrl={(localPort) => {
+            void openUrl(`http://localhost:${localPort}`).catch((e) =>
+              console.warn("openUrl failed", e),
+            );
+          }}
         />
       </ErrorBoundary>
       <div class="main">

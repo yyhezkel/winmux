@@ -335,7 +335,11 @@
   "ports.panel.empty": "لا توجد منافذ مُعاد توجيهها — شغّل خادمًا في الطرفية لرؤيته هنا",
   "ports.menu.copyUrl": "نسخ الرابط",
   "ports.menu.stopForward": "إيقاف التوجيه",
-  "ports.notification.opened": "المنفذ {remote} ← localhost:{local} — انقر للفتح",
+  "ports.notification.opened": "localhost:{local} جاهز (من البعيد :{remote}) — انقر للفتح",
+  "ports.row.activeOn": "نشط على localhost:{port}",
+  "ports.row.fromRemote": "من البعيد :{remote}",
+  "ports.workspaceBadge.tooltipOne": "منفذ واحد نشط",
+  "ports.workspaceBadge.tooltipMany": "{count} منافذ نشطة",
 
   "settings.tab.shortcuts": "اختصارات",
   "settings.shortcuts.title": "اختصارات لوحة المفاتيح",

@@ -3274,7 +3274,34 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 }
 .ports-row:hover { background: var(--w-surface-hover, #1f2630); }
 .ports-row-icon { flex-shrink: 0; }
-.ports-row-label { overflow: hidden; text-overflow: ellipsis; }
+.ports-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.ports-row-sub {
+  font-size: 10px;
+  color: var(--w-text-secondary, #7d8590);
+}
+
+/* Phase 36.A: inline per-workspace port-forward badge on the tab. */
+.ws-port-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--w-accent, #3b82f6) 22%, transparent);
+  color: var(--w-text-primary, #e6edf3);
+  cursor: pointer;
+  margin-inline-start: 4px;
+  white-space: nowrap;
+}
+.ws-port-badge:hover {
+  background: var(--w-accent, #3b82f6);
+  color: #fff;
+}
 .ports-row-menu {
   position: absolute;
   inset-inline-end: 4px;

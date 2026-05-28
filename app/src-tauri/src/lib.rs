@@ -2888,13 +2888,14 @@ pub(crate) async fn open_forward(
     Ok(local_port)
 }
 
-/// Phase 36 (#2.2): open an auto-forward that tries to bind the SAME
-/// local port as the remote (so the user's `localhost:3000` matches
-/// the server's `3000`), falling back to remote_port+1..+9 if taken.
-/// Differs from `open_forward` (browser panes, random local port) only
-/// in the bind strategy + the events it emits. Idempotent on
-/// (workspace, remote_port).
-pub(crate) async fn open_forward_matched(
+/// Phase 36 (#2.2) → 36.A: open an auto-forward for a remote listening
+/// port. We bind `127.0.0.1:0` and let the kernel hand us a free
+/// ephemeral port — the user reaches the server at whatever local port
+/// that is (shown in the Ports panel). This is simpler and race-free vs
+/// trying to match the remote port: no +1..+9 fallback, no cross-
+/// workspace collision when two servers both listen on :3000.
+/// Idempotent on (workspace, remote_port).
+pub(crate) async fn open_auto_forward(
     state: &AppState,
     app: &AppHandle,
     workspace_id: &str,
@@ -2910,26 +2911,14 @@ pub(crate) async fn open_forward_matched(
     let handle = find_ssh_handle_for_workspace(state, workspace_id)
         .ok_or_else(|| "no active SSH session for this workspace".to_string())?;
 
-    // Try remote_port, then +1..+9. u16 saturating guard at the top.
-    let mut listener = None;
-    let mut local_port = 0u16;
-    for delta in 0u16..10 {
-        let candidate = match remote_port.checked_add(delta) {
-            Some(p) => p,
-            None => break,
-        };
-        match tokio::net::TcpListener::bind(("127.0.0.1", candidate)).await {
-            Ok(l) => {
-                local_port = candidate;
-                listener = Some(l);
-                break;
-            }
-            Err(_) => continue,
-        }
-    }
-    let listener = listener.ok_or_else(|| {
-        format!("no free local port near {remote_port} for the forward")
-    })?;
+    // Bind port 0 → kernel picks a free ephemeral port (Windows ~49152+).
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("bind 127.0.0.1:0: {e}"))?;
+    let local_port = listener
+        .local_addr()
+        .map_err(|e| format!("local_addr: {e}"))?
+        .port();
 
     let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
     let ws_for_task = workspace_id.to_string();
@@ -2977,7 +2966,7 @@ pub(crate) async fn open_forward_matched(
         },
     );
     dlog(&format!(
-        "open_forward_matched[{}:{}]: bound 127.0.0.1:{}",
+        "open_auto_forward[{}:{}]: bound 127.0.0.1:{} (kernel-assigned)",
         workspace_id, remote_port, local_port
     ));
     let _ = app.emit(
@@ -5570,10 +5559,13 @@ pub fn run() {
 
 #[cfg(test)]
 mod port_forward_tests {
-    // Phase 36 (#2.2): the forwards map is keyed by (workspace_id,
-    // remote_port). These exercise the insert / lookup / remove
-    // mechanics that open_forward_matched + close_one_forward rely on,
-    // without a live russh channel (cancel = None).
+    // Phase 36 (#2.2) → 36.A: the forwards map is keyed by
+    // (workspace_id, remote_port); local_port is now whatever the
+    // kernel assigned at bind time (no longer derived from remote_port).
+    // These exercise the insert / lookup / remove mechanics that
+    // open_auto_forward + close_one_forward rely on, without a live
+    // russh channel (cancel = None). The local_port values below stand
+    // in for arbitrary kernel-assigned ephemeral ports.
     use super::{ForwardEntry, ForwardMap};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -5585,35 +5577,38 @@ mod port_forward_tests {
     #[test]
     fn insert_lookup_remove() {
         let m = empty_map();
+        // Remote :3000, kernel handed back an ephemeral local port.
         let key = ("ws1".to_string(), 3000u16);
         m.lock().unwrap().insert(
             key.clone(),
             ForwardEntry {
-                local_port: 3000,
+                local_port: 49231,
                 cancel: None,
             },
         );
-        assert_eq!(m.lock().unwrap().get(&key).map(|e| e.local_port), Some(3000));
+        assert_eq!(m.lock().unwrap().get(&key).map(|e| e.local_port), Some(49231));
         let removed = m.lock().unwrap().remove(&key);
         assert!(removed.is_some());
         assert!(m.lock().unwrap().get(&key).is_none());
     }
 
     #[test]
-    fn distinct_workspaces_same_port_dont_collide() {
+    fn distinct_workspaces_same_remote_port_dont_collide() {
+        // Two workspaces both expose remote :8080 — under 36.A each gets
+        // its own kernel-assigned local port, so no collision.
         let m = empty_map();
         m.lock().unwrap().insert(
             ("a".to_string(), 8080),
-            ForwardEntry { local_port: 8080, cancel: None },
+            ForwardEntry { local_port: 49500, cancel: None },
         );
         m.lock().unwrap().insert(
             ("b".to_string(), 8080),
-            ForwardEntry { local_port: 8081, cancel: None },
+            ForwardEntry { local_port: 49777, cancel: None },
         );
         assert_eq!(m.lock().unwrap().len(), 2);
         assert_eq!(
             m.lock().unwrap().get(&("b".to_string(), 8080)).map(|e| e.local_port),
-            Some(8081)
+            Some(49777)
         );
     }
 }

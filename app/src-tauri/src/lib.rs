@@ -3253,6 +3253,11 @@ fn workspace_update(
     setup_command: Option<String>,
     teardown_command: Option<String>,
     env: Option<Vec<EnvVar>>,
+    // Phase 37: editable connection. When present, replaces the
+    // workspace's canonical connection AND rewrites every Terminal
+    // pane's connection so the next reconnect uses the new host / user /
+    // port / key. Absent = leave the connection untouched.
+    connection: Option<Connection>,
 ) -> Result<WorkspacesFile, String> {
     {
         let mut file = state.workspaces.lock().unwrap();
@@ -3281,10 +3286,38 @@ fn workspace_update(
         if let Some(e) = env {
             ws.env = e;
         }
+        if let Some(conn) = connection {
+            ws.connection = Some(conn.clone());
+            if let Some(layout) = ws.layout.as_mut() {
+                set_terminal_connections(layout, &conn);
+            }
+        }
     }
     persist(&state)?;
     let _ = app.emit("workspaces:changed", ());
     Ok(state.workspaces.lock().unwrap().clone())
+}
+
+/// Phase 37: rewrite the `connection` on every Terminal pane in the
+/// layout to `conn`. Used when the user edits a workspace's connection
+/// so existing panes reconnect with the new credentials. Non-terminal
+/// panes (browser / file-manager / help) carry no connection — skipped.
+fn set_terminal_connections(node: &mut LayoutNode, conn: &Connection) {
+    match node {
+        LayoutNode::Pane {
+            pane_kind,
+            connection,
+            ..
+        } => {
+            if matches!(pane_kind, PaneKind::Terminal) {
+                *connection = Some(conn.clone());
+            }
+        }
+        LayoutNode::Split { first, second, .. } => {
+            set_terminal_connections(first, conn);
+            set_terminal_connections(second, conn);
+        }
+    }
 }
 
 /// Phase 8 fix v3: emergency reset for a workspace whose layout has been

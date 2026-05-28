@@ -3328,6 +3328,11 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .ws-autoport { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .ws-autoport-hint { margin-top: 2px; }
 
+/* Phase 37: SSH auth-mode radio (Key vs Password). */
+.ws-auth-seg { display: flex; gap: 16px; align-items: center; }
+.ws-auth-opt { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.ws-auth-hint { margin-top: 2px; }
+
 /* Phase 34: small contextual "?" hint button. Sits inline with a
    field label and opens the relevant HelpPane on click. */
 .ws-key-label {

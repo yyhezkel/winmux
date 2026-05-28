@@ -456,6 +456,7 @@ function App() {
       setup_command?: string;
       teardown_command?: string;
       env?: EnvVar[];
+      connection?: Connection;
     }
   ) => {
     try {
@@ -467,6 +468,7 @@ function App() {
         setupCommand: fields.setup_command,
         teardownCommand: fields.teardown_command,
         env: fields.env,
+        connection: fields.connection ?? null,
       });
       updateFile(f);
     } catch (e) {

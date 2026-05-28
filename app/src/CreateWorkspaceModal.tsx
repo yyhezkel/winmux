@@ -83,6 +83,9 @@ interface Props {
       setup_command?: string;
       teardown_command?: string;
       env?: EnvVar[];
+      // Phase 37: editable connection (SSH workspaces). Absent = leave
+      // the connection unchanged.
+      connection?: Connection;
     }
   ) => void;
 }
@@ -95,6 +98,9 @@ export function CreateWorkspaceModal(p: Props) {
   const [user, setUser] = createSignal("");
   const [port, setPort] = createSignal(22);
   const [keyPath, setKeyPath] = createSignal("");
+  // Phase 37: SSH auth mode. "key" → use key_path; "password" → save no
+  // credential, prompt interactively at every connect (never persisted).
+  const [authMode, setAuthMode] = createSignal<"key" | "password">("key");
   // Phase 36 (#2.2): auto port-forward toggle (edit mode only).
   const [autoPortForward, setAutoPortForward] = createSignal(true);
   const [color, setColor] = createSignal("#7aa2f7");
@@ -358,7 +364,7 @@ export function CreateWorkspaceModal(p: Props) {
         setTeardownCmd(w.teardown_command || "");
         setEnvRows(w.env ? [...w.env] : []);
         setAutoPortForward(w.auto_port_forward ?? true);
-        // Connection fields shown read-only.
+        // Phase 37: connection fields are now editable (not read-only).
         const c = w.layout?.kind === "pane" ? w.layout.connection : w.connection;
         if (c?.type === "local") {
           setType("local");
@@ -369,6 +375,16 @@ export function CreateWorkspaceModal(p: Props) {
           setUser(c.user);
           setPort(c.port);
           setKeyPath(c.key_path || "");
+          // Phase 37: derive auth mode from whether a key is set. A
+          // workspace saved in password mode has key_path = null →
+          // hydrate into "password" mode + custom key-mode so a later
+          // switch to "key" shows the path field.
+          if (c.key_path) {
+            setAuthMode("key");
+            setKeyMode("custom");
+          } else {
+            setAuthMode("password");
+          }
         }
       } else {
         // Fresh "new workspace" state.
@@ -379,6 +395,7 @@ export function CreateWorkspaceModal(p: Props) {
         setUser("");
         setPort(22);
         setKeyPath("");
+        setAuthMode("key");
         setColor("#7aa2f7");
         setEmoji("");
         setCustomHex("");
@@ -395,16 +412,41 @@ export function CreateWorkspaceModal(p: Props) {
   const cleanedEnv = (): EnvVar[] =>
     envRows().filter((r) => r.key.trim() !== "");
 
+  // Phase 37: build the SSH Connection from the current form state.
+  // In "password" auth mode key_path is null — the workspace saves no
+  // credential and is prompted interactively at connect (never saved).
+  const buildSshConnection = (): Connection | null => {
+    if (!host().trim() || !user().trim()) return null;
+    return {
+      type: "ssh",
+      host: host().trim(),
+      user: user().trim(),
+      port: port(),
+      key_path: authMode() === "key" ? keyPath() || null : null,
+    };
+  };
+
   const submit = () => {
     if (!name().trim()) return;
 
     if (isEdit()) {
+      // Phase 37: connection fields are now editable. For SSH
+      // workspaces send the rebuilt connection so host/user/port/key/
+      // auth-mode changes persist; local workspaces keep their existing
+      // connection (their shell wizard state isn't reconstructed here).
+      let editedConn: Connection | undefined;
+      if (type() === "ssh") {
+        const c = buildSshConnection();
+        if (!c) return; // host/user required
+        editedConn = c;
+      }
       p.onUpdate(p.editing!.id, {
         name: name().trim(),
         color: color(),
         setup_command: setupCmd(),
         teardown_command: teardownCmd(),
         env: cleanedEnv(),
+        connection: editedConn,
       });
       p.onClose();
       return;
@@ -430,14 +472,9 @@ export function CreateWorkspaceModal(p: Props) {
       connection = { type: "local", shell: cmd ?? null };
       workspaceCwd = cwd().trim() || undefined;
     } else {
-      if (!host().trim() || !user().trim()) return;
-      connection = {
-        type: "ssh",
-        host: host().trim(),
-        user: user().trim(),
-        port: port(),
-        key_path: keyPath() || null,
-      };
+      const c = buildSshConnection();
+      if (!c) return;
+      connection = c;
     }
     p.onCreate({
       name: name().trim(),
@@ -691,7 +728,6 @@ export function CreateWorkspaceModal(p: Props) {
                 value={user()}
                 onInput={(e) => setUser(e.currentTarget.value)}
                 placeholder="user"
-                disabled={isEdit()}
               />
             </label>
             <label>
@@ -700,7 +736,6 @@ export function CreateWorkspaceModal(p: Props) {
                 value={host()}
                 onInput={(e) => setHost(e.currentTarget.value)}
                 placeholder={t("ws.create.field.host.placeholder")}
-                disabled={isEdit()}
               />
             </label>
             <label>
@@ -711,16 +746,16 @@ export function CreateWorkspaceModal(p: Props) {
                 onInput={(e) =>
                   setPort(parseInt(e.currentTarget.value) || 22)
                 }
-                disabled={isEdit()}
               />
             </label>
+            {/* Phase 37: auth-mode chooser. "Password" mode saves no
+                credential — the user is prompted interactively at every
+                connect and the password is never persisted. */}
             <label>
               <span class="ws-key-label">
-                {t("ws.create.field.key")}
+                {t("ws.create.auth.label")}
                 {/* Phase 34: single contextual entry point to the
-                    SSH-key-setup HelpPane. Tooltip explains; click
-                    splits a Help pane next to whatever the user was
-                    last working in. */}
+                    SSH-key-setup HelpPane. */}
                 <button
                   type="button"
                   class="help-hint-btn"
@@ -734,78 +769,110 @@ export function CreateWorkspaceModal(p: Props) {
                   ?
                 </button>
               </span>
-              <select
-                value={keyMode()}
-                disabled={isEdit()}
-                onChange={(e) => {
-                  const v = e.currentTarget.value as "auto" | "detected" | "custom";
-                  setKeyMode(v);
-                  if (v === "auto") {
-                    setKeyPath("");
-                    setKeyPerms(null);
-                  } else if (v === "detected" && detectedKeys().length > 0) {
-                    void onPickDetectedKey(detectedKeys()[0].path);
-                  }
-                }}
-              >
-                <option value="auto">{t("ws.create.key.mode.auto")}</option>
-                <option value="detected" disabled={detectedKeys().length === 0}>
-                  {t("ws.create.key.mode.detected", { n: detectedKeys().length })}
-                </option>
-                <option value="custom">{t("ws.create.key.mode.custom")}</option>
-              </select>
+              <div class="ws-auth-seg">
+                <label class="ws-auth-opt">
+                  <input
+                    type="radio"
+                    name="ws-auth-mode"
+                    checked={authMode() === "key"}
+                    onChange={() => setAuthMode("key")}
+                  />
+                  <span>{t("ws.create.auth.key")}</span>
+                </label>
+                <label class="ws-auth-opt">
+                  <input
+                    type="radio"
+                    name="ws-auth-mode"
+                    checked={authMode() === "password"}
+                    onChange={() => {
+                      setAuthMode("password");
+                      setKeyPath("");
+                      setKeyPerms(null);
+                    }}
+                  />
+                  <span>{t("ws.create.auth.password")}</span>
+                </label>
+              </div>
             </label>
-            <Show when={keyMode() === "detected"}>
+
+            <Show when={authMode() === "password"}>
+              <p class="settings-hint ws-auth-hint">{t("ws.create.auth.password.hint")}</p>
+            </Show>
+
+            <Show when={authMode() === "key"}>
               <label>
-                <span></span>
+                <span>{t("ws.create.field.key")}</span>
                 <select
-                  value={keyPath()}
-                  disabled={isEdit()}
-                  onChange={(e) => void onPickDetectedKey(e.currentTarget.value)}
+                  value={keyMode()}
+                  onChange={(e) => {
+                    const v = e.currentTarget.value as "auto" | "detected" | "custom";
+                    setKeyMode(v);
+                    if (v === "auto") {
+                      setKeyPath("");
+                      setKeyPerms(null);
+                    } else if (v === "detected" && detectedKeys().length > 0) {
+                      void onPickDetectedKey(detectedKeys()[0].path);
+                    }
+                  }}
                 >
-                  <For each={detectedKeys()}>
-                    {(k) => (
-                      <option value={k.path}>
-                        {k.filename}
-                        {k.key_type ? ` (${k.key_type})` : ""}
-                        {k.fingerprint ? ` · ${k.fingerprint.slice(0, 19)}…` : ""}
-                      </option>
-                    )}
-                  </For>
+                  <option value="auto">{t("ws.create.key.mode.auto")}</option>
+                  <option value="detected" disabled={detectedKeys().length === 0}>
+                    {t("ws.create.key.mode.detected", { n: detectedKeys().length })}
+                  </option>
+                  <option value="custom">{t("ws.create.key.mode.custom")}</option>
                 </select>
               </label>
+              <Show when={keyMode() === "detected"}>
+                <label>
+                  <span></span>
+                  <select
+                    value={keyPath()}
+                    onChange={(e) => void onPickDetectedKey(e.currentTarget.value)}
+                  >
+                    <For each={detectedKeys()}>
+                      {(k) => (
+                        <option value={k.path}>
+                          {k.filename}
+                          {k.key_type ? ` (${k.key_type})` : ""}
+                          {k.fingerprint ? ` · ${k.fingerprint.slice(0, 19)}…` : ""}
+                        </option>
+                      )}
+                    </For>
+                  </select>
+                </label>
+              </Show>
+              <Show when={keyMode() === "custom"}>
+                <label>
+                  <span></span>
+                  <input
+                    value={keyPath()}
+                    onInput={(e) => {
+                      setKeyPath(e.currentTarget.value);
+                      if (e.currentTarget.value) void refreshPermsFor(e.currentTarget.value);
+                      else setKeyPerms(null);
+                    }}
+                    placeholder={t("ws.create.field.key.placeholder")}
+                  />
+                </label>
+              </Show>
+              <Show when={keyPath() && keyPerms() && !keyPerms()!.ok}>
+                <div class="wizard-row wizard-warn">
+                  <span>{t("wizard.perms_warn", { err: keyPerms()!.error ?? "" })}</span>
+                  <button
+                    type="button"
+                    class="wizard-fix"
+                    onClick={() => void onFixPerms()}
+                  >
+                    {t("wizard.perms_fix")}
+                  </button>
+                </div>
+              </Show>
+              <Show when={keyPath() && keyPerms()?.ok}>
+                <div class="wizard-row wizard-ok">{t("wizard.perms_ok")}</div>
+              </Show>
             </Show>
-            <Show when={keyMode() === "custom"}>
-              <label>
-                <span></span>
-                <input
-                  value={keyPath()}
-                  onInput={(e) => {
-                    setKeyPath(e.currentTarget.value);
-                    if (e.currentTarget.value) void refreshPermsFor(e.currentTarget.value);
-                    else setKeyPerms(null);
-                  }}
-                  placeholder={t("ws.create.field.key.placeholder")}
-                  disabled={isEdit()}
-                />
-              </label>
-            </Show>
-            <Show when={keyPath() && keyPerms() && !keyPerms()!.ok && !isEdit()}>
-              <div class="wizard-row wizard-warn">
-                <span>{t("wizard.perms_warn", { err: keyPerms()!.error ?? "" })}</span>
-                <button
-                  type="button"
-                  class="wizard-fix"
-                  onClick={() => void onFixPerms()}
-                >
-                  {t("wizard.perms_fix")}
-                </button>
-              </div>
-            </Show>
-            <Show when={keyPath() && keyPerms()?.ok && !isEdit()}>
-              <div class="wizard-row wizard-ok">{t("wizard.perms_ok")}</div>
-            </Show>
-            <Show when={!isEdit()}>
+
+            <Show when={true}>
               <div class="wizard-test">
                 <div class="wizard-test-fields">
                   <input

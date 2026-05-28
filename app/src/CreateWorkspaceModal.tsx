@@ -95,6 +95,8 @@ export function CreateWorkspaceModal(p: Props) {
   const [user, setUser] = createSignal("");
   const [port, setPort] = createSignal(22);
   const [keyPath, setKeyPath] = createSignal("");
+  // Phase 36 (#2.2): auto port-forward toggle (edit mode only).
+  const [autoPortForward, setAutoPortForward] = createSignal(true);
   const [color, setColor] = createSignal("#7aa2f7");
   const [emoji, setEmoji] = createSignal("");
   // Phase 30: editable hex value for the custom-color text input. Kept
@@ -206,6 +208,16 @@ export function CreateWorkspaceModal(p: Props) {
     setEmoji("");
     setCustomHex("");
     void saveIdentity(null, null);
+  };
+
+  // Phase 36 (#2.2): live-toggle auto port forwarding (edit mode).
+  const onToggleAutoPortForward = (enabled: boolean) => {
+    setAutoPortForward(enabled);
+    if (!p.editing) return;
+    void invoke("workspace_set_auto_port_forward", {
+      workspaceId: p.editing.id,
+      enabled,
+    }).catch((e) => console.error("workspace_set_auto_port_forward failed", e));
   };
 
   // Lazy-load the wizard inputs whenever the modal opens. Cheap calls and
@@ -345,6 +357,7 @@ export function CreateWorkspaceModal(p: Props) {
         setSetupCmd(w.setup_command || "");
         setTeardownCmd(w.teardown_command || "");
         setEnvRows(w.env ? [...w.env] : []);
+        setAutoPortForward(w.auto_port_forward ?? true);
         // Connection fields shown read-only.
         const c = w.layout?.kind === "pane" ? w.layout.connection : w.connection;
         if (c?.type === "local") {
@@ -519,6 +532,21 @@ export function CreateWorkspaceModal(p: Props) {
                 </button>
               </div>
             </div>
+          </Show>
+
+          {/* Phase 36 (#2.2): auto port forwarding toggle. Edit-mode
+              only — new workspaces default to ON (backend), toggle
+              after creation here. */}
+          <Show when={isEdit()}>
+            <label class="ws-autoport">
+              <input
+                type="checkbox"
+                checked={autoPortForward()}
+                onChange={(e) => onToggleAutoPortForward(e.currentTarget.checked)}
+              />
+              <span>{t("ws.autoPortForward.label")}</span>
+            </label>
+            <p class="settings-hint ws-autoport-hint">{t("ws.autoPortForward.hint")}</p>
           </Show>
 
           <Show when={!isEdit()}>

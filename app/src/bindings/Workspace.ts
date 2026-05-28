@@ -3,4 +3,4 @@ import type { Connection } from "./Connection";
 import type { EnvVar } from "./EnvVar";
 import type { LayoutNode } from "./LayoutNode";
 
-export type Workspace = { id: string, name: string, color: string | null, emoji: string | null, cwd: string | null, connection: Connection | null, layout: LayoutNode | null, setup_command: string | null, teardown_command: string | null, env: Array<EnvVar>, };
+export type Workspace = { id: string, name: string, color: string | null, emoji: string | null, cwd: string | null, connection: Connection | null, layout: LayoutNode | null, setup_command: string | null, teardown_command: string | null, env: Array<EnvVar>, auto_port_forward: boolean, };

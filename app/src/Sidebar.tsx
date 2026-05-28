@@ -1,5 +1,6 @@
 import { For, Show, createSignal } from "solid-js";
-import { collectPanes, findPane, type Workspace } from "./types";
+import { collectPanes, findPane, type Workspace, type ForwardRow } from "./types";
+import { PortsPanel } from "./PortsPanel";
 import { t } from "./i18n";
 
 function workspaceBadge(w: Workspace): { label: string; cls: string; title: string } {
@@ -30,6 +31,10 @@ interface Props {
   /** Phase 14.A — open the server provisioning wizard. */
   onProvision: () => void;
   onAction: (id: string, action: "rename" | "edit" | "delete" | "disconnect") => void;
+  // Phase 36 (#2.2): live auto port-forwards for the ACTIVE workspace,
+  // shown in the Ports panel below the workspace list.
+  activeForwards: ForwardRow[];
+  onStopForward: (remotePort: number) => void;
 }
 
 export function Sidebar(p: Props) {
@@ -133,6 +138,7 @@ export function Sidebar(p: Props) {
           )}
         </For>
       </div>
+      <PortsPanel forwards={p.activeForwards} onStop={p.onStopForward} />
       <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
         {t("sidebar.provision_server")}
       </button>

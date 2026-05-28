@@ -329,6 +329,13 @@
   "cmd.view.zoom.out": "Вид: Уменьшить",
   "cmd.view.zoom.reset": "Вид: Сбросить масштаб",
   "cmd.fm.open": "Файловый менеджер: Открыть",
+  "ws.autoPortForward.label": "Автопереброс портов",
+  "ws.autoPortForward.hint": "Когда сервер начинает слушать порт на удалённой машине, winmux автоматически открывает локальный SSH-туннель. Нажмите порт в боковой панели, чтобы открыть его в браузере.",
+  "ports.panel.title": "Порты",
+  "ports.panel.empty": "Нет проброшенных портов — запустите сервер в терминале, чтобы увидеть его здесь",
+  "ports.menu.copyUrl": "Копировать URL",
+  "ports.menu.stopForward": "Остановить проброс",
+  "ports.notification.opened": "Порт {remote} → localhost:{local} — нажмите, чтобы открыть",
 
   "settings.tab.shortcuts": "горячие клавиши",
   "settings.shortcuts.title": "Горячие клавиши",

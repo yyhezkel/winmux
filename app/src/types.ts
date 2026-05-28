@@ -95,6 +95,17 @@ export type WorkspacesFile = {
 export type PtyDataEvent = { session_id: string; data: string };
 export type PtyExitEvent = { session_id: string; reason: string | null };
 
+// Phase 36 (#2.2): a live auto port-forward, as tracked on the
+// frontend. opened_at is stamped client-side when the
+// port-forward-opened event arrives (the backend doesn't persist it).
+export type ForwardRow = {
+  workspace_id: string;
+  remote_port: number;
+  local_port: number;
+  remote_addr: string;
+  opened_at: number;
+};
+
 export type FeedResolvedEvent = { request_id: string; decision: string };
 
 export type NoteStatus = "open" | "done";

@@ -329,6 +329,13 @@
   "cmd.view.zoom.out": "العرض: تصغير",
   "cmd.view.zoom.reset": "العرض: إعادة ضبط التكبير",
   "cmd.fm.open": "مدير الملفات: فتح",
+  "ws.autoPortForward.label": "إعادة توجيه المنافذ تلقائيًا",
+  "ws.autoPortForward.hint": "عندما يبدأ خادم بالاستماع على الجهاز البعيد، يفتح winmux نفق SSH محلي تلقائيًا. انقر على منفذ في الشريط الجانبي لفتحه في المتصفح.",
+  "ports.panel.title": "المنافذ",
+  "ports.panel.empty": "لا توجد منافذ مُعاد توجيهها — شغّل خادمًا في الطرفية لرؤيته هنا",
+  "ports.menu.copyUrl": "نسخ الرابط",
+  "ports.menu.stopForward": "إيقاف التوجيه",
+  "ports.notification.opened": "المنفذ {remote} ← localhost:{local} — انقر للفتح",
 
   "settings.tab.shortcuts": "اختصارات",
   "settings.shortcuts.title": "اختصارات لوحة المفاتيح",

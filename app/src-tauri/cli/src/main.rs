@@ -9,6 +9,7 @@
 // - If a Linux build can't find `WINMUX_SOCKET_ADDR`, it errors with exit code 2.
 
 mod hooks;
+mod port_watch;
 
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -473,6 +474,18 @@ enum Cmd {
         workspace: String,
         #[arg(long, default_value_t = 30)]
         limit: usize,
+    },
+
+    /// Phase 36 (#2.2): long-running listening-port watcher. Scans
+    /// /proc/net/tcp(6) every 500ms and reports new/closed LISTEN ports
+    /// to the winmux app, which opens/closes SSH local-forwards.
+    /// Launched automatically by the app on SSH connect — not meant to
+    /// be run by hand. Runs until killed (the exec channel dies with
+    /// the workspace's SSH session).
+    PortWatch {
+        /// Workspace id this watcher reports for.
+        #[arg(long)]
+        workspace: String,
     },
 }
 
@@ -1061,6 +1074,14 @@ fn main() -> ExitCode {
 #[tokio::main]
 async fn real_main() -> ExitCode {
     let cli = Cli::parse();
+    // Phase 36: the port watcher loops forever and never produces a
+    // single RPC result, so it's handled before the request/response
+    // dispatch below. `run` diverges (-> !); it only returns control
+    // if the process is signalled.
+    if let Cmd::PortWatch { workspace } = &cli.command {
+        load_fallback_env_file();
+        port_watch::run(workspace).await;
+    }
     let result: Result<Value, String> = match &cli.command {
         Cmd::ListWorkspaces => rpc_call("list-workspaces", json!({})).await,
         Cmd::SelectWorkspace { id } => rpc_call("select-workspace", json!({ "id": id })).await,
@@ -2002,6 +2023,8 @@ async fn real_main() -> ExitCode {
                 rpc_call("settings.save", json!({ "settings": parsed })).await
             }
         },
+        // Phase 36: handled before this match (port_watch::run diverges).
+        Cmd::PortWatch { .. } => unreachable!("PortWatch handled before dispatch"),
     };
 
     match result {

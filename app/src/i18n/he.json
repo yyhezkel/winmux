@@ -329,6 +329,13 @@
   "cmd.view.zoom.out": "תצוגה: הקטנה",
   "cmd.view.zoom.reset": "תצוגה: איפוס זום",
   "cmd.fm.open": "מנהל קבצים: פתיחה",
+  "ws.autoPortForward.label": "פתיחה אוטומטית של פורטים",
+  "ws.autoPortForward.hint": "כשהשרת מתחיל להאזין בצד המרוחק, winmux פותח אוטומטית מנהרת SSH מקומית. לחץ על פורט בסרגל הצד כדי לפתוח אותו בדפדפן.",
+  "ports.panel.title": "פורטים",
+  "ports.panel.empty": "אין פורטים מועברים — הפעל שרת במעטפת כדי לראות אותו כאן",
+  "ports.menu.copyUrl": "העתק כתובת",
+  "ports.menu.stopForward": "עצור העברה",
+  "ports.notification.opened": "פורט {remote} ← localhost:{local} — לחץ לפתיחה",
 
   "settings.tab.shortcuts": "קיצורי דרך",
   "settings.shortcuts.title": "קיצורי מקלדת",

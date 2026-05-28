@@ -189,6 +189,7 @@ async fn dispatch(
                 setup_command: input.setup_command,
                 teardown_command: input.teardown_command,
                 env: input.env.unwrap_or_default(),
+                auto_port_forward: true,
             };
             let cloned = ws.clone();
             {
@@ -1700,6 +1701,62 @@ async fn dispatch(
             let dir = config_dir_pub().map_err(|e| e.to_string())?;
             let path = dev::write_bug_report(&dir, &body)?;
             Ok(json!({ "ok": true, "path": path.to_string_lossy() }))
+        }
+
+        // Phase 36 (#2.2): the remote port-watcher reports listening
+        // ports here. We honour the workspace's auto_port_forward
+        // toggle: when off, the watcher keeps running but we no-op so
+        // no tunnels open.
+        "port.opened" => {
+            let workspace_id = params
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("missing workspace_id")?
+                .to_string();
+            let port = params
+                .get("port")
+                .and_then(|v| v.as_u64())
+                .ok_or("missing port")? as u16;
+            let addr = params
+                .get("addr")
+                .and_then(|v| v.as_str())
+                .unwrap_or("127.0.0.1")
+                .to_string();
+            let enabled = {
+                let file = state.workspaces.lock().unwrap();
+                file.workspaces
+                    .iter()
+                    .find(|w| w.id == workspace_id)
+                    .map(|w| w.auto_port_forward)
+                    .unwrap_or(false)
+            };
+            if !enabled {
+                return Ok(json!({ "ok": true, "skipped": "auto_port_forward off" }));
+            }
+            match crate::open_forward_matched(state, app, &workspace_id, &addr, port).await {
+                Ok(local_port) => Ok(json!({ "ok": true, "local_port": local_port })),
+                Err(e) => {
+                    let _ = app.emit(
+                        "toast",
+                        json!({ "kind": "error", "message": format!("port {port}: {e}") }),
+                    );
+                    Err(e)
+                }
+            }
+        }
+
+        "port.closed" => {
+            let workspace_id = params
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("missing workspace_id")?
+                .to_string();
+            let port = params
+                .get("port")
+                .and_then(|v| v.as_u64())
+                .ok_or("missing port")? as u16;
+            crate::close_one_forward(state, app, &workspace_id, port);
+            Ok(json!({ "ok": true }))
         }
 
         other => Err(format!("unknown method: {other}")),

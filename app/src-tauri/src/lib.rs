@@ -204,6 +204,11 @@ pub(crate) struct AppState {
     /// (SSH execs do NOT source ~/.bashrc, so a `claude` only on
     /// the user's interactive PATH is otherwise invisible).
     pub(crate) claude_paths: Arc<Mutex<HashMap<String, String>>>,
+    // Phase 36 (#2.2): workspaces that currently have a remote
+    // port-watcher running, so spawn_ssh launches at most one per
+    // workspace even when multiple panes connect. Cleared when the
+    // workspace's last SSH session ends.
+    pub(crate) port_watchers: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -437,6 +442,12 @@ pub(crate) struct Workspace {
     pub(crate) teardown_command: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) env: Vec<EnvVar>,
+    // Phase 36 (#2.2): when true (default), winmux auto-opens SSH
+    // local-forwards for listening ports the remote watcher reports.
+    // `#[serde(default = "default_true")]` so older workspaces.json
+    // without the field load as ON.
+    #[serde(default = "default_true")]
+    pub(crate) auto_port_forward: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -2428,6 +2439,71 @@ async fn spawn_ssh(
         }
     }
 
+    // Phase 36 (#2.2): launch the remote listening-port watcher, once
+    // per workspace (deduped via state.port_watchers so multiple panes
+    // don't spawn duplicates). It scans /proc/net/tcp and reports ports
+    // back over the tunnel; the port.opened / port.closed dispatch arms
+    // open + tear down local forwards. The watcher process is tied to
+    // this exec channel — it dies when the SSH session does. We still
+    // launch even if the workspace toggle is off; the dispatch arms
+    // no-op in that case (cheaper than a remote on/off control channel).
+    if remote_port != 0 {
+        let should_launch = {
+            let mut set = state.port_watchers.lock().unwrap();
+            if set.contains(&workspace_id) {
+                false
+            } else {
+                set.insert(workspace_id.clone());
+                true
+            }
+        };
+        if should_launch {
+            match handle.channel_open_session().await {
+                Ok(mut wchan) => {
+                    let socket_addr = format!("127.0.0.1:{}", remote_port);
+                    let _ = wchan.set_env(false, "WINMUX_SOCKET_ADDR", socket_addr).await;
+                    let _ = wchan
+                        .set_env(false, "WINMUX_TUNNEL_TOKEN", token.as_str().to_string())
+                        .await;
+                    // Exec channels don't source the rc files that add
+                    // ~/.winmux/bin to PATH, so use the explicit path.
+                    let cmd = format!(
+                        "\"$HOME/.winmux/bin/winmux\" port-watch --workspace {}",
+                        shell_quote(&workspace_id)
+                    );
+                    match wchan.exec(true, cmd.as_str()).await {
+                        Ok(()) => {
+                            let ws_guard = workspace_id.clone();
+                            let watchers = state.port_watchers.clone();
+                            tokio::spawn(async move {
+                                loop {
+                                    match wchan.wait().await {
+                                        Some(ChannelMsg::Eof)
+                                        | Some(ChannelMsg::Close)
+                                        | None => break,
+                                        _ => {}
+                                    }
+                                }
+                                watchers.lock().unwrap().remove(&ws_guard);
+                                dlog(&format!(
+                                    "port-watch[{ws_guard}]: channel closed, watcher slot freed"
+                                ));
+                            });
+                        }
+                        Err(e) => {
+                            dlog(&format!("port-watch: exec failed: {e}"));
+                            state.port_watchers.lock().unwrap().remove(&workspace_id);
+                        }
+                    }
+                }
+                Err(e) => {
+                    dlog(&format!("port-watch: channel_open_session failed: {e}"));
+                    state.port_watchers.lock().unwrap().remove(&workspace_id);
+                }
+            }
+        }
+    }
+
     let mut channel = handle
         .channel_open_session()
         .await
@@ -2812,6 +2888,135 @@ pub(crate) async fn open_forward(
     Ok(local_port)
 }
 
+/// Phase 36 (#2.2): open an auto-forward that tries to bind the SAME
+/// local port as the remote (so the user's `localhost:3000` matches
+/// the server's `3000`), falling back to remote_port+1..+9 if taken.
+/// Differs from `open_forward` (browser panes, random local port) only
+/// in the bind strategy + the events it emits. Idempotent on
+/// (workspace, remote_port).
+pub(crate) async fn open_forward_matched(
+    state: &AppState,
+    app: &AppHandle,
+    workspace_id: &str,
+    remote_addr: &str,
+    remote_port: u16,
+) -> Result<u16, String> {
+    {
+        let m = state.forwards.lock().unwrap();
+        if let Some(e) = m.get(&(workspace_id.to_string(), remote_port)) {
+            return Ok(e.local_port);
+        }
+    }
+    let handle = find_ssh_handle_for_workspace(state, workspace_id)
+        .ok_or_else(|| "no active SSH session for this workspace".to_string())?;
+
+    // Try remote_port, then +1..+9. u16 saturating guard at the top.
+    let mut listener = None;
+    let mut local_port = 0u16;
+    for delta in 0u16..10 {
+        let candidate = match remote_port.checked_add(delta) {
+            Some(p) => p,
+            None => break,
+        };
+        match tokio::net::TcpListener::bind(("127.0.0.1", candidate)).await {
+            Ok(l) => {
+                local_port = candidate;
+                listener = Some(l);
+                break;
+            }
+            Err(_) => continue,
+        }
+    }
+    let listener = listener.ok_or_else(|| {
+        format!("no free local port near {remote_port} for the forward")
+    })?;
+
+    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    let ws_for_task = workspace_id.to_string();
+    let forwards_for_task = state.forwards.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => break,
+                accept = listener.accept() => {
+                    let (mut sock, peer) = match accept {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+                    let h = Arc::clone(&handle);
+                    tokio::spawn(async move {
+                        let chan = match h
+                            .channel_open_direct_tcpip(
+                                "localhost",
+                                remote_port as u32,
+                                peer.ip().to_string(),
+                                peer.port() as u32,
+                            )
+                            .await
+                        {
+                            Ok(c) => c,
+                            Err(_) => return,
+                        };
+                        let mut chan_stream = chan.into_stream();
+                        let _ = tokio::io::copy_bidirectional(&mut sock, &mut chan_stream).await;
+                    });
+                }
+            }
+        }
+        forwards_for_task
+            .lock()
+            .unwrap()
+            .remove(&(ws_for_task, remote_port));
+    });
+
+    state.forwards.lock().unwrap().insert(
+        (workspace_id.to_string(), remote_port),
+        ForwardEntry {
+            local_port,
+            cancel: Some(cancel_tx),
+        },
+    );
+    dlog(&format!(
+        "open_forward_matched[{}:{}]: bound 127.0.0.1:{}",
+        workspace_id, remote_port, local_port
+    ));
+    let _ = app.emit(
+        "port-forward-opened",
+        serde_json::json!({
+            "workspace_id": workspace_id,
+            "remote_addr": remote_addr,
+            "remote_port": remote_port,
+            "local_port": local_port,
+        }),
+    );
+    Ok(local_port)
+}
+
+/// Phase 36: tear down a single (workspace, remote_port) forward.
+pub(crate) fn close_one_forward(
+    state: &AppState,
+    app: &AppHandle,
+    workspace_id: &str,
+    remote_port: u16,
+) {
+    let removed = {
+        let mut m = state.forwards.lock().unwrap();
+        m.remove(&(workspace_id.to_string(), remote_port))
+    };
+    if let Some(mut e) = removed {
+        if let Some(c) = e.cancel.take() {
+            let _ = c.send(());
+        }
+        let _ = app.emit(
+            "port-forward-closed",
+            serde_json::json!({
+                "workspace_id": workspace_id,
+                "remote_port": remote_port,
+            }),
+        );
+    }
+}
+
 /// Cancel every forward task whose key has the given workspace_id.
 pub(crate) fn close_workspace_forwards(forwards: &ForwardMap, workspace_id: &str) {
     let mut m = forwards.lock().unwrap();
@@ -3033,6 +3238,7 @@ fn workspace_create(
         setup_command: input.setup_command,
         teardown_command: input.teardown_command,
         env: input.env.unwrap_or_default(),
+        auto_port_forward: true,
     };
     {
         let mut file = state.workspaces.lock().unwrap();
@@ -3328,6 +3534,49 @@ async fn workspace_set_identity(
     persist(&state)?;
     let _ = app.emit("workspaces:changed", ());
     Ok(updated)
+}
+
+// Phase 36 (#2.2): toggle auto port forwarding for a workspace.
+// Persists the flag. When turned off, also tears down any forwards the
+// watcher already opened for this workspace (the watcher keeps running
+// remotely but its events are ignored — see the dispatch arms).
+#[tauri::command]
+async fn workspace_set_auto_port_forward(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    enabled: bool,
+) -> Result<Workspace, String> {
+    let updated: Workspace;
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        ws.auto_port_forward = enabled;
+        updated = ws.clone();
+    }
+    if !enabled {
+        close_workspace_forwards(&state.forwards, &workspace_id);
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(updated)
+}
+
+// Phase 36 (#2.2): manually stop one forward (Ports panel "Stop
+// forward" menu item).
+#[tauri::command]
+async fn port_forward_stop(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    remote_port: u16,
+) -> Result<(), String> {
+    close_one_forward(&state, &app, &workspace_id, remote_port);
+    Ok(())
 }
 
 // Phase 31: per-pane identity. Same validation as the workspace
@@ -5217,6 +5466,8 @@ pub fn run() {
             workspace_update,
             workspace_rename,
             workspace_set_identity,
+            workspace_set_auto_port_forward,
+            port_forward_stop,
             pane_set_identity,
             ssh_key_offer_dismiss,
             ssh_key_generate_and_install,
@@ -5315,4 +5566,54 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod port_forward_tests {
+    // Phase 36 (#2.2): the forwards map is keyed by (workspace_id,
+    // remote_port). These exercise the insert / lookup / remove
+    // mechanics that open_forward_matched + close_one_forward rely on,
+    // without a live russh channel (cancel = None).
+    use super::{ForwardEntry, ForwardMap};
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    fn empty_map() -> ForwardMap {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
+    #[test]
+    fn insert_lookup_remove() {
+        let m = empty_map();
+        let key = ("ws1".to_string(), 3000u16);
+        m.lock().unwrap().insert(
+            key.clone(),
+            ForwardEntry {
+                local_port: 3000,
+                cancel: None,
+            },
+        );
+        assert_eq!(m.lock().unwrap().get(&key).map(|e| e.local_port), Some(3000));
+        let removed = m.lock().unwrap().remove(&key);
+        assert!(removed.is_some());
+        assert!(m.lock().unwrap().get(&key).is_none());
+    }
+
+    #[test]
+    fn distinct_workspaces_same_port_dont_collide() {
+        let m = empty_map();
+        m.lock().unwrap().insert(
+            ("a".to_string(), 8080),
+            ForwardEntry { local_port: 8080, cancel: None },
+        );
+        m.lock().unwrap().insert(
+            ("b".to_string(), 8080),
+            ForwardEntry { local_port: 8081, cancel: None },
+        );
+        assert_eq!(m.lock().unwrap().len(), 2);
+        assert_eq!(
+            m.lock().unwrap().get(&("b".to_string(), 8080)).map(|e| e.local_port),
+            Some(8081)
+        );
+    }
 }

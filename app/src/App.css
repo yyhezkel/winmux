@@ -3227,6 +3227,80 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   font-size: 13px;
 }
 
+/* Phase 36 (#2.2): Ports panel in the sidebar. */
+.ports-panel {
+  border-top: 1px solid var(--w-border, #21262d);
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.ports-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--w-text-secondary, #7d8590);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  padding: 2px 4px;
+  user-select: none;
+}
+.ports-panel-caret { width: 10px; }
+.ports-panel-title { flex: 1; }
+.ports-panel-count {
+  background: var(--w-accent, #3b82f6);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+.ports-panel-empty {
+  color: var(--w-text-secondary, #7d8590);
+  font-style: italic;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+.ports-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--w-text-primary, #e6edf3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ports-row:hover { background: var(--w-surface-hover, #1f2630); }
+.ports-row-icon { flex-shrink: 0; }
+.ports-row-label { overflow: hidden; text-overflow: ellipsis; }
+.ports-row-menu {
+  position: absolute;
+  inset-inline-end: 4px;
+  top: 100%;
+  z-index: 20;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+}
+.ports-row-menu button {
+  background: transparent;
+  border: none;
+  color: var(--w-text-primary, #e6edf3);
+  text-align: start;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ports-row-menu button:hover { background: var(--w-surface-hover, #1f2630); }
+.ws-autoport { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.ws-autoport-hint { margin-top: 2px; }
+
 /* Phase 34: small contextual "?" hint button. Sits inline with a
    field label and opens the relevant HelpPane on click. */
 .ws-key-label {

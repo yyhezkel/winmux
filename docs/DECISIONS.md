@@ -58,6 +58,11 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Decided
 
+### 2026-05-29 — Ports feature redesign: sidebar button + current-workspace window (Phase 40, `aea8438`)
+- **Context:** Phase 39.E hid the sidebar Ports entry after live testing showed the global PortsWindow was usually empty. Step 1 of a multi-step Ports rebuild: bring the entry back, but tighter and scoped.
+- **Decision:** Re-added the 🌐 Ports sidebar button next to [📝 Notes][⚙ Settings] with an explanatory `title` tooltip ("Lets your local browser reach what's running on the remote server"). PortsWindow rewritten to show ONLY the active workspace — dropped the "All workspaces" tab — and auto-tracks workspace switches via `activeWs()`. Prominent Active/Inactive auto-forward toggle row at the top (colored by the workspace's color, green fallback; disabled for Local workspaces since they have no SSH), then the forwards list or one of three contextual empty states (toggle-on-no-forwards / toggle-off / no-workspace). Badge click now activates the workspace, then opens the window. Added a short `sidebar.ports.label` key for the button text so the long sentence lives only in the `title` (the old key doubled as the label). i18n in all 4 locales; tab keys removed.
+- **Outcome / Commit:** `aea8438` (debug build green, BUILD_EXIT 0, app.exe ~30.9 MB). Frontend-only; no version bump — batches into v0.2.6. Further Ports-rebuild steps to follow.
+
 ### 2026-05-28 — Ports default-off + internal-port filter + floating Ports/Notes + Logs tab (Phase 39, `3a5c50b`)
 - **Context:** Live testing of v0.2.4 surfaced six related issues, the headline being a foot-gun: auto port forwarding was on by default and the Phase 36 watcher forwarded EVERY remote LISTEN port — including winmux's own reverse-tunnel HMAC endpoint — so the browser hit `WINMUX-CHALLENGE / WINMUX-DENIED bad-format`.
 - **Decision:**

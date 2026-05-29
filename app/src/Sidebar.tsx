@@ -180,6 +180,9 @@ export function Sidebar(p: Props) {
         <button class="ws-action-half" onClick={p.onOpenSettings} title={t("sidebar.settings.tooltip")}>
           ⚙ {t("sidebar.settings.tooltip")}
         </button>
+        <button class="ws-action-half" onClick={p.onOpenPortsGlobal} title={t("sidebar.ports.tooltip")}>
+          🌐 {t("sidebar.ports.label")}
+        </button>
       </div>
       <button class="ws-add" onClick={p.onCreate}>
         {t("sidebar.new_workspace")}

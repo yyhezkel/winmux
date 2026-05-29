@@ -1,32 +1,25 @@
-import { createMemo, createSignal, createEffect, For, Show, onCleanup } from "solid-js";
+import { createMemo, createEffect, For, Show, onCleanup } from "solid-js";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { ForwardRow, Workspace } from "./types";
 import { t } from "./i18n";
 
-// Phase 39: floating Ports window (replaces the always-on sidebar
-// panel). Opened by clicking a workspace's 🌐 badge. Two tabs:
-// the scoped workspace, and "All workspaces".
+// Phase 40: floating Ports window, scoped to the CURRENTLY ACTIVE
+// workspace only (the "All workspaces" tab was dropped). Opened from
+// the sidebar 🌐 button or a workspace's 🌐 badge. Shows a prominent
+// Active/Inactive auto-forward toggle and the list of live forwards.
 
 interface Props {
   open: boolean;
-  /** Workspace whose badge was clicked — the initial scoped tab. */
-  workspaceId: string | null;
+  /** The currently active workspace — drives scope, name, toggle, color. */
+  activeWorkspace: Workspace | null;
   forwards: ForwardRow[];
-  workspaces: Workspace[];
   onClose: () => void;
   onStop: (workspaceId: string, remotePort: number) => void;
-  /** Open workspace settings (to the auto-port-forward toggle). */
-  onOpenSettings: (workspaceId: string) => void;
+  /** Flip auto_port_forward for a workspace (no-op for Local). */
+  onToggleAutoForward: (workspaceId: string, enabled: boolean) => void;
 }
 
 export function PortsWindow(p: Props) {
-  const [tab, setTab] = createSignal<"workspace" | "all">("workspace");
-
-  // Reset to the workspace tab each time it opens.
-  createEffect(() => {
-    if (p.open) setTab(p.workspaceId ? "workspace" : "all");
-  });
-
   // Esc to close.
   createEffect(() => {
     if (!p.open) return;
@@ -40,24 +33,26 @@ export function PortsWindow(p: Props) {
     onCleanup(() => window.removeEventListener("keydown", onKey, true));
   });
 
-  const wsName = (id: string) =>
-    p.workspaces.find((w) => w.id === id)?.name ?? id;
+  const ws = () => p.activeWorkspace;
+  // Local workspaces have no SSH connection — auto-port-forward is meaningless.
+  const isLocal = () => !!ws() && ws()!.connection == null;
+  const enabled = () => (ws()?.auto_port_forward ?? false) && !isLocal();
 
   const rows = createMemo(() => {
-    if (tab() === "all") return p.forwards;
-    const id = p.workspaceId;
+    const id = ws()?.id;
     return id ? p.forwards.filter((f) => f.workspace_id === id) : [];
   });
 
-  const open = (localPort: number) => {
-    void openUrl(`http://localhost:${localPort}`).catch((e) => console.warn("openUrl failed", e));
+  const openLocal = (localPort: number) => {
+    void openUrl(`http://localhost:${localPort}`).catch((e) =>
+      console.warn("openUrl failed", e),
+    );
   };
-  const copy = async (localPort: number) => {
-    try {
-      await navigator.clipboard.writeText(`http://localhost:${localPort}`);
-    } catch (e) {
-      console.warn("clipboard write failed", e);
-    }
+
+  const toggle = () => {
+    const w = ws();
+    if (!w || isLocal()) return;
+    p.onToggleAutoForward(w.id, !enabled());
   };
 
   return (
@@ -65,57 +60,72 @@ export function PortsWindow(p: Props) {
       <div class="modal-backdrop" onClick={p.onClose}>
         <div class="modal ports-window" onClick={(e) => e.stopPropagation()}>
           <div class="settings-head">
-            <h3>{t("ports.panel.title")}</h3>
-            <div class="ports-window-head-actions">
-              <Show when={p.workspaceId}>
-                <button class="ports-window-settings" onClick={() => p.onOpenSettings(p.workspaceId!)}>
-                  {t("ports.window.settings")}
-                </button>
+            <h3>
+              <Show when={ws()} fallback={t("ports.panel.title")}>
+                {t("ports.window.title", { workspace: ws()!.name })}
               </Show>
-              <button class="feed-x" title={t("common.close")} onClick={p.onClose}>×</button>
-            </div>
+            </h3>
+            <button class="feed-x" title={t("common.close")} onClick={p.onClose}>
+              ×
+            </button>
           </div>
 
-          <div class="ports-window-tabs">
+          <Show
+            when={ws()}
+            fallback={
+              <div class="ports-window-body">
+                <p class="ports-panel-empty">{t("ports.window.empty.noWorkspace")}</p>
+              </div>
+            }
+          >
             <button
-              class={tab() === "workspace" ? "active" : ""}
-              disabled={!p.workspaceId}
-              onClick={() => setTab("workspace")}
+              type="button"
+              class="ports-toggle-row"
+              classList={{ on: enabled(), off: !enabled() }}
+              disabled={isLocal()}
+              onClick={toggle}
+              style={enabled() && ws()!.color ? `--ws-color: ${ws()!.color}` : undefined}
             >
-              {p.workspaceId ? wsName(p.workspaceId) : t("ports.window.thisWorkspace")}
+              <span class="ports-toggle-state">
+                {enabled()
+                  ? `✓ ${t("ports.window.toggle.active")}`
+                  : t("ports.window.toggle.inactive")}
+              </span>
+              <span class="ports-toggle-label">{t("ports.window.toggle.label")}</span>
             </button>
-            <button class={tab() === "all" ? "active" : ""} onClick={() => setTab("all")}>
-              {t("ports.window.allWorkspaces")}
-            </button>
-          </div>
 
-          <div class="ports-window-body">
-            <Show
-              when={rows().length > 0}
-              fallback={<p class="ports-panel-empty">{t("ports.window.empty")}</p>}
-            >
-              <For each={rows()}>
-                {(f) => (
-                  <div class="ports-row" title={`http://localhost:${f.local_port}`}>
-                    <span class="ports-row-icon">🌐</span>
-                    <span class="ports-row-label" onClick={() => open(f.local_port)}>
-                      {t("ports.row.activeOn", { port: f.local_port })}
-                      <span class="ports-row-sub">
-                        {t("ports.row.fromRemote", { remote: f.remote_port })}
-                        <Show when={tab() === "all"}> · {wsName(f.workspace_id)}</Show>
+            <div class="ports-window-body">
+              <Show
+                when={rows().length > 0}
+                fallback={
+                  <p class="ports-panel-empty">
+                    {enabled()
+                      ? t("ports.window.empty.activeNoForwards")
+                      : t("ports.window.empty.toggleOff")}
+                  </p>
+                }
+              >
+                <For each={rows()}>
+                  {(f) => (
+                    <div class="ports-row" title={`http://localhost:${f.local_port}`}>
+                      <span class="ports-row-icon">🌐</span>
+                      <span class="ports-row-label" onClick={() => openLocal(f.local_port)}>
+                        {t("ports.row.activeOn", { port: f.local_port })}
+                        <span class="ports-row-sub">
+                          {t("ports.row.fromRemote", { remote: f.remote_port })}
+                        </span>
                       </span>
-                    </span>
-                    <span class="ports-row-actions">
-                      <button onClick={() => void copy(f.local_port)}>{t("ports.menu.copyUrl")}</button>
-                      <button onClick={() => p.onStop(f.workspace_id, f.remote_port)}>
-                        {t("ports.menu.stopForward")}
-                      </button>
-                    </span>
-                  </div>
-                )}
-              </For>
-            </Show>
-          </div>
+                      <span class="ports-row-actions">
+                        <button onClick={() => p.onStop(f.workspace_id, f.remote_port)}>
+                          {t("ports.menu.stopForward")}
+                        </button>
+                      </span>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </div>
+          </Show>
         </div>
       </div>
     </Show>

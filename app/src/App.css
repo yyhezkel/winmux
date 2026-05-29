@@ -3406,6 +3406,41 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .ports-window-tabs button.active { color: var(--w-text-primary, #e6edf3); border-bottom-color: var(--w-accent, #3b82f6); }
 .ports-window-tabs button:disabled { opacity: 0.4; cursor: default; }
 .ports-window-body { overflow-y: auto; padding: 8px 4px; }
+
+/* Phase 40: prominent Active/Inactive auto-forward toggle row. */
+.ports-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: start;
+  padding: 10px 12px;
+  margin: 8px 4px;
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 8px;
+  background: var(--w-surface, #161b22);
+  color: var(--w-text-primary, #e6edf3);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.ports-toggle-row:hover:not(:disabled) { background: var(--w-surface-hover, #1f2630); }
+.ports-toggle-row:disabled { opacity: 0.45; cursor: default; }
+.ports-toggle-state {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--w-border, #21262d);
+  color: var(--w-text-secondary, #7d8590);
+}
+.ports-toggle-row.on { border-color: var(--ws-color, #2ea043); }
+.ports-toggle-row.on .ports-toggle-state {
+  background: var(--ws-color, #2ea043);
+  border-color: var(--ws-color, #2ea043);
+  color: #fff;
+}
+.ports-toggle-label { font-size: 13px; }
 .ports-row-actions { display: flex; gap: 6px; margin-inline-start: auto; }
 .ports-row-actions button {
   background: transparent;

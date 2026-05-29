@@ -112,9 +112,7 @@ function App() {
   const [showPalette, setShowPalette] = createSignal(false);
   // Phase 36 (#2.2): live auto port-forwards (all workspaces).
   const [portForwards, setPortForwards] = createSignal<ForwardRow[]>([]);
-  // Phase 39: floating Ports window state — which workspace's badge
-  // was clicked.
-  const [portsWindowWs, setPortsWindowWs] = createSignal<string | null>(null);
+  // Phase 40: floating Ports window — scoped to the active workspace.
   const [showPortsWindow, setShowPortsWindow] = createSignal(false);
   const stopForward = (workspaceId: string, remotePort: number) => {
     void invoke("port_forward_stop", { workspaceId, remotePort });
@@ -523,6 +521,24 @@ function App() {
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  // Phase 40: flip auto_port_forward from the Ports window. The command
+  // returns the updated workspace; patch it into the file state.
+  const handleToggleAutoForward = async (workspaceId: string, enabled: boolean) => {
+    try {
+      const updated = await invoke<Workspace>("workspace_set_auto_port_forward", {
+        workspaceId,
+        enabled,
+      });
+      const f = file();
+      updateFile({
+        ...f,
+        workspaces: f.workspaces.map((w) => (w.id === updated.id ? updated : w)),
+      });
+    } catch (e) {
+      console.error("workspace_set_auto_port_forward failed", e);
     }
   };
 
@@ -1187,13 +1203,12 @@ function App() {
           }}
           allForwards={portForwards()}
           onOpenPorts={(workspaceId) => {
-            setPortsWindowWs(workspaceId);
+            // Badge click: activate that workspace, then open the
+            // (active-workspace-scoped) Ports window.
+            void handleSetActive(workspaceId);
             setShowPortsWindow(true);
           }}
-          onOpenPortsGlobal={() => {
-            setPortsWindowWs(null);
-            setShowPortsWindow(true);
-          }}
+          onOpenPortsGlobal={() => setShowPortsWindow(true)}
         />
       </ErrorBoundary>
       <div class="main">
@@ -1494,22 +1509,14 @@ function App() {
         onClose={() => setShowPalette(false)}
       />
 
-      {/* Phase 39: floating Ports window (opened from a workspace's 🌐 badge). */}
+      {/* Phase 40: floating Ports window, scoped to the active workspace. */}
       <PortsWindow
         open={showPortsWindow()}
-        workspaceId={portsWindowWs()}
+        activeWorkspace={activeWs()}
         forwards={portForwards()}
-        workspaces={file().workspaces}
         onClose={() => setShowPortsWindow(false)}
         onStop={stopForward}
-        onOpenSettings={(wsId) => {
-          setShowPortsWindow(false);
-          const ws = file().workspaces.find((w) => w.id === wsId);
-          if (ws) {
-            setEditingWorkspace(ws);
-            setShowCreate(true);
-          }
-        }}
+        onToggleAutoForward={handleToggleAutoForward}
       />
 
       <Show when={updateBanner()}>

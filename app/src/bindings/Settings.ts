@@ -33,6 +33,15 @@ hooks_updates: HooksUpdates,
  */
 ssh_key_offer_disabled: boolean, 
 /**
+ * Phase 41. When true (default), activating an SSH workspace
+ * establishes a background SSH session so the tmux session picker and
+ * the remote file manager populate without the user opening a
+ * terminal pane first. Disable to defer the connection until a pane
+ * connects. `default = "default_true"` keeps pre-41 settings.json
+ * backwards-compatible (missing field → true).
+ */
+auto_connect_on_workspace_select: boolean, 
+/**
  * Phase 39.B. One-time data migrations that have already run.
  */
 migrations: MigrationFlags, };

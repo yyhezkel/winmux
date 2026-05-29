@@ -234,6 +234,8 @@
   "settings.terminal.rtl.off.desc": "WebGL renderer, no reorder. Hebrew bytes render left-to-right as written.",
   "settings.terminal.use_winmux_tmux_config.label": "Use winmux tmux config (recommended)",
   "settings.terminal.use_winmux_tmux_config.hint": "Bundles a tmux.conf at ~/.winmux/tmux.conf so wheel scrolls the scrollback ring instead of shell history, 50k-line buffer, sane truecolour. Turn off to fall back to your own ~/.tmux.conf. Takes effect on next pane connect.",
+  "settings.autoConnect.label": "Auto-connect on workspace select",
+  "settings.autoConnect.hint": "When enabled, switching to an SSH workspace establishes a background connection so tmux sessions and your files are immediately visible. Disable to defer the connection until a terminal pane is opened.",
   "ws_header.add_browser": "🌐 + browser",
   "ws_header.add_filemanager": "🗂 + files",
   "ws_header.split_browser_title": "Split into browser pane",

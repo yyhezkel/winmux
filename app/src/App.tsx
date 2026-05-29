@@ -399,6 +399,32 @@ function App() {
     void getCurrentWindow().setTitle(title);
   });
 
+  // Phase 41: when the user activates an SSH workspace and the setting is
+  // on (default), establish a background SSH session so the tmux picker and
+  // file manager populate without opening a terminal pane. Fire-and-forget;
+  // the backend command is idempotent and skips password-mode workspaces.
+  // The id guard fires once per workspace switch (the effect otherwise
+  // re-runs on every file() change). We do NOT consume the workspace while
+  // settings is still loading, so the initial workspace still auto-connects
+  // once settings arrives.
+  let lastAutoConnectWs: string | null = null;
+  createEffect(() => {
+    const ws = activeWs();
+    const s = settings();
+    if (!ws) {
+      lastAutoConnectWs = null;
+      return;
+    }
+    if (!s) return;
+    if (ws.id === lastAutoConnectWs) return;
+    lastAutoConnectWs = ws.id;
+    if (s.auto_connect_on_workspace_select === false) return;
+    if (ws.connection?.type !== "ssh") return;
+    void invoke("workspace_ensure_connected", { workspaceId: ws.id }).catch((e) =>
+      console.warn("workspace_ensure_connected failed", e),
+    );
+  });
+
   const reconcilePanes = (file: WorkspacesFile) => {
     const live = new Set<string>();
     for (const ws of file.workspaces) {

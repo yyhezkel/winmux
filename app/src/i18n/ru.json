@@ -249,6 +249,8 @@
   "settings.terminal.rtl.off.desc": "WebGL renderer без reorder. Иврит выводится слева направо, как записано.",
   "settings.terminal.use_winmux_tmux_config.label": "Использовать конфиг tmux от winmux (рекомендуется)",
   "settings.terminal.use_winmux_tmux_config.hint": "Загружает tmux.conf в ~/.winmux/tmux.conf — колесо прокручивает scrollback (вместо истории shell), буфер на 50,000 строк, truecolour. Отключите, чтобы вернуться к собственному ~/.tmux.conf. Применяется при следующем подключении панели.",
+  "settings.autoConnect.label": "Автоподключение при выборе среды",
+  "settings.autoConnect.hint": "Когда включено, переход к SSH-среде создаёт фоновое подключение, чтобы сессии tmux и ваши файлы были видны сразу. Отключите, чтобы отложить подключение до открытия панели терминала.",
 
   "ws_header.add_browser": "🌐 + браузер",
   "ws_header.add_filemanager": "🗂 + файлы",

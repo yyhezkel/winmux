@@ -416,6 +416,17 @@ export function SettingsModal(p: Props) {
                   <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
                     {t("settings.terminal.use_winmux_tmux_config.hint")}
                   </p>
+                  <label class="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={p.settings.auto_connect_on_workspace_select !== false}
+                      onChange={(e) => update("auto_connect_on_workspace_select", e.currentTarget.checked)}
+                    />
+                    <span>{t("settings.autoConnect.label")}</span>
+                  </label>
+                  <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
+                    {t("settings.autoConnect.hint")}
+                  </p>
                 </section>
                 <section>
                   <h4>{t("settings.terminal.rtl.title")}</h4>

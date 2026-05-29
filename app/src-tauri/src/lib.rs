@@ -48,7 +48,10 @@ pub(crate) struct LocalSession {
 }
 
 pub(crate) struct SshSession {
-    pub(crate) tx: tokio::sync::mpsc::UnboundedSender<SshCmd>,
+    // Phase 41: `None` for a headless session — one established by
+    // `workspace_ensure_connected` to back the tmux picker / file manager
+    // with no PTY behind it. Pane-backed sessions always carry `Some`.
+    pub(crate) tx: Option<tokio::sync::mpsc::UnboundedSender<SshCmd>>,
     // Phase 8.B: shared russh client handle. The I/O task and any port-forward
     // accept loop both hold an Arc; russh's Handle methods take &self, so
     // concurrent users send commands through the underlying mpsc sender.
@@ -69,6 +72,19 @@ pub(crate) struct SshSession {
     pub(crate) user: String,
     pub(crate) port: u16,
     pub(crate) key_path: Option<String>,
+}
+
+impl SshSession {
+    /// Phase 41: forward a command to the PTY task. Headless sessions have
+    /// no PTY (`tx == None`), so this is a no-op for them. Pane operations
+    /// only ever look sessions up by pane id, so in practice this only
+    /// reaches `Some` senders — the `None` arm is the safety net.
+    pub(crate) fn try_send(&self, cmd: SshCmd) -> Result<(), String> {
+        match &self.tx {
+            Some(tx) => tx.send(cmd).map_err(|e| e.to_string()),
+            None => Ok(()),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1465,7 +1481,7 @@ fn schedule_setup_injection(
                     let _ = l.writer.flush();
                 }
                 Session::Ssh(ssh) => {
-                    let _ = ssh.tx.send(SshCmd::Data(bytes));
+                    let _ = ssh.try_send(SshCmd::Data(bytes));
                 }
             }
         }
@@ -2341,34 +2357,34 @@ async fn remote_get_home(
     Ok((String::from_utf8_lossy(&out).to_string(), code))
 }
 
-async fn spawn_ssh(
-    state: &AppState,
-    pane_id: String,
-    app: &AppHandle,
-    workspace_id: String,
-    host: String,
-    user: String,
+/// Phase 41: result of the connect→host-key→authenticate handshake,
+/// factored out of `spawn_ssh` so `workspace_ensure_connected` can
+/// establish a reusable handle without a pane (no PTY / tmux / bootstrap
+/// / reverse-tunnel — the caller owns those).
+struct SshHandshake {
+    handle: client::Handle<SshClient>,
+    auth_method: AuthMethod,
+    /// The reverse-tunnel HMAC token baked into the connection's handler.
+    /// `spawn_ssh` forwards it to the remote for the CLI dial-back; the
+    /// headless path ignores it.
+    tunnel_token: Arc<String>,
+}
+
+/// Phase 41: connect to the SSH target, run the host-key check, and
+/// authenticate. Shared by `spawn_ssh` (pane path) and
+/// `workspace_ensure_connected` (headless background path). Surfaces the
+/// same `UNKNOWN_HOST` / `HOST_KEY_MISMATCH` / auth-failure errors as
+/// before. Includes the Phase 38 keepalive so headless handles also
+/// survive idle NAT timeouts.
+async fn connect_and_authenticate(
+    host: &str,
+    user: &str,
     port: u16,
-    key_path: Option<String>,
-    key_passphrase: Option<String>,
-    password: Option<String>,
+    key_path: Option<&str>,
+    key_passphrase: Option<&str>,
+    password: Option<&str>,
     accept_unknown_host: bool,
-    cols: u16,
-    rows: u16,
-    persistent: bool,
-    // Phase 23.F: when set, override the pane-id-derived tmux session
-    // name. Passed through from pane_connect when the picker UI chose
-    // a specific orphan session to attach to.
-    tmux_session_name: Option<String>,
-) -> Result<String, String> {
-    dlog(&format!(
-        "spawn_ssh: entry ws={} pane={} target={}@{}:{}",
-        workspace_id, pane_id, user, host, port
-    ));
-    // Phase 38: SSH-level keepalive every 30s. Without it, an idle
-    // connection's NAT/firewall mapping (typically 5-15 min) expires and
-    // the link silently dies. keepalive_max stays at the default 3 →
-    // ~90s dead-peer detection.
+) -> Result<SshHandshake, String> {
     let config = Arc::new(client::Config {
         keepalive_interval: Some(std::time::Duration::from_secs(30)),
         ..Default::default()
@@ -2383,10 +2399,10 @@ async fn spawn_ssh(
         tunnel_token: Some(token.clone()),
     };
 
-    dlog(&format!("spawn_ssh: client::connect to {} starting", target));
-    let connect_res = client::connect(config, (host.as_str(), port), sh).await;
+    dlog(&format!("ssh.connect: client::connect to {} starting", target));
+    let connect_res = client::connect(config, (host, port), sh).await;
     dlog(&format!(
-        "spawn_ssh: client::connect to {} returned (ok={})",
+        "ssh.connect: client::connect to {} returned (ok={})",
         target,
         connect_res.is_ok()
     ));
@@ -2411,20 +2427,61 @@ async fn spawn_ssh(
         }
     };
 
-    dlog("spawn_ssh: try_authenticate begin");
-    let auth_method = try_authenticate(
-        &mut handle,
-        &user,
-        key_path.as_deref(),
-        key_passphrase.as_deref(),
-        password.as_deref(),
-    )
-    .await?;
-    dlog(&format!("spawn_ssh: try_authenticate returned method={auth_method:?}"));
+    let auth_method = try_authenticate(&mut handle, user, key_path, key_passphrase, password).await?;
     let auth_method = match auth_method {
         Some(m) => m,
         None => return Err("authentication failed (agent, key, and password all failed)".into()),
     };
+
+    Ok(SshHandshake {
+        handle,
+        auth_method,
+        tunnel_token: token,
+    })
+}
+
+async fn spawn_ssh(
+    state: &AppState,
+    pane_id: String,
+    app: &AppHandle,
+    workspace_id: String,
+    host: String,
+    user: String,
+    port: u16,
+    key_path: Option<String>,
+    key_passphrase: Option<String>,
+    password: Option<String>,
+    accept_unknown_host: bool,
+    cols: u16,
+    rows: u16,
+    persistent: bool,
+    // Phase 23.F: when set, override the pane-id-derived tmux session
+    // name. Passed through from pane_connect when the picker UI chose
+    // a specific orphan session to attach to.
+    tmux_session_name: Option<String>,
+) -> Result<String, String> {
+    dlog(&format!(
+        "spawn_ssh: entry ws={} pane={} target={}@{}:{}",
+        workspace_id, pane_id, user, host, port
+    ));
+    // Phase 41: connect + host-key + auth now live in the shared
+    // `connect_and_authenticate` helper (includes the Phase 38 keepalive).
+    dlog("spawn_ssh: connect_and_authenticate begin");
+    let SshHandshake {
+        mut handle,
+        auth_method,
+        tunnel_token: token,
+    } = connect_and_authenticate(
+        &host,
+        &user,
+        port,
+        key_path.as_deref(),
+        key_passphrase.as_deref(),
+        password.as_deref(),
+        accept_unknown_host,
+    )
+    .await?;
+    dlog(&format!("spawn_ssh: authenticated method={auth_method:?}"));
 
     // Phase 32.B: offer to convert a password-auth connection to key
     // auth. Skipped when the user previously ticked "don't show again",
@@ -2785,7 +2842,7 @@ async fn spawn_ssh(
     state.sessions.lock().unwrap().insert(
         id.clone(),
         Session::Ssh(SshSession {
-            tx,
+            tx: Some(tx),
             handle: handle_for_state,
             workspace_id: workspace_id_for_state.clone(),
             tmux_session: tmux_name.clone(),
@@ -2866,7 +2923,7 @@ async fn spawn_ssh(
             ));
             let mut sessions = sessions_clone.lock().unwrap();
             if let Some(Session::Ssh(ssh)) = sessions.get_mut(&id_clone) {
-                let _ = ssh.tx.send(SshCmd::Data(script.into_bytes()));
+                let _ = ssh.try_send(SshCmd::Data(script.into_bytes()));
             }
         });
     }
@@ -2887,7 +2944,7 @@ pub(crate) fn kill_session_inner(s: &mut Session) {
             let _ = l.killer.kill();
         }
         Session::Ssh(ssh) => {
-            let _ = ssh.tx.send(SshCmd::Kill);
+            let _ = ssh.try_send(SshCmd::Kill);
         }
     }
 }
@@ -4525,6 +4582,94 @@ fn pane_set_annotation(
 
 // ─── Pane connect / disconnect ───────────────────────────────────────────────
 
+/// Phase 41: establish a background ("headless") SSH session for a
+/// workspace without opening a pane, so the tmux session picker and the
+/// remote file manager populate immediately on workspace select.
+///
+/// Idempotent — a no-op if any SSH session (headless or pane-backed)
+/// already serves the workspace. Only agent/key auth is attempted
+/// (`password: None`); password-mode workspaces are skipped silently with
+/// a dlog (no UI to prompt from here — they connect when the user opens a
+/// terminal pane). An unknown host key also skips silently rather than
+/// auto-accepting in the background.
+#[tauri::command]
+async fn workspace_ensure_connected(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<(), String> {
+    // Fast idempotency check before doing any network work.
+    if live_ssh_connection_for_workspace_pub(&state, &workspace_id).is_some() {
+        return Ok(());
+    }
+
+    // Resolve the workspace's canonical SSH target.
+    let conn = {
+        let file = state.workspaces.lock().unwrap();
+        file.workspaces
+            .iter()
+            .find(|w| w.id == workspace_id)
+            .and_then(|w| w.connection.clone())
+    };
+    let (host, user, port, key_path) = match conn {
+        Some(Connection::Ssh {
+            host,
+            user,
+            port,
+            key_path,
+        }) => (host, user, port, key_path),
+        // Local workspace or no connection — nothing to auto-connect.
+        _ => return Ok(()),
+    };
+
+    // agent/key only; never auto-accept an unknown host key in the background.
+    match connect_and_authenticate(&host, &user, port, key_path.as_deref(), None, None, false).await
+    {
+        Ok(SshHandshake {
+            handle,
+            auth_method,
+            ..
+        }) => {
+            let mut sessions = state.sessions.lock().unwrap();
+            // Re-check under the lock: a terminal pane may have connected
+            // while we were authenticating. If so, drop this spare handle.
+            let already = sessions
+                .values()
+                .any(|s| matches!(s, Session::Ssh(ssh) if ssh.workspace_id == workspace_id));
+            if already {
+                dlog(&format!(
+                    "workspace_ensure_connected: {workspace_id} connected by a pane mid-auth — dropping spare headless handle"
+                ));
+                return Ok(());
+            }
+            sessions.insert(
+                format!("__headless__{workspace_id}"),
+                Session::Ssh(SshSession {
+                    tx: None,
+                    handle: Arc::new(handle),
+                    workspace_id: workspace_id.clone(),
+                    tmux_session: None,
+                    host,
+                    user,
+                    port,
+                    key_path,
+                }),
+            );
+            dlog(&format!(
+                "workspace_ensure_connected: headless session up for {workspace_id} (method={auth_method:?})"
+            ));
+            Ok(())
+        }
+        Err(e) => {
+            // Most commonly: no key/agent → password-only, which we can't
+            // prompt for here. Skip silently; the terminal-pane path handles it.
+            dlog(&format!(
+                "workspace_ensure_connected: skipped for {workspace_id}: {e}"
+            ));
+            Ok(())
+        }
+    }
+}
+
 #[tauri::command]
 async fn pane_connect(
     state: State<'_, AppState>,
@@ -4732,7 +4877,7 @@ async fn pane_connect(
                             let _ = l.writer.flush();
                         }
                         Session::Ssh(ssh) => {
-                            let _ = ssh.tx.send(SshCmd::Data(script.into_bytes()));
+                            let _ = ssh.try_send(SshCmd::Data(script.into_bytes()));
                         }
                     }
                 }
@@ -5333,7 +5478,7 @@ async fn pane_disconnect(
                         let _ = l.writer.flush();
                     }
                     Session::Ssh(ssh) => {
-                        let _ = ssh.tx.send(SshCmd::Data(bytes));
+                        let _ = ssh.try_send(SshCmd::Data(bytes));
                     }
                 }
             }
@@ -5360,9 +5505,7 @@ pub(crate) fn write_to_session(state: &AppState, session_id: &str, data: &[u8]) 
             l.writer.flush().map_err(|e| e.to_string())?;
         }
         Session::Ssh(ssh) => {
-            ssh.tx
-                .send(SshCmd::Data(data.to_vec()))
-                .map_err(|e| e.to_string())?;
+            ssh.try_send(SshCmd::Data(data.to_vec()))?;
         }
     }
     Ok(())
@@ -5459,10 +5602,7 @@ fn pty_resize(
                 pixel_height: 0,
             })
             .map_err(|e| e.to_string()),
-        Session::Ssh(ssh) => ssh
-            .tx
-            .send(SshCmd::Resize(cols as u32, rows as u32))
-            .map_err(|e| e.to_string()),
+        Session::Ssh(ssh) => ssh.try_send(SshCmd::Resize(cols as u32, rows as u32)),
     }
 }
 
@@ -5682,6 +5822,7 @@ pub fn run() {
             workspace_split,
             workspace_close_pane,
             workspace_set_split_ratio,
+            workspace_ensure_connected,
             pane_connect,
             pane_disconnect,
             pane_kill_session,

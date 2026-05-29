@@ -249,6 +249,8 @@
   "settings.terminal.rtl.off.desc": "WebGL renderer، بدون إعادة ترتيب. بايتات العبرية تُعرض من اليسار إلى اليمين كما تُكتب.",
   "settings.terminal.use_winmux_tmux_config.label": "استخدام إعدادات tmux الخاصة بـ winmux (مستحسن)",
   "settings.terminal.use_winmux_tmux_config.hint": "ينشر ملف tmux.conf إلى ~/.winmux/tmux.conf بحيث يقوم تمرير العجلة بالتمرير في الذاكرة المؤقتة بدلاً من سجل الصدفة، buffer بحجم 50,000 سطر، دعم truecolour. أوقف للعودة إلى ~/.tmux.conf الخاص بك. يسري عند الاتصال التالي للوحة.",
+  "settings.autoConnect.label": "اتصال تلقائي عند تحديد بيئة العمل",
+  "settings.autoConnect.hint": "عند التفعيل، يؤدي الانتقال إلى بيئة عمل SSH إلى إنشاء اتصال في الخلفية بحيث تظهر جلسات tmux وملفاتك فورًا. عطّله لتأجيل الاتصال حتى فتح لوحة طرفية.",
 
   "ws_header.add_browser": "🌐 + متصفح",
   "ws_header.add_filemanager": "🗂 + ملفات",

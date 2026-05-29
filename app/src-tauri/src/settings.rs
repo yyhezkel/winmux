@@ -383,6 +383,14 @@ pub(crate) struct Settings {
     /// `#[serde(default)]` so older settings.json loads cleanly.
     #[serde(default)]
     pub ssh_key_offer_disabled: bool,
+    /// Phase 41. When true (default), activating an SSH workspace
+    /// establishes a background SSH session so the tmux session picker and
+    /// the remote file manager populate without the user opening a
+    /// terminal pane first. Disable to defer the connection until a pane
+    /// connects. `default = "default_true"` keeps pre-41 settings.json
+    /// backwards-compatible (missing field → true).
+    #[serde(default = "default_true")]
+    pub auto_connect_on_workspace_select: bool,
     /// Phase 39.B. One-time data migrations that have already run.
     #[serde(default)]
     pub migrations: MigrationFlags,
@@ -498,6 +506,7 @@ impl Default for Settings {
             claude: ClaudeOptions::default(),
             hooks_updates: HooksUpdates::default(),
             ssh_key_offer_disabled: false,
+            auto_connect_on_workspace_select: true,
             migrations: MigrationFlags::default(),
         }
     }
@@ -960,5 +969,21 @@ mod tests {
         let json = r##"{"version":1,"theme":{"preset":"x","accent":"#000","background":"#000","surface":"#000","border":"#000","text_primary":"#000","text_secondary":"#000","success":"#000","warning":"#000","error":"#000","ansi":{"black":"#000","red":"#000","green":"#000","yellow":"#000","blue":"#000","magenta":"#000","cyan":"#000","white":"#000","bright_black":"#000","bright_red":"#000","bright_green":"#000","bright_yellow":"#000","bright_blue":"#000","bright_magenta":"#000","bright_cyan":"#000","bright_white":"#000"}},"font":{"ui_family":"x","ui_size_pt":13,"terminal_family":"x","terminal_size_pt":13},"terminal":{"cursor_style":"bar","scrollback_lines":1000,"bidi_enabled":true,"allow_proposed_api":true},"hooks":{"enabled":true,"agents":[],"policy_preset":"default"},"notifications":{"toast_enabled":true,"sound_enabled":false},"updates":{"check_on_startup":true,"auto_download":false}}"##;
         let s: Settings = serde_json::from_str(json).unwrap();
         assert!(!s.migrations.phase_39_auto_port_forward_default_flipped);
+        // Phase 41: the same pre-41 JSON has no auto_connect field either —
+        // serde(default = "default_true") must fill it in as true.
+        assert!(
+            s.auto_connect_on_workspace_select,
+            "missing auto_connect_on_workspace_select must default to true"
+        );
+    }
+
+    #[test]
+    fn auto_connect_default_is_true_and_round_trips() {
+        assert!(Settings::default().auto_connect_on_workspace_select);
+        let mut s = Settings::default();
+        s.auto_connect_on_workspace_select = false;
+        let json = serde_json::to_string(&s).unwrap();
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert!(!back.auto_connect_on_workspace_select);
     }
 }

@@ -159,6 +159,9 @@ export interface Settings {
   shortcuts?: ShortcutsSettings;
   claude?: ClaudeSettings;
   hooks_updates?: HooksUpdatesSettings;
+  // Phase 41: auto-connect a background SSH session on workspace select.
+  // Backend defaults to true; always serialized.
+  auto_connect_on_workspace_select?: boolean;
 }
 
 export interface SummaryResult {

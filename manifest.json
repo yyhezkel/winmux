@@ -1,13 +1,13 @@
 {
-  "version": "0.2.4",
-  "released_at": "2026-05-28T07:20:07Z",
-  "notes_url": "https://github.com/yyhezkel/winmux/releases/tag/v0.2.4",
-  "msi_url": "https://github.com/yyhezkel/winmux/releases/download/v0.2.4/winmux_0.2.4_x64_en-US.msi",
-  "msi_sha256": "a053e93cf7afaa36d9d42ff53eaf784c11708d50ff7874b909953c02955fab00",
-  "msi_size": 8757248,
-  "nsis_url": "https://github.com/yyhezkel/winmux/releases/download/v0.2.4/winmux_0.2.4_x64-setup.exe",
-  "nsis_sha256": "fb5847d40ed093392bb40e500d8ac27706406352f953d900ce456b2c5352442e",
-  "nsis_size": 5916840,
+  "version": "0.2.5",
+  "released_at": "2026-05-29T04:55:58Z",
+  "notes_url": "https://github.com/yyhezkel/winmux/releases/tag/v0.2.5",
+  "msi_url": "https://github.com/yyhezkel/winmux/releases/download/v0.2.5/winmux_0.2.5_x64_en-US.msi",
+  "msi_sha256": "2cb4840161b3531ddc8412537fdb0defe9cff832b0315d07436d9e7b591dbec2",
+  "msi_size": 8781824,
+  "nsis_url": "https://github.com/yyhezkel/winmux/releases/download/v0.2.5/winmux_0.2.5_x64-setup.exe",
+  "nsis_sha256": "da66e06948d178a544b04e4fb469dfe4c4654a954a7a2cdfdddb32e4b767c9b9",
+  "nsis_size": 5920780,
   "min_supported_version": "0.1.0",
   "hooks": {
     "claude-code": {

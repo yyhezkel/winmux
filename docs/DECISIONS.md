@@ -58,6 +58,15 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Decided
 
+### 2026-05-31 — Pipe listener pool (8 slots) + handler lifetime telemetry (Phase 44, `c65b0c5`)
+- **Context:** Yossi reported sporadic `tunnel: bridge error … os error 231` on v0.2.5 — much less frequent than the pre-39.A storm, but still present. Diagnosis traced it to the rpc_server's accept loop: Phase 39.A raised `max_instances` to 254 and pre-created the "next" listener, but at any single moment there was still only ONE listener in accept state. Two clients racing for it within microseconds raced for that single slot; the loser got `ERROR_PIPE_NOT_AVAILABLE` (231). `max_instances(254)` is the OS upper bound on instances, NOT concurrent accept-ready listeners.
+- **Decision:**
+  - `LISTENER_POOL_SIZE = 8` simultaneous listeners, each in its own tokio task that loops `make_listener → connect() → tokio::spawn(handle_client_with_telemetry(...)) → recreate`. The handler runs on a separate task so the slot recreates its listener immediately — never blocked on handler duration. A burst of up to 8 concurrent clients serves instantly; the 9th+ still falls into tunnel.rs's bounded backoff (rare). max_instances(254) ceiling and the Phase 39.C `catch_unwind` are unchanged.
+  - Handler-lifetime telemetry: each connection now dlogs `handler {id} START` and `handler {id} END {ms} ms` with a 5-hex sequential connection id (atomic counter, no new deps). Future support tickets surface slow handlers immediately.
+- **Test:** `pool_serves_concurrent_clients_without_busy` — spins up an 8-slot mini-pool on a unique pipe name and fires 4 simultaneous `ClientOptions::new().open()` calls; asserts all succeed (no 231). 39 Rust tests pass total.
+- **Spec deviation:** `handle_client` returns `()` and exits on either EOF or read error with no top-level distinction, so the END dlog logs duration only (no result-kind classification). Reframing as `Result<_, String>` would touch every break path without changing observability.
+- **Outcome / Commit:** `c65b0c5` (debug build green, BUILD_EXIT 0, app.exe ~30.9 MB). Single backend file changed; no version bump — batches into v0.2.6.
+
 ### 2026-05-31 — i18n mop-up: 7 untranslated leftovers + 27 hardcoded strings (Phase 43, `2204226`)
 - **Context:** v0.2.5 audit found 100% key parity across en/he/ar/ru (431 keys each), but 7 he/ar/ru values still matched English (untranslated leftovers — Buffer, Toasts, Shell, Host, three tmux_picker keys) and 27 user-visible strings in SettingsModal/CreateWorkspaceModal/App/Sidebar were hardcoded in JSX, bypassing `t()`.
 - **Decision:**

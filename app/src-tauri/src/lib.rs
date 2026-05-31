@@ -2556,41 +2556,14 @@ async fn spawn_ssh(
         }
     }
 
-    // Phase 6.3: ask server to forward a port back to us. With port=0 the server
-    // picks a free one and returns it. Forwarded channels arrive in our Handler's
-    // `server_channel_open_forwarded_tcpip` and get bridged to the local pipe.
-    let remote_port = match handle.tcpip_forward("127.0.0.1", 0).await {
-        Ok(p) => {
-            dlog(&format!("tunnel: tcpip_forward got remote port {p}"));
-            p
-        }
-        Err(e) => {
-            dlog(&format!("tunnel: tcpip_forward failed: {e}"));
-            tracing::warn!("tcpip_forward failed: {e}");
-            0
-        }
-    };
-
-    // Phase 39: record winmux's own reverse-tunnel remote port so the
-    // auto-port watcher skips it (it's an HMAC endpoint, not a web app).
-    if remote_port != 0 {
-        state
-            .internal_reverse_tunnel_remote_ports
-            .lock()
-            .unwrap()
-            .entry(workspace_id.clone())
-            .or_default()
-            .insert(remote_port as u16);
-        // Phase 47: stash the tunnel token so a later
-        // `workspace_ensure_port_watcher` (driven by activating a
-        // workspace whose detection toggle is on) can spawn the watcher
-        // without having to rebuild the SSH session.
-        state
-            .workspace_tunnel_tokens
-            .lock()
-            .unwrap()
-            .insert(workspace_id.clone(), token.clone());
-    }
+    // Phase 6.3 → 47.A: ask server to forward a port back to us. With
+    // port=0 the server picks a free one and returns it. Forwarded
+    // channels arrive in our Handler's `server_channel_open_forwarded_tcpip`
+    // and get bridged to the local pipe. Phase 47.A factored this into
+    // `setup_workspace_reverse_tunnel` so the headless connect path can
+    // call the same setup — that helper also fires `spawn_port_watcher`.
+    let remote_port =
+        setup_workspace_reverse_tunnel(state, &mut handle, &workspace_id, &token).await;
 
     if remote_port != 0 {
         // Best-effort: write the env file so the CLI can dial back even if sshd
@@ -2614,16 +2587,9 @@ async fn spawn_ssh(
         }
     }
 
-    // Phase 36 (#2.2) → 47: launch the remote listening-port watcher.
-    // Now delegated to `spawn_port_watcher` so the same path is reachable
-    // from `workspace_ensure_port_watcher` (which fires when activating
-    // a workspace whose detection toggle is on, even if no pane is open
-    // YET — provided the SSH session has set up its tunnel already).
-    // Dedup via state.port_watchers — multiple panes don't double-spawn.
-    if remote_port != 0 {
-        let _ =
-            spawn_port_watcher(state, &handle, &workspace_id, remote_port as u16, &token).await;
-    }
+    // Phase 47.A: the watcher launch moved into
+    // `setup_workspace_reverse_tunnel` above so the headless connect
+    // path gets it too. Dedup via state.port_watchers still applies.
 
     let mut channel = handle
         .channel_open_session()
@@ -2926,6 +2892,69 @@ pub(crate) fn kill_session_inner(s: &mut Session) {
 // Find an SSH handle for the workspace by walking its connected terminal panes.
 // Returns the first one found, or None if no terminal pane in the workspace
 // currently has an active SSH session.
+/// Phase 47.A: workspace-level reverse-tunnel setup, factored out of
+/// `spawn_ssh` so the headless `workspace_ensure_connected` path can
+/// call it too. Without this, a workspace whose toggle is on but with
+/// no terminal pane open never got a tunnel — so the watcher couldn't
+/// dial back, and PortsWindow stayed "stuck searching."
+///
+/// Does the workspace-level slice ONLY: `tcpip_forward` (kernel picks
+/// a free remote port), records the port + token in `AppState`, and
+/// fires `spawn_port_watcher` (deduped). Pane-specific bits — the
+/// env-file write that takes `&pane_id`, and the `WINMUX_PANE_ID`
+/// `set_env` on the shell channel — stay in `spawn_ssh`.
+///
+/// Returns the assigned remote port, or 0 if `tcpip_forward` failed
+/// (which still leaves the SSH handle usable for tmux-list / file
+/// manager — just no detection).
+async fn setup_workspace_reverse_tunnel(
+    state: &AppState,
+    handle: &mut client::Handle<SshClient>,
+    workspace_id: &str,
+    token: &Arc<String>,
+) -> u16 {
+    let remote_port = match handle.tcpip_forward("127.0.0.1", 0).await {
+        Ok(p) => {
+            dlog(&format!(
+                "setup_workspace_reverse_tunnel[{workspace_id}]: tcpip_forward got remote port {p}"
+            ));
+            p as u16
+        }
+        Err(e) => {
+            dlog(&format!(
+                "setup_workspace_reverse_tunnel[{workspace_id}]: tcpip_forward failed: {e}"
+            ));
+            tracing::warn!("tcpip_forward[{workspace_id}] failed: {e}");
+            return 0;
+        }
+    };
+    if remote_port == 0 {
+        return 0;
+    }
+    // Phase 39: record winmux's own reverse-tunnel remote port so the
+    // auto-port watcher skips it (it's an HMAC endpoint).
+    state
+        .internal_reverse_tunnel_remote_ports
+        .lock()
+        .unwrap()
+        .entry(workspace_id.to_string())
+        .or_default()
+        .insert(remote_port);
+    // Phase 47: stash the tunnel token so a later
+    // workspace_ensure_port_watcher can spawn the watcher without
+    // having to rebuild the SSH session.
+    state
+        .workspace_tunnel_tokens
+        .lock()
+        .unwrap()
+        .insert(workspace_id.to_string(), token.clone());
+    // Phase 47.A: best-effort watcher launch as part of tunnel setup.
+    // spawn_port_watcher dedups via port_watchers so calling here AND
+    // from try_ensure_port_watcher later is safe.
+    let _ = spawn_port_watcher(state, handle, workspace_id, remote_port, token).await;
+    remote_port
+}
+
 /// Phase 47: spawn the remote `winmux port-watch` for a workspace.
 /// Deduplicated via `state.port_watchers` — calling twice in a row is
 /// a no-op the second time. Stores the spawned task's JoinHandle in
@@ -4864,20 +4893,51 @@ async fn workspace_ensure_connected(
     // agent/key only; never auto-accept an unknown host key in the background.
     match connect_and_authenticate(&host, &user, port, key_path.as_deref(), None, None, false).await
     {
+        // Phase 47.A: capture tunnel_token (Phase 41 dropped it) and
+        // keep `handle` mutable — `tcpip_forward` inside
+        // `setup_workspace_reverse_tunnel` needs &mut, so the tunnel
+        // setup must happen BEFORE the handle is moved into Arc and
+        // stored in the session.
         Ok(SshHandshake {
-            handle,
+            mut handle,
             auth_method,
-            ..
+            tunnel_token,
         }) => {
+            // Quick idempotency pre-check (a pane may have already
+            // connected). If so, drop the spare handle now.
+            {
+                let sessions = state.sessions.lock().unwrap();
+                let already = sessions
+                    .values()
+                    .any(|s| matches!(s, Session::Ssh(ssh) if ssh.workspace_id == workspace_id));
+                if already {
+                    dlog(&format!(
+                        "workspace_ensure_connected: {workspace_id} connected by a pane mid-auth — dropping spare headless handle"
+                    ));
+                    return Ok(());
+                }
+            }
+            // Phase 47.A: bootstrap the reverse tunnel before Arc-wrapping
+            // so port detection works without a terminal pane. Best-effort:
+            // failure leaves the session usable for tmux-list / file
+            // manager, just no detection (matches pre-47.A behavior).
+            let _ = setup_workspace_reverse_tunnel(
+                &state,
+                &mut handle,
+                &workspace_id,
+                &tunnel_token,
+            )
+            .await;
+            // Re-check + insert under the lock. If a pane raced in during
+            // tunnel setup, drop the spare (its handle Drop tears the
+            // tunnel down with it).
             let mut sessions = state.sessions.lock().unwrap();
-            // Re-check under the lock: a terminal pane may have connected
-            // while we were authenticating. If so, drop this spare handle.
             let already = sessions
                 .values()
                 .any(|s| matches!(s, Session::Ssh(ssh) if ssh.workspace_id == workspace_id));
             if already {
                 dlog(&format!(
-                    "workspace_ensure_connected: {workspace_id} connected by a pane mid-auth — dropping spare headless handle"
+                    "workspace_ensure_connected: {workspace_id} connected by a pane mid-tunnel-setup — dropping spare headless handle"
                 ));
                 return Ok(());
             }
@@ -4894,6 +4954,7 @@ async fn workspace_ensure_connected(
                     key_path,
                 }),
             );
+            drop(sessions);
             dlog(&format!(
                 "workspace_ensure_connected: headless session up for {workspace_id} (method={auth_method:?})"
             ));

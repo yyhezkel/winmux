@@ -310,6 +310,69 @@ function App() {
     if (next) setActivePaneId(next);
   };
 
+  // Phase 48-E: find the pane that's the nearest neighbor of `paneId`
+  // in a given direction. Walks the layout tree: collects the path
+  // from root to the pane (leaf-first), then finds the closest
+  // ancestor whose split direction matches and where our subtree sits
+  // on the side opposite the target direction. Returns the
+  // first/leftmost/topmost leaf of the sibling subtree on the target
+  // side. Returns null if no neighbor exists in that direction.
+  const findDirectionalNeighbor = (
+    root: LayoutNode,
+    paneId: string,
+    dir: "left" | "right" | "up" | "down",
+  ): string | null => {
+    const path: { node: LayoutNode & { kind: "split" }; side: "first" | "second" }[] = [];
+    const walk = (n: LayoutNode): boolean => {
+      if (n.kind === "pane") return n.pane_id === paneId;
+      if (walk(n.first)) {
+        path.push({ node: n, side: "first" });
+        return true;
+      }
+      if (walk(n.second)) {
+        path.push({ node: n, side: "second" });
+        return true;
+      }
+      return false;
+    };
+    if (!walk(root)) return null;
+    const needSplitDir = dir === "left" || dir === "right" ? "horizontal" : "vertical";
+    // To go RIGHT/DOWN we need to be on the FIRST side of a matching
+    // split; the sibling on the SECOND side holds our neighbor. Reverse
+    // for LEFT/UP. Then descend into the sibling: for LEFT/UP, take
+    // SECOND repeatedly (rightmost/bottommost leaf); for RIGHT/DOWN,
+    // take FIRST repeatedly (leftmost/topmost leaf).
+    const seekSide = dir === "right" || dir === "down" ? "first" : "second";
+    const descendSide = dir === "right" || dir === "down" ? "first" : "second";
+    for (const step of path) {
+      if (step.node.direction === needSplitDir && step.side === seekSide) {
+        let cur: LayoutNode = step.side === "first" ? step.node.second : step.node.first;
+        while (cur.kind === "split") {
+          cur = (cur as Extract<LayoutNode, { kind: "split" }>)[descendSide];
+        }
+        return cur.pane_id;
+      }
+    }
+    return null;
+  };
+
+  // Phase 48-E: Ctrl+Alt+Arrow — if there's a pane in that direction,
+  // focus it; otherwise split the current pane in that direction.
+  // Left/Right map to horizontal splits, Up/Down to vertical.
+  const splitOrMove = (dir: "left" | "right" | "up" | "down") => {
+    const ws = activeWs();
+    const cur = activePaneId();
+    if (!ws?.layout || !cur) return;
+    const neighbor = findDirectionalNeighbor(ws.layout, cur, dir);
+    if (neighbor) {
+      setActivePaneId(neighbor);
+      return;
+    }
+    const splitDir: SplitDirection =
+      dir === "left" || dir === "right" ? "horizontal" : "vertical";
+    void splitPane(cur, splitDir);
+  };
+
   // Phase 35 (#1.3): the command-palette catalog. Each command reuses
   // the same handler the existing UI calls. `enabled` hides commands
   // that need context they don't have (no active workspace / pane).
@@ -972,6 +1035,22 @@ function App() {
       e.preventDefault();
       void summarizeActivePane();
       return;
+    }
+    // Phase 48-E: Ctrl+Alt+Arrow — split-or-move. Focus the neighbor
+    // in that direction if one exists, else split the current pane in
+    // that direction.
+    if (e.ctrlKey && e.altKey && !e.shiftKey) {
+      const dirKey: "left" | "right" | "up" | "down" | null =
+        e.key === "ArrowLeft" ? "left"
+        : e.key === "ArrowRight" ? "right"
+        : e.key === "ArrowUp" ? "up"
+        : e.key === "ArrowDown" ? "down"
+        : null;
+      if (dirKey) {
+        e.preventDefault();
+        splitOrMove(dirKey);
+        return;
+      }
     }
     // Pane-relative legacy shortcuts (split / close) still on
     // Ctrl+Shift+D/E/W until we expand the table.

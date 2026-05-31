@@ -450,5 +450,8 @@
   "ports.window.row.openAction": "Открыть",
   "ports.window.row.stopAction": "Остановить",
   "ports.window.empty.detectionOn": "Обнаружение включено. Ожидание удалённых портов…",
-  "ports.window.error.unreachable": "Перенаправление открыто, но localhost:{local} недоступен. Отключено. ({msg})"
+  "ports.window.error.unreachable": "Перенаправление открыто, но localhost:{local} недоступен. Отключено. ({msg})",
+  "settings.autoDestroy.label": "Автоудаление пустых сред через (дней)",
+  "settings.autoDestroy.hint": "Диапазон 1-90. Пусто — отключено. Среда удаляется только если в ней нет панелей И последняя активация была более N дней назад. Молча — при запуске.",
+  "settings.autoDestroy.disabled": "отключено"
 }

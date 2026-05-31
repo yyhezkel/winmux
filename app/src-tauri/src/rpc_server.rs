@@ -280,6 +280,7 @@ async fn dispatch(
                 teardown_command: input.teardown_command,
                 env: input.env.unwrap_or_default(),
                 auto_port_forward: false,
+                last_active_at: 0,
             };
             let cloned = ws.clone();
             {

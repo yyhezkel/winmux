@@ -1047,6 +1047,7 @@ fn finalize_workspace(
         teardown_command: None,
         env: Vec::new(),
         auto_port_forward: false,
+        last_active_at: 0,
     };
     let id_out = ws.id.clone();
     {

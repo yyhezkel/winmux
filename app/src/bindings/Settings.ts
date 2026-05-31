@@ -42,6 +42,15 @@ ssh_key_offer_disabled: boolean,
  */
 auto_connect_on_workspace_select: boolean, 
 /**
+ * Phase 49-C: optional auto-delete of empty + stale workspaces at
+ * startup. `None` (default) = disabled. Range 1-90 days enforced
+ * by the UI; the backend sweep treats any non-zero positive value
+ * as a valid TTL. A workspace is "empty" for sweep purposes when
+ * it has no live SSH sessions and its `last_active_at` is older
+ * than the TTL.
+ */
+auto_destroy_empty_workspaces_days: number | null, 
+/**
  * Phase 39.B. One-time data migrations that have already run.
  */
 migrations: MigrationFlags, };

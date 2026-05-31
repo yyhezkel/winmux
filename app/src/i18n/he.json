@@ -450,5 +450,8 @@
   "ports.window.row.openAction": "פתח בדפדפן",
   "ports.window.row.stopAction": "סגור",
   "ports.window.empty.detectionOn": "זיהוי פעיל. ממתין לפורטים מרוחקים…",
-  "ports.window.error.unreachable": "הפורוורד נפתח אך localhost:{local} לא נגיש. הסתיים. ({msg})"
+  "ports.window.error.unreachable": "הפורוורד נפתח אך localhost:{local} לא נגיש. הסתיים. ({msg})",
+  "settings.autoDestroy.label": "מחק אוטומטית סביבות עבודה ריקות אחרי (ימים)",
+  "settings.autoDestroy.hint": "טווח 1-90. ריק לכיבוי. סביבת עבודה נמחקת רק אם אין בה panes וההפעלה האחרונה שלה הייתה לפני יותר מ-N ימים. שקט — קורה בהפעלת האפליקציה.",
+  "settings.autoDestroy.disabled": "כבוי"
 }

@@ -437,6 +437,25 @@ export function SettingsModal(p: Props) {
                   <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
                     {t("settings.autoConnect.hint")}
                   </p>
+                  {/* Phase 49-C: auto-destroy empty workspaces after N days. */}
+                  <label>
+                    <span>{t("settings.autoDestroy.label")}</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="90"
+                      placeholder={t("settings.autoDestroy.disabled")}
+                      value={p.settings.auto_destroy_empty_workspaces_days ?? ""}
+                      onInput={(e) => {
+                        const raw = e.currentTarget.value.trim();
+                        const n = raw === "" ? null : Math.min(90, Math.max(1, parseInt(raw, 10) || 0)) || null;
+                        update("auto_destroy_empty_workspaces_days", n ?? undefined);
+                      }}
+                    />
+                  </label>
+                  <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
+                    {t("settings.autoDestroy.hint")}
+                  </p>
                 </section>
                 <section>
                   <h4>{t("settings.terminal.rtl.title")}</h4>

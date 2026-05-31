@@ -491,6 +491,14 @@ pub(crate) struct Workspace {
     // false, so older workspaces.json without the field load as OFF.
     #[serde(default)]
     pub(crate) auto_port_forward: bool,
+    // Phase 49-C: unix-seconds timestamp of the last user activation.
+    // Used by the optional auto-destroy sweep at startup. Updated in
+    // workspace_set_active. `#[serde(default)]` so existing
+    // workspaces.json files load with 0 (treated as "unknown / very
+    // old" by the sweep — never deletes on the first run, only after
+    // the workspace has been activated at least once this session).
+    #[serde(default)]
+    pub(crate) last_active_at: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -3553,6 +3561,7 @@ fn workspace_create(
         teardown_command: input.teardown_command,
         env: input.env.unwrap_or_default(),
         auto_port_forward: false,
+        last_active_at: 0,
     };
     {
         let mut file = state.workspaces.lock().unwrap();
@@ -4196,7 +4205,18 @@ fn workspace_set_active(
 ) -> Result<WorkspacesFile, String> {
     {
         let mut file = state.workspaces.lock().unwrap();
-        file.active_workspace_id = workspace_id;
+        file.active_workspace_id = workspace_id.clone();
+        // Phase 49-C: stamp the activation timestamp on the workspace
+        // being activated so the auto-destroy sweep can age it correctly.
+        if let Some(id) = workspace_id.as_ref() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == *id) {
+                ws.last_active_at = now;
+            }
+        }
     }
     persist(&state)?;
     Ok(state.workspaces.lock().unwrap().clone())
@@ -6173,6 +6193,61 @@ pub fn run() {
                     }
                 }
             }
+            // Phase 49-C: auto-destroy sweep. Opt-in via
+            // settings.auto_destroy_empty_workspaces_days. A workspace is
+            // a candidate when it has no panes (empty layout) AND its
+            // last_active_at is older than the configured TTL. Sessions
+            // aren't checked — startup runs BEFORE any spawn_ssh, so
+            // there's nothing live yet. last_active_at = 0 (never
+            // activated since the field was added) is grace-treated as
+            // "recent" so the first run after upgrade doesn't nuke
+            // never-touched workspaces. Silent — the user opted in via
+            // the setting; no toast.
+            {
+                let load_ok = *state.load_state.lock().unwrap() == Some(LoadState::Loaded);
+                let ttl_days = state
+                    .settings
+                    .lock()
+                    .unwrap()
+                    .auto_destroy_empty_workspaces_days;
+                if load_ok {
+                    if let Some(days) = ttl_days {
+                        if days > 0 {
+                            let ttl_secs = (days as u64) * 86_400;
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            let removed = {
+                                let mut f = state.workspaces.lock().unwrap();
+                                let before = f.workspaces.len();
+                                f.workspaces.retain(|w| {
+                                    let stale = w.last_active_at > 0
+                                        && now.saturating_sub(w.last_active_at) > ttl_secs;
+                                    let empty = w.layout.is_none();
+                                    if stale && empty {
+                                        dlog(&format!(
+                                            "auto-destroy: removing workspace {} ({}) — empty + last_active {} days ago",
+                                            w.id,
+                                            w.name,
+                                            now.saturating_sub(w.last_active_at) / 86_400
+                                        ));
+                                        false
+                                    } else {
+                                        true
+                                    }
+                                });
+                                before - f.workspaces.len()
+                            };
+                            if removed > 0 {
+                                if let Err(e) = persist(&state) {
+                                    dlog(&format!("auto-destroy: save failed: {e}"));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             // Phase 9.B: spawn the update checker if enabled. Fully best-effort —
             // never blocks startup; failures (offline, manifest missing, repo
             // private) just log to debug.log and emit nothing.
@@ -6427,6 +6502,7 @@ mod migration_tests {
             teardown_command: None,
             env: Vec::new(),
             auto_port_forward: apf,
+            last_active_at: 0,
         }
     }
 

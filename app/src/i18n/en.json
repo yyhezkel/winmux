@@ -450,5 +450,8 @@
   "ports.window.row.openAction": "Open",
   "ports.window.row.stopAction": "Stop",
   "ports.window.empty.detectionOn": "Detection on. Waiting for remote ports…",
-  "ports.window.error.unreachable": "Forward opened but localhost:{local} isn't reachable. Tunnel torn down. ({msg})"
+  "ports.window.error.unreachable": "Forward opened but localhost:{local} isn't reachable. Tunnel torn down. ({msg})",
+  "settings.autoDestroy.label": "Auto-delete empty workspaces after (days)",
+  "settings.autoDestroy.hint": "Range 1-90. Blank to disable. A workspace is deleted only if it has no panes AND was last activated more than N days ago. Silent — happens at startup.",
+  "settings.autoDestroy.disabled": "disabled"
 }

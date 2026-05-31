@@ -450,5 +450,8 @@
   "ports.window.row.openAction": "فتح",
   "ports.window.row.stopAction": "إيقاف",
   "ports.window.empty.detectionOn": "الاكتشاف مفعّل. في انتظار المنافذ البعيدة…",
-  "ports.window.error.unreachable": "تم فتح إعادة التوجيه ولكن localhost:{local} غير قابل للوصول. تم الإغلاق. ({msg})"
+  "ports.window.error.unreachable": "تم فتح إعادة التوجيه ولكن localhost:{local} غير قابل للوصول. تم الإغلاق. ({msg})",
+  "settings.autoDestroy.label": "حذف بيئات العمل الفارغة تلقائيًا بعد (أيام)",
+  "settings.autoDestroy.hint": "النطاق 1-90. اتركه فارغًا للتعطيل. تُحذف بيئة العمل فقط إذا لم تكن بها لوحات وكان آخر تنشيط لها قبل أكثر من N أيام. صامت — يحدث عند بدء التشغيل.",
+  "settings.autoDestroy.disabled": "معطل"
 }

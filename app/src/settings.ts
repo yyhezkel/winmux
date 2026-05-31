@@ -162,6 +162,9 @@ export interface Settings {
   // Phase 41: auto-connect a background SSH session on workspace select.
   // Backend defaults to true; always serialized.
   auto_connect_on_workspace_select?: boolean;
+  // Phase 49-C: optional auto-delete of empty workspaces older than N
+  // days. null/undefined = disabled. Range 1-90 enforced by the UI.
+  auto_destroy_empty_workspaces_days?: number | null;
 }
 
 export interface SummaryResult {

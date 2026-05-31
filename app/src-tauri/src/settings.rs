@@ -391,6 +391,14 @@ pub(crate) struct Settings {
     /// backwards-compatible (missing field → true).
     #[serde(default = "default_true")]
     pub auto_connect_on_workspace_select: bool,
+    /// Phase 49-C: optional auto-delete of empty + stale workspaces at
+    /// startup. `None` (default) = disabled. Range 1-90 days enforced
+    /// by the UI; the backend sweep treats any non-zero positive value
+    /// as a valid TTL. A workspace is "empty" for sweep purposes when
+    /// it has no live SSH sessions and its `last_active_at` is older
+    /// than the TTL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_destroy_empty_workspaces_days: Option<u32>,
     /// Phase 39.B. One-time data migrations that have already run.
     #[serde(default)]
     pub migrations: MigrationFlags,
@@ -507,6 +515,7 @@ impl Default for Settings {
             hooks_updates: HooksUpdates::default(),
             ssh_key_offer_disabled: false,
             auto_connect_on_workspace_select: true,
+            auto_destroy_empty_workspaces_days: None,
             migrations: MigrationFlags::default(),
         }
     }

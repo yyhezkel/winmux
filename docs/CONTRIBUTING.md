@@ -153,6 +153,44 @@ chore: bump russh to 0.50 (when released)
 The body should explain *why* a change was made when it isn't obvious; the
 diff explains *what*.
 
+## Postmortem-style fix notes (commit body + release notes)
+
+When a commit fixes a real-world bug — anything where a user hit broken
+behavior — write the body in postmortem shape. Same for the bullet
+that lands in a GitHub release. Four parts:
+
+- **SYMPTOM:** what the user saw. Specific. Quote the error string if
+  there was one.
+- **DISCOVERY:** how you found the cause. The grep, the dlog line, the
+  reproduction that pinpointed it.
+- **ROOT CAUSE:** the actual reason. Not "X failed" but *why* X failed
+  in this scenario when it works elsewhere.
+- **FIX:** what changed and why that specifically addresses the root
+  cause. If a workaround would've been simpler, say why you didn't.
+
+Example (modeled on Phase 39.D):
+
+> **SYMPTOM:** `sftp create …winmux-linux-x64: Failure: Failure` on every
+> reconnect after the Phase 39 CLI rebuild changed the bundled binary's
+> hash. **DISCOVERY:** OpenSSH server logs showed `ETXTBSY` returned to
+> the SFTP layer; matched against the leftover `port-watch` process
+> from the pre-39.C pipe crash still running the old binary.
+> **ROOT CAUSE:** Linux returns `ETXTBSY` when truncating a currently-
+> executing binary; the SFTP server maps it to the generic
+> `SSH_FX_FAILURE` and renders it as the unhelpful "Failure" string.
+> **FIX:** Upload to `<name>.tmp`, then shell `mv -f` (rename atomically
+> swaps the dir-entry to a new inode — the running process keeps its
+> own inode). Also `pkill -f winmux-linux-x64` first to free orphaned
+> watchers; belt-and-suspenders.
+
+A future-you reading the log a year from now should understand the
+incident in ~30 seconds without leaving the commit. The discipline is
+the point — it costs ~5 extra minutes per bug-fix commit and pays back
+the next time something similar bites.
+
+For features and refactors, the regular "why + what" body is fine. The
+postmortem shape only applies to fixes.
+
 ## Phase numbering
 
 Phases are stable in the commit history. Reading `git log --oneline | grep '^...... Phase'`

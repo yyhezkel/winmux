@@ -453,5 +453,11 @@
   "ports.window.error.unreachable": "Forward opened but localhost:{local} isn't reachable. Tunnel torn down. ({msg})",
   "settings.autoDestroy.label": "Auto-delete empty workspaces after (days)",
   "settings.autoDestroy.hint": "Range 1-90. Blank to disable. A workspace is deleted only if it has no panes AND was last activated more than N days ago. Silent — happens at startup.",
-  "settings.autoDestroy.disabled": "disabled"
+  "settings.autoDestroy.disabled": "disabled",
+  "ws.worktree.branchName": "New branch name",
+  "ws.worktree.baseBranch": "Base branch",
+  "ws.worktree.create": "Create worktree",
+  "ws.worktree.failed": "git worktree add failed",
+  "ws.worktree.alreadyOn": "This workspace is anchored to a worktree at",
+  "ws.worktree.hint": "Creates a fresh git worktree (sibling directory) and switches the workspace's cwd to it. Future panes spawn there. The original repo is untouched."
 }

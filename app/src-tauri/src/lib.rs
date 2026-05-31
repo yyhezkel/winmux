@@ -499,6 +499,13 @@ pub(crate) struct Workspace {
     // the workspace has been activated at least once this session).
     #[serde(default)]
     pub(crate) last_active_at: u64,
+    // Phase 49-B: if Some, this workspace is anchored to a git worktree
+    // path created by `workspace_create_worktree`. The UI shows a 🌿
+    // chip on the workspace tab. The path is what `cd`s into when a
+    // pane spawns; it sits alongside (not inside) the original repo so
+    // it never collides with the user's working tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) git_worktree: Option<PathBuf>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -3562,6 +3569,7 @@ fn workspace_create(
         env: input.env.unwrap_or_default(),
         auto_port_forward: false,
         last_active_at: 0,
+        git_worktree: None,
     };
     {
         let mut file = state.workspaces.lock().unwrap();
@@ -4219,6 +4227,100 @@ fn workspace_set_active(
         }
     }
     persist(&state)?;
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
+// Phase 49-B: anchor a workspace to a fresh git worktree.
+//
+// Runs `git worktree add <root>/<workspace_id>-<branch> -b <branch>
+// <base>` from the workspace's cwd, then rewrites the workspace's cwd
+// (and stamps `git_worktree`) so future panes spawn inside the worktree.
+// Only valid for Local workspaces with an existing cwd that is itself
+// a git repo. <root> defaults to `<config_dir>/worktrees`.
+//
+// Branch and base names are passed as standalone args to Command::new
+// (no shell concatenation, per Absolute Rule #3). Branch name is also
+// validated against an allow-list to keep it filesystem-safe.
+#[tauri::command]
+fn workspace_create_worktree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+    branch_name: String,
+    base_branch: String,
+) -> Result<WorkspacesFile, String> {
+    // Sanitize the branch name for filesystem use. git itself allows
+    // a wider set, but we own the directory naming so we constrain it.
+    let safe_branch: String = branch_name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/' { c } else { '-' })
+        .collect();
+    if safe_branch.is_empty() || safe_branch.starts_with('-') || safe_branch.contains("..") {
+        return Err("invalid branch name".to_string());
+    }
+    if base_branch.trim().is_empty() {
+        return Err("base branch is required".to_string());
+    }
+    // Snapshot the source cwd while holding the lock briefly.
+    let src_cwd = {
+        let file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| "workspace not found".to_string())?;
+        match ws.connection {
+            Some(Connection::Local { .. }) | None => {}
+            _ => return Err("worktrees only apply to local workspaces".to_string()),
+        }
+        ws.cwd
+            .clone()
+            .ok_or_else(|| "workspace has no cwd to anchor a worktree to".to_string())?
+    };
+    let src_path = PathBuf::from(&src_cwd);
+    if !src_path.join(".git").exists() {
+        // .git can be a dir (regular repo) or file (submodule / worktree).
+        return Err(format!("{src_cwd} is not a git repository"));
+    }
+    // Replace forward slashes in the branch with hyphens for the
+    // directory name so feature/foo doesn't create nested dirs.
+    let dir_branch = safe_branch.replace('/', "-");
+    let root = config_dir()?.join("worktrees");
+    std::fs::create_dir_all(&root).map_err(|e| format!("create worktrees root: {e}"))?;
+    let target = root.join(format!("{workspace_id}-{dir_branch}"));
+    if target.exists() {
+        return Err(format!("target already exists: {}", target.display()));
+    }
+    let out = std::process::Command::new("git")
+        .arg("worktree")
+        .arg("add")
+        .arg(&target)
+        .arg("-b")
+        .arg(&branch_name)
+        .arg(&base_branch)
+        .current_dir(&src_path)
+        .output()
+        .map_err(|e| format!("spawn git: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("git worktree add failed: {}", stderr.trim()));
+    }
+    // Stamp the workspace and re-anchor its cwd to the new worktree.
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+            ws.cwd = Some(target.to_string_lossy().into_owned());
+            ws.git_worktree = Some(target.clone());
+        }
+    }
+    persist(&state)?;
+    dlog(&format!(
+        "[worktree] created {} for ws={} branch={}",
+        target.display(),
+        workspace_id,
+        branch_name,
+    ));
+    let _ = app.emit("workspaces:changed", ());
     Ok(state.workspaces.lock().unwrap().clone())
 }
 
@@ -6291,6 +6393,7 @@ pub fn run() {
             ssh_key_generate_and_install,
             workspace_delete,
             workspace_set_active,
+            workspace_create_worktree,
             workspace_split,
             workspace_close_pane,
             workspace_set_split_ratio,
@@ -6503,6 +6606,7 @@ mod migration_tests {
             env: Vec::new(),
             auto_port_forward: apf,
             last_active_at: 0,
+            git_worktree: None,
         }
     }
 

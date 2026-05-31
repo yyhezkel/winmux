@@ -281,6 +281,7 @@ async fn dispatch(
                 env: input.env.unwrap_or_default(),
                 auto_port_forward: false,
                 last_active_at: 0,
+                git_worktree: None,
             };
             let cloned = ws.clone();
             {

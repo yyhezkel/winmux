@@ -103,6 +103,13 @@ export function CreateWorkspaceModal(p: Props) {
   const [authMode, setAuthMode] = createSignal<"key" | "password">("key");
   // Phase 36 (#2.2): auto port-forward toggle (edit mode only).
   const [autoPortForward, setAutoPortForward] = createSignal(true);
+  // Phase 49-B: worktree creator (edit mode + local + cwd is git repo).
+  // wtBusy guards against double-clicks while git is running; wtErr
+  // surfaces the backend's git stderr verbatim so the user can react.
+  const [wtBranch, setWtBranch] = createSignal("");
+  const [wtBase, setWtBase] = createSignal("main");
+  const [wtBusy, setWtBusy] = createSignal(false);
+  const [wtErr, setWtErr] = createSignal<string | null>(null);
   const [color, setColor] = createSignal("#7aa2f7");
   const [emoji, setEmoji] = createSignal("");
   // Phase 30: editable hex value for the custom-color text input. Kept
@@ -224,6 +231,30 @@ export function CreateWorkspaceModal(p: Props) {
       workspaceId: p.editing.id,
       enabled,
     }).catch((e) => console.error("workspace_set_auto_port_forward failed", e));
+  };
+
+  // Phase 49-B: spawn `git worktree add` from the workspace's cwd. The
+  // backend re-anchors the workspace's cwd to the new worktree path and
+  // sets git_worktree, so new panes will spawn inside it.
+  const onCreateWorktree = async () => {
+    if (!p.editing) return;
+    const branch = wtBranch().trim();
+    const base = wtBase().trim();
+    if (!branch || !base) return;
+    setWtBusy(true);
+    setWtErr(null);
+    try {
+      await invoke("workspace_create_worktree", {
+        workspaceId: p.editing.id,
+        branchName: branch,
+        baseBranch: base,
+      });
+      setWtBranch("");
+    } catch (e) {
+      setWtErr(String(e));
+    } finally {
+      setWtBusy(false);
+    }
   };
 
   // Lazy-load the wizard inputs whenever the modal opens. Cheap calls and
@@ -587,6 +618,57 @@ export function CreateWorkspaceModal(p: Props) {
               <span>{t("ws.autoPortForward.label")}</span>
             </label>
             <p class="settings-hint ws-autoport-hint">{t("ws.autoPortForward.hint")}</p>
+          </Show>
+
+          {/* Phase 49-B: worktree creator. Shown only in edit mode for
+              local workspaces. If a worktree already exists for this
+              workspace, the path is shown instead. */}
+          <Show when={isEdit() && type() === "local"}>
+            <div class="ws-worktree-block">
+              <Show
+                when={!p.editing?.git_worktree}
+                fallback={
+                  <p class="settings-hint">
+                    🌿 {t("ws.worktree.alreadyOn")}{" "}
+                    <code>{p.editing?.git_worktree}</code>
+                  </p>
+                }
+              >
+                <label>
+                  <span>{t("ws.worktree.branchName")}</span>
+                  <input
+                    type="text"
+                    value={wtBranch()}
+                    placeholder="feature/my-thing"
+                    onInput={(e) => setWtBranch(e.currentTarget.value)}
+                    disabled={wtBusy()}
+                  />
+                </label>
+                <label>
+                  <span>{t("ws.worktree.baseBranch")}</span>
+                  <input
+                    type="text"
+                    value={wtBase()}
+                    placeholder="main"
+                    onInput={(e) => setWtBase(e.currentTarget.value)}
+                    disabled={wtBusy()}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void onCreateWorktree()}
+                  disabled={wtBusy() || !wtBranch().trim() || !wtBase().trim()}
+                >
+                  {wtBusy() ? "…" : t("ws.worktree.create")}
+                </button>
+                <Show when={wtErr()}>
+                  <p class="settings-hint" style="color:#e88">
+                    {t("ws.worktree.failed")}: {wtErr()}
+                  </p>
+                </Show>
+                <p class="settings-hint">{t("ws.worktree.hint")}</p>
+              </Show>
+            </div>
           </Show>
 
           <Show when={!isEdit()}>

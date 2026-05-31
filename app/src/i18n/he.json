@@ -453,5 +453,11 @@
   "ports.window.error.unreachable": "הפורוורד נפתח אך localhost:{local} לא נגיש. הסתיים. ({msg})",
   "settings.autoDestroy.label": "מחק אוטומטית סביבות עבודה ריקות אחרי (ימים)",
   "settings.autoDestroy.hint": "טווח 1-90. ריק לכיבוי. סביבת עבודה נמחקת רק אם אין בה panes וההפעלה האחרונה שלה הייתה לפני יותר מ-N ימים. שקט — קורה בהפעלת האפליקציה.",
-  "settings.autoDestroy.disabled": "כבוי"
+  "settings.autoDestroy.disabled": "כבוי",
+  "ws.worktree.branchName": "שם branch חדש",
+  "ws.worktree.baseBranch": "Branch בסיס",
+  "ws.worktree.create": "צור worktree",
+  "ws.worktree.failed": "git worktree add נכשל",
+  "ws.worktree.alreadyOn": "סביבת העבודה הזו מעוגנת ל-worktree ב-",
+  "ws.worktree.hint": "יוצר git worktree טרי (תיקיית-אחות) ומחליף את ה-cwd של סביבת העבודה אליו. panes חדשים ייפתחו שם. הריפו המקורי לא נגוע."
 }

@@ -453,5 +453,11 @@
   "ports.window.error.unreachable": "تم فتح إعادة التوجيه ولكن localhost:{local} غير قابل للوصول. تم الإغلاق. ({msg})",
   "settings.autoDestroy.label": "حذف بيئات العمل الفارغة تلقائيًا بعد (أيام)",
   "settings.autoDestroy.hint": "النطاق 1-90. اتركه فارغًا للتعطيل. تُحذف بيئة العمل فقط إذا لم تكن بها لوحات وكان آخر تنشيط لها قبل أكثر من N أيام. صامت — يحدث عند بدء التشغيل.",
-  "settings.autoDestroy.disabled": "معطل"
+  "settings.autoDestroy.disabled": "معطل",
+  "ws.worktree.branchName": "اسم فرع جديد",
+  "ws.worktree.baseBranch": "الفرع الأساسي",
+  "ws.worktree.create": "إنشاء worktree",
+  "ws.worktree.failed": "فشل git worktree add",
+  "ws.worktree.alreadyOn": "بيئة العمل هذه مرتبطة بـ worktree في",
+  "ws.worktree.hint": "ينشئ git worktree جديدًا (مجلد شقيق) ويبدل cwd الخاص ببيئة العمل إليه. تنشأ اللوحات الجديدة هناك. لا يُمس المستودع الأصلي."
 }

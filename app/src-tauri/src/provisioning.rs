@@ -1048,6 +1048,7 @@ fn finalize_workspace(
         env: Vec::new(),
         auto_port_forward: false,
         last_active_at: 0,
+        git_worktree: None,
     };
     let id_out = ws.id.clone();
     {

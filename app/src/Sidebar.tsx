@@ -114,6 +114,11 @@ export function Sidebar(p: Props) {
   <Show when={w.emoji}>{w.emoji} </Show>
   <TechText text={w.name} />
 </span>
+              {/* Phase 49-B: 🌿 chip when this workspace is anchored
+                  to a git worktree. Path goes in the tooltip. */}
+              <Show when={w.git_worktree}>
+                <span class="ws-worktree-chip" title={w.git_worktree!}>🌿</span>
+              </Show>
               <WorkspaceBadge w={w} />
               {/* Phase 36.A: inline port-forward badge. Click opens the
                   browser (1 forward) or surfaces the workspace's Ports

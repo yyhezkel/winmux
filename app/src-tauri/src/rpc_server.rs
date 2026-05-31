@@ -60,63 +60,84 @@ fn make_listener(name: &str) -> Result<NamedPipeServer, String> {
     }
 }
 
+// Phase 44: pool of LISTENER_POOL_SIZE concurrent listeners always in
+// accept state. Phase 39.A only ever had ONE listener listening at a
+// time (it pre-created the NEXT before spawning the handler, but still
+// only one at any instant), so two clients racing for the slot within
+// microseconds raced and one got ERROR_PIPE_NOT_AVAILABLE (231). A pool
+// of 8 absorbs the bursts seen in practice (port.opened + a hook event
+// arriving together); the 9th+ falls back to tunnel.rs's bounded
+// backoff. max_instances(254) ceiling unchanged. Each slot owns its
+// loop; handlers run on a separate task so the slot recreates its
+// listener immediately, not after the handler completes.
+const LISTENER_POOL_SIZE: usize = 8;
+
 pub async fn run(state: AppState, app: AppHandle) {
     let name = pipe_name();
-    tracing::info!("rpc: listening on {}", name);
+    tracing::info!(
+        "rpc: listening on {} (pool of {} listeners)",
+        name,
+        LISTENER_POOL_SIZE
+    );
+    spawn_listener_pool(name, LISTENER_POOL_SIZE, state, app);
+}
 
-    // Phase 39.A: keep a listening instance ready at ALL times. We
-    // pre-create the NEXT instance before spawning the handler for the
-    // current connection — so there's never the brief 1-listener gap
-    // (between `.connect()` returning and the next `.create()`) where a
-    // racing client would hit 231.
-    let mut listener = match make_listener(&name) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("rpc: create pipe failed: {e}");
-            return;
-        }
-    };
-    loop {
-        if let Err(e) = listener.connect().await {
-            tracing::error!("rpc: connect failed: {e}");
-            // Recreate and keep going.
-            match make_listener(&name) {
-                Ok(s) => listener = s,
-                Err(e2) => {
-                    tracing::error!("rpc: recreate pipe failed: {e2}");
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    match make_listener(&name) {
-                        Ok(s) => listener = s,
-                        Err(e3) => {
-                            tracing::error!("rpc: recreate pipe failed twice: {e3}");
-                            return;
-                        }
+fn spawn_listener_pool(name: String, size: usize, state: AppState, app: AppHandle) {
+    for slot in 0..size {
+        let name = name.clone();
+        let state = state.clone();
+        let app = app.clone();
+        tokio::spawn(async move {
+            loop {
+                let listener = match make_listener(&name) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        crate::dlog(&format!(
+                            "rpc_server: pool slot {slot} make_listener failed: {e} — retrying in 500ms"
+                        ));
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        continue;
+                    }
+                };
+                match listener.connect().await {
+                    Ok(()) => {
+                        // Hand off on a separate task so this slot can
+                        // recreate its listener immediately, never blocked
+                        // on handler duration.
+                        let state2 = state.clone();
+                        let app2 = app.clone();
+                        tokio::spawn(handle_client_with_telemetry(listener, state2, app2));
+                    }
+                    Err(e) => {
+                        crate::dlog(&format!(
+                            "rpc_server: pool slot {slot} connect failed: {e}"
+                        ));
                     }
                 }
             }
-            continue;
-        }
-        // Hand the connected instance to the handler and immediately
-        // open a fresh listener for the next client.
-        let conn = listener;
-        listener = match make_listener(&name) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!("rpc: create next pipe failed: {e}");
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                match make_listener(&name) {
-                    Ok(s) => s,
-                    Err(e2) => {
-                        tracing::error!("rpc: create next pipe failed twice: {e2}");
-                        return;
-                    }
-                }
-            }
-        };
-        let state2 = state.clone();
-        let app2 = app.clone();
-        tokio::spawn(handle_client(conn, state2, app2));
+        });
     }
+}
+
+// Phase 44: wrap the handler with start/end + elapsed-ms telemetry so
+// slow handlers surface in debug.log without needing a profiler. The
+// handler itself is unchanged — it loops over JSON-RPC lines and exits
+// on EOF or read error, which we treat uniformly as "ended".
+async fn handle_client_with_telemetry(
+    stream: NamedPipeServer,
+    state: AppState,
+    app: AppHandle,
+) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static HANDLER_SEQ: AtomicU64 = AtomicU64::new(0);
+    let conn_id = format!("{:05x}", HANDLER_SEQ.fetch_add(1, Ordering::Relaxed));
+    let start = std::time::Instant::now();
+    crate::dlog(&format!("rpc_server: handler {conn_id} START"));
+    handle_client(stream, state, app).await;
+    let elapsed_ms = start.elapsed().as_millis();
+    crate::dlog(&format!(
+        "rpc_server: handler {conn_id} END {elapsed_ms} ms"
+    ));
 }
 
 async fn handle_client(stream: NamedPipeServer, state: AppState, app: AppHandle) {
@@ -2012,5 +2033,71 @@ mod tests {
         // (proves max_instances > 1 took effect).
         let second = make_listener(&name);
         assert!(second.is_ok(), "second instance: {:?}", second.err());
+    }
+
+    // Phase 44: a small pool of listeners serves multiple concurrent
+    // clients without ERROR_PIPE_NOT_AVAILABLE (231). The pre-39.A and
+    // Phase 39.A code both kept only ONE listener in accept state, so a
+    // burst of N>1 simultaneous client opens would race and the loser
+    // would get 231. With POOL_SIZE listeners simultaneously in accept
+    // state, up to POOL_SIZE concurrent opens succeed immediately.
+    #[tokio::test]
+    async fn pool_serves_concurrent_clients_without_busy() {
+        const POOL_SIZE: usize = 8;
+        const CONCURRENT_CLIENTS: usize = 4;
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let name = format!(r"\\.\pipe\winmux-test-44-pool-{n}");
+
+        // Mini-pool mirroring spawn_listener_pool's accept loop, but
+        // without the full handler (a no-op task takes the connection so
+        // the slot can recreate its listener immediately).
+        for _slot in 0..POOL_SIZE {
+            let name = name.clone();
+            tokio::spawn(async move {
+                loop {
+                    let listener = match super::make_listener(&name) {
+                        Ok(l) => l,
+                        Err(_) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                            continue;
+                        }
+                    };
+                    if listener.connect().await.is_ok() {
+                        tokio::spawn(async move {
+                            // Hold briefly so the client's open is fully
+                            // acknowledged, then drop.
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                            drop(listener);
+                        });
+                    }
+                }
+            });
+        }
+
+        // Let the pool come up.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Fire CONCURRENT_CLIENTS pipe opens at once; all must succeed.
+        let handles: Vec<_> = (0..CONCURRENT_CLIENTS)
+            .map(|i| {
+                let name = name.clone();
+                tokio::spawn(async move {
+                    let r = tokio::net::windows::named_pipe::ClientOptions::new().open(&name);
+                    (i, r)
+                })
+            })
+            .collect();
+
+        for h in handles {
+            let (i, r) = h.await.expect("client task panicked");
+            assert!(
+                r.is_ok(),
+                "client {i} expected Ok, got {:?} (231 = pool exhausted)",
+                r.as_ref().err().map(|e| e.raw_os_error())
+            );
+        }
     }
 }

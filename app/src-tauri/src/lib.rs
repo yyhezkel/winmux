@@ -241,6 +241,15 @@ pub(crate) struct AppState {
     // disconnects.
     pub(crate) detected_ports:
         Arc<Mutex<HashMap<String, HashMap<u16, (String, String)>>>>,
+    // Phase 47: cancellable handles to running port-watcher tasks per
+    // workspace. .abort() kills the task → drops the SSH exec channel →
+    // remote port-watch process exits. Toggling detection off uses this.
+    pub(crate) port_watcher_tasks: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+    // Phase 47: the WINMUX_TUNNEL_TOKEN baked into a workspace's live SSH
+    // handler — needed to start a watcher AFTER the initial spawn_ssh has
+    // already done auth + tunnel setup. Inserted by spawn_ssh; absent
+    // means "no pane has connected yet, watcher cannot dial back."
+    pub(crate) workspace_tunnel_tokens: Arc<Mutex<HashMap<String, Arc<String>>>>,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -2572,6 +2581,15 @@ async fn spawn_ssh(
             .entry(workspace_id.clone())
             .or_default()
             .insert(remote_port as u16);
+        // Phase 47: stash the tunnel token so a later
+        // `workspace_ensure_port_watcher` (driven by activating a
+        // workspace whose detection toggle is on) can spawn the watcher
+        // without having to rebuild the SSH session.
+        state
+            .workspace_tunnel_tokens
+            .lock()
+            .unwrap()
+            .insert(workspace_id.clone(), token.clone());
     }
 
     if remote_port != 0 {
@@ -2596,69 +2614,15 @@ async fn spawn_ssh(
         }
     }
 
-    // Phase 36 (#2.2): launch the remote listening-port watcher, once
-    // per workspace (deduped via state.port_watchers so multiple panes
-    // don't spawn duplicates). It scans /proc/net/tcp and reports ports
-    // back over the tunnel; the port.opened / port.closed dispatch arms
-    // open + tear down local forwards. The watcher process is tied to
-    // this exec channel — it dies when the SSH session does. We still
-    // launch even if the workspace toggle is off; the dispatch arms
-    // no-op in that case (cheaper than a remote on/off control channel).
+    // Phase 36 (#2.2) → 47: launch the remote listening-port watcher.
+    // Now delegated to `spawn_port_watcher` so the same path is reachable
+    // from `workspace_ensure_port_watcher` (which fires when activating
+    // a workspace whose detection toggle is on, even if no pane is open
+    // YET — provided the SSH session has set up its tunnel already).
+    // Dedup via state.port_watchers — multiple panes don't double-spawn.
     if remote_port != 0 {
-        let should_launch = {
-            let mut set = state.port_watchers.lock().unwrap();
-            if set.contains(&workspace_id) {
-                false
-            } else {
-                set.insert(workspace_id.clone());
-                true
-            }
-        };
-        if should_launch {
-            match handle.channel_open_session().await {
-                Ok(mut wchan) => {
-                    let socket_addr = format!("127.0.0.1:{}", remote_port);
-                    let _ = wchan.set_env(false, "WINMUX_SOCKET_ADDR", socket_addr).await;
-                    let _ = wchan
-                        .set_env(false, "WINMUX_TUNNEL_TOKEN", token.as_str().to_string())
-                        .await;
-                    // Exec channels don't source the rc files that add
-                    // ~/.winmux/bin to PATH, so use the explicit path.
-                    let cmd = format!(
-                        "\"$HOME/.winmux/bin/winmux\" port-watch --workspace {}",
-                        shell_quote(&workspace_id)
-                    );
-                    match wchan.exec(true, cmd.as_str()).await {
-                        Ok(()) => {
-                            let ws_guard = workspace_id.clone();
-                            let watchers = state.port_watchers.clone();
-                            tokio::spawn(async move {
-                                loop {
-                                    match wchan.wait().await {
-                                        Some(ChannelMsg::Eof)
-                                        | Some(ChannelMsg::Close)
-                                        | None => break,
-                                        _ => {}
-                                    }
-                                }
-                                watchers.lock().unwrap().remove(&ws_guard);
-                                dlog(&format!(
-                                    "port-watch[{ws_guard}]: channel closed, watcher slot freed"
-                                ));
-                            });
-                        }
-                        Err(e) => {
-                            dlog(&format!("port-watch: exec failed: {e}"));
-                            state.port_watchers.lock().unwrap().remove(&workspace_id);
-                        }
-                    }
-                }
-                Err(e) => {
-                    dlog(&format!("port-watch: channel_open_session failed: {e}"));
-                    state.port_watchers.lock().unwrap().remove(&workspace_id);
-                }
-            }
-        }
+        let _ =
+            spawn_port_watcher(state, &handle, &workspace_id, remote_port as u16, &token).await;
     }
 
     let mut channel = handle
@@ -2962,6 +2926,108 @@ pub(crate) fn kill_session_inner(s: &mut Session) {
 // Find an SSH handle for the workspace by walking its connected terminal panes.
 // Returns the first one found, or None if no terminal pane in the workspace
 // currently has an active SSH session.
+/// Phase 47: spawn the remote `winmux port-watch` for a workspace.
+/// Deduplicated via `state.port_watchers` — calling twice in a row is
+/// a no-op the second time. Stores the spawned task's JoinHandle in
+/// `state.port_watcher_tasks` so toggling detection off can `.abort()`
+/// it. Returns Err on channel/exec failure; on success the task
+/// detaches and the watcher streams events back through the reverse
+/// tunnel (dispatched by `port.opened` / `port.closed` in rpc_server).
+async fn spawn_port_watcher(
+    state: &AppState,
+    handle: &client::Handle<SshClient>,
+    workspace_id: &str,
+    remote_port: u16,
+    token: &Arc<String>,
+) -> Result<(), String> {
+    // Dedup: if a watcher's already running for this workspace, no-op.
+    {
+        let mut set = state.port_watchers.lock().unwrap();
+        if set.contains(workspace_id) {
+            return Ok(());
+        }
+        set.insert(workspace_id.to_string());
+    }
+    let mut wchan = match handle.channel_open_session().await {
+        Ok(c) => c,
+        Err(e) => {
+            dlog(&format!("port-watch[{workspace_id}]: channel_open_session failed: {e}"));
+            state.port_watchers.lock().unwrap().remove(workspace_id);
+            return Err(format!("channel_open: {e}"));
+        }
+    };
+    let socket_addr = format!("127.0.0.1:{}", remote_port);
+    let _ = wchan.set_env(false, "WINMUX_SOCKET_ADDR", socket_addr).await;
+    let _ = wchan
+        .set_env(false, "WINMUX_TUNNEL_TOKEN", token.as_str().to_string())
+        .await;
+    // Exec channels don't source the rc files that add ~/.winmux/bin to PATH,
+    // so use the explicit path.
+    let cmd = format!(
+        "\"$HOME/.winmux/bin/winmux\" port-watch --workspace {}",
+        shell_quote(workspace_id)
+    );
+    if let Err(e) = wchan.exec(true, cmd.as_str()).await {
+        dlog(&format!("port-watch[{workspace_id}]: exec failed: {e}"));
+        state.port_watchers.lock().unwrap().remove(workspace_id);
+        return Err(format!("exec failed: {e}"));
+    }
+    let ws_guard = workspace_id.to_string();
+    let watchers = state.port_watchers.clone();
+    let tasks = state.port_watcher_tasks.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            match wchan.wait().await {
+                Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+                _ => {}
+            }
+        }
+        watchers.lock().unwrap().remove(&ws_guard);
+        tasks.lock().unwrap().remove(&ws_guard);
+        dlog(&format!(
+            "port-watch[{ws_guard}]: channel closed, watcher slot freed"
+        ));
+    });
+    state
+        .port_watcher_tasks
+        .lock()
+        .unwrap()
+        .insert(workspace_id.to_string(), task);
+    dlog(&format!(
+        "port-watch[{workspace_id}]: launched (remote_port={remote_port})"
+    ));
+    Ok(())
+}
+
+/// Phase 47: abort the watcher task + clear the workspace's detected
+/// ports, and tell the FE to wipe its list. Idempotent — safe to call
+/// when no watcher is running.
+fn clear_workspace_detection(state: &AppState, app: &AppHandle, workspace_id: &str) {
+    let aborted = {
+        let mut tasks = state.port_watcher_tasks.lock().unwrap();
+        tasks.remove(workspace_id).map(|h| {
+            h.abort();
+            true
+        })
+    };
+    if aborted.is_some() {
+        state.port_watchers.lock().unwrap().remove(workspace_id);
+    }
+    state
+        .detected_ports
+        .lock()
+        .unwrap()
+        .remove(workspace_id);
+    let _ = app.emit(
+        "port-detection-cleared",
+        serde_json::json!({ "workspace_id": workspace_id }),
+    );
+    dlog(&format!(
+        "port-watch[{workspace_id}]: detection cleared (was_running={})",
+        aborted.is_some()
+    ));
+}
+
 fn find_ssh_handle_for_workspace(
     state: &AppState,
     workspace_id: &str,
@@ -3811,11 +3877,102 @@ async fn workspace_set_auto_port_forward(
         updated = ws.clone();
     }
     if !enabled {
+        // Phase 47: turning detection off should ACTUALLY stop the
+        // watcher (not just suppress events) and wipe what we've seen.
+        clear_workspace_detection(&state, &app, &workspace_id);
         close_workspace_forwards(&state.forwards, &workspace_id);
+    } else {
+        // Phase 47: turning detection on while a session is already up
+        // should start the watcher immediately. Best-effort: no-op if
+        // no pane-backed SSH session has set up a tunnel yet.
+        try_ensure_port_watcher(&state, &workspace_id).await;
     }
     persist(&state)?;
     let _ = app.emit("workspaces:changed", ());
     Ok(updated)
+}
+
+/// Phase 47: try to start the workspace's port-watcher. Best-effort —
+/// returns silently (with a dlog) when no pane-backed SSH session has
+/// set up a reverse tunnel yet (headless connect from Phase 41 doesn't
+/// open one). spawn_ssh's own watcher launch will pick up later when a
+/// terminal pane connects. Used by the activation effect, the toggle,
+/// and the explicit `workspace_ensure_port_watcher` command.
+async fn try_ensure_port_watcher(state: &AppState, workspace_id: &str) {
+    let handle = match find_ssh_handle_for_workspace(state, workspace_id) {
+        Some(h) => h,
+        None => {
+            dlog(&format!(
+                "ensure_port_watcher[{workspace_id}]: no live SSH session — skip"
+            ));
+            return;
+        }
+    };
+    let remote_port = {
+        let m = state.internal_reverse_tunnel_remote_ports.lock().unwrap();
+        m.get(workspace_id).and_then(|s| s.iter().next().copied())
+    };
+    let token = {
+        let m = state.workspace_tunnel_tokens.lock().unwrap();
+        m.get(workspace_id).cloned()
+    };
+    match (remote_port, token) {
+        (Some(rp), Some(tok)) => {
+            let _ = spawn_port_watcher(state, &handle, workspace_id, rp, &tok).await;
+        }
+        _ => {
+            dlog(&format!(
+                "ensure_port_watcher[{workspace_id}]: session has no reverse tunnel yet — open a terminal pane to bootstrap"
+            ));
+        }
+    }
+}
+
+/// Phase 47: explicit command — frontend calls this on workspace
+/// activation (when detection is on) to make sure a watcher is up.
+/// Idempotent via spawn_port_watcher's dedup. Always Ok.
+#[tauri::command]
+async fn workspace_ensure_port_watcher(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<(), String> {
+    try_ensure_port_watcher(&state, &workspace_id).await;
+    Ok(())
+}
+
+/// Phase 47: serializable shape for the snapshot endpoint.
+#[derive(Clone, Serialize)]
+pub(crate) struct DetectedPortInfo {
+    pub remote_port: u16,
+    pub addr: String,
+    pub family: String,
+}
+
+/// Phase 47: snapshot the workspace's current detected_ports. Frontend
+/// calls this on workspace switch to populate PortsWindow from state —
+/// events alone aren't enough because they only fire while the FE was
+/// already listening with the right workspace_id.
+#[tauri::command]
+async fn list_detected_ports(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<DetectedPortInfo>, String> {
+    let m = state.detected_ports.lock().unwrap();
+    let mut out: Vec<DetectedPortInfo> = m
+        .get(&workspace_id)
+        .map(|ports| {
+            ports
+                .iter()
+                .map(|(port, (addr, family))| DetectedPortInfo {
+                    remote_port: *port,
+                    addr: addr.clone(),
+                    family: family.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort_by_key(|d| d.remote_port);
+    Ok(out)
 }
 
 // Phase 36 (#2.2): manually stop one forward (Ports panel "Stop
@@ -5896,6 +6053,8 @@ pub fn run() {
             workspace_set_auto_port_forward,
             port_forward_stop,
             forward_port_start,
+            workspace_ensure_port_watcher,
+            list_detected_ports,
             log_dir_path,
             read_log_tail,
             pane_set_identity,

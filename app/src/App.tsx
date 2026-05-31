@@ -436,6 +436,50 @@ function App() {
     );
   });
 
+  // Phase 47: on workspace activation, if it's SSH and detection is on,
+  // make sure the remote port-watcher is running for this workspace AND
+  // replay the current detected_ports snapshot from the backend. Events
+  // alone don't fill the FE signal when the workspace was previously
+  // active in another session — the detected_ports state may exist on
+  // the backend without the FE having seen its events.
+  let lastPortsEnsuredWs: string | null = null;
+  createEffect(() => {
+    const ws = activeWs();
+    if (!ws) {
+      lastPortsEnsuredWs = null;
+      return;
+    }
+    // Re-fire when the workspace itself changes OR its toggle flips on
+    // (so flipping the toggle "live" also kicks the watcher).
+    const key = `${ws.id}:${ws.auto_port_forward ? 1 : 0}`;
+    if (key === lastPortsEnsuredWs) return;
+    lastPortsEnsuredWs = key;
+    if (ws.connection?.type !== "ssh") return;
+    if (!ws.auto_port_forward) return;
+    const wsId = ws.id;
+    void invoke("workspace_ensure_port_watcher", { workspaceId: wsId }).catch((e) =>
+      console.warn("workspace_ensure_port_watcher failed", e),
+    );
+    void invoke<{ remote_port: number; addr: string; family: string }[]>(
+      "list_detected_ports",
+      { workspaceId: wsId },
+    )
+      .then((snapshot) => {
+        setDetectedPorts((prev) => {
+          // Replace this workspace's entries with the backend snapshot.
+          const other = prev.filter((p) => p.workspace_id !== wsId);
+          const mine = snapshot.map((d) => ({
+            workspace_id: wsId,
+            remote_port: d.remote_port,
+            addr: d.addr,
+            family: d.family,
+          }));
+          return [...other, ...mine];
+        });
+      })
+      .catch((e) => console.warn("list_detected_ports failed", e));
+  });
+
   const reconcilePanes = (file: WorkspacesFile) => {
     const live = new Set<string>();
     for (const ws of file.workspaces) {
@@ -1114,6 +1158,17 @@ function App() {
             prev.filter(
               (p) => !(p.workspace_id === e.payload.workspace_id && p.remote_port === e.payload.remote_port),
             ),
+          );
+        },
+      ),
+    );
+    // Phase 47: detection toggled off → wipe the workspace's entries.
+    unlistens.push(
+      await listen<{ workspace_id: string }>(
+        "port-detection-cleared",
+        (e) => {
+          setDetectedPorts((prev) =>
+            prev.filter((p) => p.workspace_id !== e.payload.workspace_id),
           );
         },
       ),

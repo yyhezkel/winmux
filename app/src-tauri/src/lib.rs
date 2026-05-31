@@ -5882,6 +5882,83 @@ fn feed_decide(
     decide_feed(&state, &app, &request_id, &decision)
 }
 
+// Phase 48-C: build the /doctor diagnostic snapshot. Process-cheap
+// signals only — no shell-outs, no FS scans beyond a small log tail.
+// Reused by the `doctor` tauri command, the `doctor` RPC method, and
+// the `winmux doctor` CLI subcommand.
+pub(crate) fn build_doctor_snapshot(state: &AppState) -> serde_json::Value {
+    use std::sync::atomic::Ordering;
+    let workspaces = state.workspaces.lock().unwrap().workspaces.clone();
+    let workspace_count = workspaces.len();
+    // Count which workspaces have a live SSH session (any pane or the
+    // headless Phase 41 entry counts).
+    let sessions = state.sessions.lock().unwrap();
+    let mut ssh_connected = std::collections::HashSet::new();
+    let mut pty_count = 0usize;
+    for s in sessions.values() {
+        pty_count += 1;
+        if let Session::Ssh(ssh) = s {
+            ssh_connected.insert(ssh.workspace_id.clone());
+        }
+    }
+    let ssh_connected_count = ssh_connected.len();
+    drop(sessions);
+
+    let bundled_cli_sha256: Option<String> = (|| {
+        let manifest = std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("remote-manifest.json"),
+        )
+        .ok()?;
+        // Trivial parse: just find the first sha256 string.
+        let m: serde_json::Value = serde_json::from_str(manifest.trim_start_matches('\u{FEFF}'))
+            .ok()?;
+        m.get("x86_64-linux")?
+            .get("sha256")?
+            .as_str()
+            .map(|s| s.to_string())
+    })();
+
+    // Last few lines from debug.log filtered to ERROR/WARN. Best-effort.
+    let recent_errors: Vec<String> = (|| -> Option<Vec<String>> {
+        let path = config_dir_pub().ok()?.join("debug.log");
+        let s = std::fs::read_to_string(&path).ok()?;
+        let mut out: Vec<String> = s
+            .lines()
+            .rev()
+            .filter(|l| l.contains("ERROR") || l.contains("WARN"))
+            .take(10)
+            .map(|s| s.to_string())
+            .collect();
+        out.reverse();
+        Some(out)
+    })()
+    .unwrap_or_default();
+
+    serde_json::json!({
+        "winmux_version": env!("CARGO_PKG_VERSION"),
+        "platform": std::env::consts::OS,
+        "workspaces": {
+            "total": workspace_count,
+            "ssh_connected": ssh_connected_count,
+        },
+        "pty_sessions": pty_count,
+        "rpc_server": {
+            "pipe_name": rpc_server::pipe_name(),
+            "listener_pool_size": 8,
+            "handlers_served": rpc_server::HANDLER_SEQ.load(Ordering::Relaxed),
+        },
+        "bundled_linux_cli_sha256": bundled_cli_sha256,
+        "recent_errors": recent_errors,
+    })
+}
+
+#[tauri::command]
+fn doctor(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    Ok(build_doctor_snapshot(&state))
+}
+
 // Phase 48-D: frontend stall instrumentation. The FE drives a 100ms
 // heartbeat and a longtask PerformanceObserver; when either spots
 // >threshold gaps, it calls this to record them in debug.log with a
@@ -6169,6 +6246,7 @@ pub fn run() {
             pty_write,
             pty_resize,
             diag_log,
+            doctor,
             notifications_list,
             notifications_clear,
             pane_status_get,

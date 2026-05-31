@@ -49,6 +49,16 @@ export function SettingsModal(p: Props) {
       console.warn("read_log_tail failed", e);
     }
   };
+  // Phase 48-C: /doctor snapshot — paste-friendly JSON for bug reports.
+  const [doctorJson, setDoctorJson] = createSignal<string>("");
+  const runDoctor = async () => {
+    try {
+      const snapshot = await invoke<unknown>("doctor");
+      setDoctorJson(JSON.stringify(snapshot, null, 2));
+    } catch (e) {
+      setDoctorJson(`error: ${String(e)}`);
+    }
+  };
 
   // Debounced save: live-preview every change locally, persist 500ms after
   // the last edit so a slider drag doesn't write 60 files/sec.
@@ -684,6 +694,14 @@ export function SettingsModal(p: Props) {
                       {logCopied() ? t("settings.updates.logs.copied") : t("settings.updates.logs.copyPath")}
                     </button>
                   </div>
+                  {/* Phase 48-C: /doctor diagnostic snapshot for bug reports. */}
+                  <hr class="modal-sep" />
+                  <div class="settings-logs-actions">
+                    <button onClick={() => void runDoctor()}>Run Doctor</button>
+                  </div>
+                  <Show when={doctorJson()}>
+                    <pre class="settings-logs-viewer">{doctorJson()}</pre>
+                  </Show>
                 </section>
               </Show>
 

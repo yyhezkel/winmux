@@ -123,13 +123,18 @@ fn spawn_listener_pool(name: String, size: usize, state: AppState, app: AppHandl
 // slow handlers surface in debug.log without needing a profiler. The
 // handler itself is unchanged — it loops over JSON-RPC lines and exits
 // on EOF or read error, which we treat uniformly as "ended".
+// Phase 48-C: handler-served counter lifted to module-scope so
+// `doctor` can include it in the diagnostic snapshot. Each new
+// pipe connection increments this; the value is monotonic for the
+// process's lifetime.
+pub(crate) static HANDLER_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 async fn handle_client_with_telemetry(
     stream: NamedPipeServer,
     state: AppState,
     app: AppHandle,
 ) {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static HANDLER_SEQ: AtomicU64 = AtomicU64::new(0);
+    use std::sync::atomic::Ordering;
     let conn_id = format!("{:05x}", HANDLER_SEQ.fetch_add(1, Ordering::Relaxed));
     let start = std::time::Instant::now();
     crate::dlog(&format!("rpc_server: handler {conn_id} START"));
@@ -1743,6 +1748,12 @@ async fn dispatch(
 
         // Phase 8.E: introspection. Pure reads of AppState + on-disk debug.log.
         "dev.get-state" => Ok(build_dev_state(state, 50, 50)),
+
+        // Phase 48-C: /doctor diagnostic snapshot. Same payload as the
+        // tauri `doctor` command, reusable from the bundled CLI via
+        // `winmux doctor` so support tickets can be dumped at the
+        // command line.
+        "doctor" => Ok(crate::build_doctor_snapshot(state)),
 
         "dev.console-tail" => {
             let limit = params

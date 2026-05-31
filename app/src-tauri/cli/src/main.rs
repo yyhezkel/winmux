@@ -487,6 +487,11 @@ enum Cmd {
         #[arg(long)]
         workspace: String,
     },
+    /// Phase 48-C: print a JSON diagnostic snapshot of the running
+    /// winmux app (version, workspaces, PTY count, RPC handlers served,
+    /// bundled Linux CLI sha256, recent errors). Calls the `doctor`
+    /// RPC method — requires the desktop app to be running.
+    Doctor,
 }
 
 #[derive(Subcommand, Debug)]
@@ -2025,6 +2030,8 @@ async fn real_main() -> ExitCode {
         },
         // Phase 36: handled before this match (port_watch::run diverges).
         Cmd::PortWatch { .. } => unreachable!("PortWatch handled before dispatch"),
+        // Phase 48-C: thin RPC wrapper. The backend builds the snapshot.
+        Cmd::Doctor => rpc_call("doctor", json!({})).await,
     };
 
     match result {

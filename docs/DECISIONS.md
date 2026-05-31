@@ -58,6 +58,19 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Decided
 
+### 2026-05-31 — Ports redesign: detect-only, click-to-forward, per-port stop, sanity-check (Phase 46, `1aef47f`)
+- **Context:** Yossi tested v0.2.5 ports end-to-end. Five problems: notifications popping for every auto-forward; the toggle being too eager (forwarded everything detected); no way to stop a tunnel; clicking a forwarded port opened a browser tab that couldn't reach `localhost:<port>`; parallel-workspace behavior unverified.
+- **Decision:**
+  - **Detect ≠ forward.** `AppState.detected_ports` is a new runtime-only registry separate from `forwards`. `port.opened` inserts into detected + emits `port-detected` (no auto-forward, no FeedItem). `port.closed` removes from detected + emits `port-undetected`, and tears down the forward if one was open.
+  - **Click to forward.** New `forward_port_start` command looks up addr from detected_ports and calls `open_auto_forward`. PortsWindow rows now have two states: Detected → `[Forward]` button (click row/button → forward + open browser); Forwarded → `[Open]` + `[Stop]`.
+  - **Sanity-probe before "live".** `open_auto_forward` now runs a 200 ms TCP probe to `127.0.0.1:<local_port>` between binding and emitting `port-forwarded`. On failure it tears down and returns an error — the FE never opens a dead browser tab.
+  - **Use `127.0.0.1` not `localhost`** for browser URLs. Root cause of issue 4 was dual-stack `localhost` → `::1` while the russh forward is IPv4-only.
+  - **FeedItem removed** — the PortsWindow is the only surface; no toasts, no feed cards.
+  - Event names renamed for clarity: `port-forward-opened` → `port-forwarded`; `port-forward-closed` → `port-forward-stopped`.
+- **Multi-workspace:** all state already keyed by `(workspace_id, remote_port)`; per-workspace listener tasks are independent. Confirmed by code review; Phase 44's per-handler dlog telemetry will surface any future contention.
+- **Tests:** new `tcp_probe_tests` module (probe succeeds for listening port, fails for vacant port). 41 Rust tests total.
+- **Outcome / Commit:** `1aef47f` (debug build green, BUILD_EXIT 0, app.exe ~31.0 MB). 8 files changed, 397+/84-. 454 i18n keys × 4 locales (parity OK; `ports.notification.opened` retired). No version bump — batches into v0.2.6.
+
 ### 2026-05-31 — Pipe listener pool (8 slots) + handler lifetime telemetry (Phase 44, `c65b0c5`)
 - **Context:** Yossi reported sporadic `tunnel: bridge error … os error 231` on v0.2.5 — much less frequent than the pre-39.A storm, but still present. Diagnosis traced it to the rpc_server's accept loop: Phase 39.A raised `max_instances` to 254 and pre-created the "next" listener, but at any single moment there was still only ONE listener in accept state. Two clients racing for it within microseconds raced for that single slot; the loser got `ERROR_PIPE_NOT_AVAILABLE` (231). `max_instances(254)` is the OS upper bound on instances, NOT concurrent accept-ready listeners.
 - **Decision:**

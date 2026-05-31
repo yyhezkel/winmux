@@ -459,5 +459,8 @@
   "ws.worktree.create": "إنشاء worktree",
   "ws.worktree.failed": "فشل git worktree add",
   "ws.worktree.alreadyOn": "بيئة العمل هذه مرتبطة بـ worktree في",
-  "ws.worktree.hint": "ينشئ git worktree جديدًا (مجلد شقيق) ويبدل cwd الخاص ببيئة العمل إليه. تنشأ اللوحات الجديدة هناك. لا يُمس المستودع الأصلي."
+  "ws.worktree.hint": "ينشئ git worktree جديدًا (مجلد شقيق) ويبدل cwd الخاص ببيئة العمل إليه. تنشأ اللوحات الجديدة هناك. لا يُمس المستودع الأصلي.",
+  "pane.drop.uploading": "جارٍ رفع {name}…",
+  "pane.drop.uploaded": "تم رفع {name}",
+  "pane.drop.failed": "فشل رفع {name}: {err}"
 }

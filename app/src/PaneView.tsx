@@ -1,5 +1,6 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Connection, LayoutNode } from "./types";
 import { describeConnection, effectiveIdentity } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
@@ -158,7 +159,13 @@ interface Props {
 
 export function PaneView(p: Props) {
   let slotRef!: HTMLDivElement;
+  let paneRef!: HTMLDivElement;
   let ti: TerminalInstance | null = null;
+  // Phase 49-A: drag-drop into terminal. dropping = visual highlight
+  // (border) when a drag enters this pane's bounds; dropMsg = transient
+  // status string shown over the pane while an upload is in flight.
+  const [dropping, setDropping] = createSignal(false);
+  const [dropMsg, setDropMsg] = createSignal<string | null>(null);
   const [pwInput, setPwInput] = createSignal("");
   const [passInput, setPassInput] = createSignal("");
   // Phase 7.A: edit mode for title/annotation.
@@ -326,6 +333,60 @@ export function PaneView(p: Props) {
     if (detail === p.pane.pane_id) openMeta();
   };
 
+  // Phase 49-A: POSIX single-quote escape for paths typed into the
+  // shell. `'foo bar'` is literal; an embedded ' is closed, escaped,
+  // and re-opened: foo'bar → 'foo'\''bar'. Safe for any byte sequence.
+  const posixQuote = (s: string): string =>
+    `'${s.replace(/'/g, `'\\''`)}'`;
+
+  // Effective connection for this pane — pane override beats workspace
+  // default. Used to route drops to SFTP (SSH) vs. local-path passthrough.
+  const effectiveConn = (): Connection | null =>
+    p.pane.connection ?? p.workspaceConnection ?? null;
+  const isSshPane = () => effectiveConn()?.type === "ssh";
+
+  // Phase 49-A: turn one dropped file path into a string suitable for
+  // pty_write. SSH workspaces uploaded via SFTP; the returned remote
+  // path is what gets typed. Local panes type the host path verbatim.
+  const handleOneDrop = async (hostPath: string): Promise<string | null> => {
+    const basename =
+      hostPath.split(/[\\/]/).filter(Boolean).pop() || "dropped";
+    if (!isSshPane()) {
+      return hostPath;
+    }
+    try {
+      setDropMsg(t("pane.drop.uploading", { name: basename }));
+      const remote = await invoke<string>("pane_upload_dropped", {
+        workspaceId: p.workspaceId,
+        paneId: p.pane.pane_id,
+        localPath: hostPath,
+        fileName: basename,
+      });
+      setDropMsg(t("pane.drop.uploaded", { name: basename }));
+      return remote;
+    } catch (e) {
+      console.error("pane_upload_dropped failed", e);
+      setDropMsg(t("pane.drop.failed", { name: basename, err: String(e) }));
+      return null;
+    }
+  };
+
+  // Phase 49-A: hit-test helper; returns true if (x, y) — in CSS px —
+  // sits inside the pane's bounding box. Tauri drag positions arrive
+  // in physical px; caller divides by DPR before invoking.
+  const pointInPane = (x: number, y: number): boolean => {
+    if (!paneRef) return false;
+    const r = paneRef.getBoundingClientRect();
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+  };
+
+  const writeToPty = (s: string) => {
+    if (!ti?.sessionId) return;
+    void invoke("pty_write", { sessionId: ti.sessionId, data: s }).catch(
+      (e) => console.error("pty_write failed", e),
+    );
+  };
+
   onMount(() => {
     ti = p.ensureTerm(p.pane.pane_id);
     if (ti.container.parentElement !== slotRef) {
@@ -334,6 +395,57 @@ export function PaneView(p: Props) {
     ti.container.style.display = "block";
     requestAnimationFrame(() => ti?.fitAndResize());
     window.addEventListener("winmux:pane-rename", onRenameRequest);
+
+    // Phase 49-A: subscribe to the window-wide drag-drop event. Each
+    // PaneView registers its own listener and hit-tests against its own
+    // bounding rect, so multi-pane layouts route the drop to whichever
+    // pane the cursor was over. File-manager panes register their own
+    // listener at a different on-screen location, so there's no double
+    // claim. The webview consumes file drops at the OS level, so this
+    // handler is the only path for OS-file drops; the HTML5 ondrop on
+    // the pane div picks up text/URL drags from the browser.
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      try {
+        unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+          const payload = event.payload as
+            | { type: "enter" | "over"; position: { x: number; y: number } }
+            | { type: "drop"; paths: string[]; position: { x: number; y: number } }
+            | { type: "leave" };
+          if (payload.type === "leave") {
+            setDropping(false);
+            return;
+          }
+          const dpr = window.devicePixelRatio || 1;
+          const x = payload.position.x / dpr;
+          const y = payload.position.y / dpr;
+          const inside = pointInPane(x, y);
+          if (payload.type === "enter" || payload.type === "over") {
+            setDropping(inside);
+            return;
+          }
+          setDropping(false);
+          if (payload.type !== "drop" || !inside) return;
+          const paths = payload.paths || [];
+          if (paths.length === 0) return;
+          void (async () => {
+            for (const hostPath of paths) {
+              const typed = await handleOneDrop(hostPath);
+              if (typed) writeToPty(posixQuote(typed) + " ");
+            }
+            // Clear the toast after a short grace so the user sees it.
+            setTimeout(() => setDropMsg(null), 1800);
+          })();
+        });
+      } catch (e) {
+        console.warn("pane: onDragDropEvent failed:", e);
+      }
+    })();
+
+    // Cleanup for the async-assigned unlisten.
+    onCleanup(() => {
+      try { unlisten?.(); } catch {}
+    });
   });
 
   onCleanup(() => {
@@ -342,6 +454,30 @@ export function PaneView(p: Props) {
       ti.container.parentElement.removeChild(ti.container);
     }
   });
+
+  // Phase 49-A: HTML5 drop for non-file drags (URLs / text dragged
+  // from browser tabs). Tauri's onDragDropEvent only fires for OS-level
+  // file drops, so URLs need this fallback. URI-list takes priority,
+  // then plain text. Same rule: type the string + SPACE.
+  const onHtml5Drop = (e: DragEvent) => {
+    if (!e.dataTransfer) return;
+    // If files are present, Tauri's handler already routed them; bail.
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) return;
+    const uri = e.dataTransfer.getData("text/uri-list").trim();
+    const txt = uri || e.dataTransfer.getData("text/plain").trim();
+    if (!txt) return;
+    e.preventDefault();
+    setDropping(false);
+    writeToPty(posixQuote(txt) + " ");
+  };
+  const onHtml5DragOver = (e: DragEvent) => {
+    // Allow drop. Don't preventDefault for file drops or Tauri's
+    // OS-level handler won't see them.
+    if (e.dataTransfer?.types?.includes("text/uri-list") ||
+        e.dataTransfer?.types?.includes("text/plain")) {
+      e.preventDefault();
+    }
+  };
 
   const passphraseHere = () =>
     p.pendingPassphrase && p.pendingPassphrase.paneId === p.pane.pane_id
@@ -364,11 +500,17 @@ export function PaneView(p: Props) {
   };
   return (
     <div
-      class={`pane ${p.isActive ? "active" : ""} ${p.isWaiting ? "waiting" : ""}`}
+      ref={(el) => (paneRef = el)}
+      class={`pane ${p.isActive ? "active" : ""} ${p.isWaiting ? "waiting" : ""} ${dropping() ? "drop-target" : ""}`}
       data-has-color={liveEffective().color ? "true" : "false"}
       style={liveEffective().color ? `--pane-color: ${liveEffective().color}` : undefined}
       onMouseDown={() => p.onFocus(p.pane.pane_id)}
+      onDrop={onHtml5Drop}
+      onDragOver={onHtml5DragOver}
     >
+      <Show when={dropMsg()}>
+        <div class="pane-drop-toast">{dropMsg()}</div>
+      </Show>
       <div class="pane-header">
         {/* Phase 23.I: header fallback chain — user-set pane.title
             beats workspace name beats the raw SSH URL. The old

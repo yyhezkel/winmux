@@ -459,5 +459,8 @@
   "ws.worktree.create": "Создать worktree",
   "ws.worktree.failed": "git worktree add не удался",
   "ws.worktree.alreadyOn": "Эта среда привязана к worktree в",
-  "ws.worktree.hint": "Создаёт новый git worktree (соседний каталог) и переключает cwd среды на него. Новые панели открываются там. Исходный репо не трогается."
+  "ws.worktree.hint": "Создаёт новый git worktree (соседний каталог) и переключает cwd среды на него. Новые панели открываются там. Исходный репо не трогается.",
+  "pane.drop.uploading": "Загрузка {name}…",
+  "pane.drop.uploaded": "{name} загружен",
+  "pane.drop.failed": "Загрузка {name} не удалась: {err}"
 }

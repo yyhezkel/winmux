@@ -553,6 +553,40 @@ body {
   border-color: rgba(122, 162, 247, 0.55);
   box-shadow: inset 0 0 0 1px rgba(122, 162, 247, 0.18);
 }
+/* Phase 49-A: visible highlight while an OS drag hovers a pane. */
+.pane.drop-target {
+  outline: 2px dashed var(--w-accent);
+  outline-offset: -4px;
+  background: rgba(122, 162, 247, 0.08);
+}
+.pane-drop-toast {
+  position: absolute;
+  top: 38px;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 22, 30, 0.92);
+  color: var(--w-fg);
+  border: 1px solid var(--w-border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: var(--w-fs-sm);
+  font-family: var(--w-font-mono);
+  pointer-events: none;
+  z-index: 50;
+  white-space: nowrap;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane { position: relative; }
+/* Phase 49-B: 🌿 chip next to a workspace name when it's anchored to
+   a git worktree. Same vibe as the port-forward badge. */
+.ws-worktree-chip {
+  font-size: 12px;
+  margin-inline-start: 4px;
+  opacity: 0.85;
+  cursor: default;
+}
 
 .pane-header {
   display: flex;

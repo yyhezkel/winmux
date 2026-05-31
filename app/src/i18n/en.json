@@ -459,5 +459,8 @@
   "ws.worktree.create": "Create worktree",
   "ws.worktree.failed": "git worktree add failed",
   "ws.worktree.alreadyOn": "This workspace is anchored to a worktree at",
-  "ws.worktree.hint": "Creates a fresh git worktree (sibling directory) and switches the workspace's cwd to it. Future panes spawn there. The original repo is untouched."
+  "ws.worktree.hint": "Creates a fresh git worktree (sibling directory) and switches the workspace's cwd to it. Future panes spawn there. The original repo is untouched.",
+  "pane.drop.uploading": "Uploading {name}…",
+  "pane.drop.uploaded": "Uploaded {name}",
+  "pane.drop.failed": "Upload {name} failed: {err}"
 }

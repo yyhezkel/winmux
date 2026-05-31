@@ -6468,6 +6468,7 @@ pub fn run() {
             file_manager::file_create_remote,
             file_manager::file_upload,
             file_manager::file_upload_bytes,
+            file_manager::pane_upload_dropped,
             file_manager::file_download,
             file_manager::file_open_local,
             file_manager::file_open_remote,

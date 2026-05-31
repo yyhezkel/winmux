@@ -440,6 +440,64 @@ pub(crate) async fn file_upload_bytes(
     Ok(n)
 }
 
+/// Phase 49-A: drag-drop into a Terminal pane. For SSH workspaces the
+/// dropped file is uploaded via SFTP to `~/winmux-drops/<file_name>`
+/// (created on demand) and the remote path is returned. The frontend
+/// then types that path into the pane (single-quoted) so the user can
+/// reference the just-uploaded file from their shell.
+///
+/// `pane_id` is accepted for log clarity; it's not used to route the
+/// upload (the SSH session is per-workspace).
+#[tauri::command]
+pub(crate) async fn pane_upload_dropped(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    pane_id: String,
+    local_path: String,
+    file_name: String,
+) -> Result<String, String> {
+    // Sanitize file_name to its basename. The frontend already passes
+    // the basename but defending against path separators here keeps the
+    // command safe to call from anywhere.
+    let safe = file_name
+        .rsplit(|c: char| c == '/' || c == '\\')
+        .next()
+        .unwrap_or("");
+    if safe.is_empty() || safe.starts_with('.') && safe.len() <= 2 {
+        return Err("invalid file name".to_string());
+    }
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| "no active SSH session".to_string())?;
+    let local = PathBuf::from(expand_path(&local_path));
+    let bytes = std::fs::read(&local).map_err(|e| format!("read {local:?}: {e}"))?;
+    let sftp = open_sftp(&handle).await?;
+    // SFTP starts in the user's home dir; relative path puts us inside it.
+    // create_dir errors if already present — ignore that case.
+    let _ = sftp.create_dir("winmux-drops").await;
+    let remote_path = format!("winmux-drops/{safe}");
+    let mut file = sftp
+        .create(&remote_path)
+        .await
+        .map_err(|e| format!("sftp create {remote_path}: {e}"))?;
+    file.write_all(&bytes)
+        .await
+        .map_err(|e| format!("write: {e}"))?;
+    file.flush().await.ok();
+    file.shutdown().await.ok();
+    drop(file);
+    let _ = sftp.close().await;
+    crate::dlog(&format!(
+        "[drop] uploaded {} bytes to {} (ws={}, pane={})",
+        bytes.len(),
+        remote_path,
+        workspace_id,
+        pane_id,
+    ));
+    // Resolve to absolute via ~ for caller readability; the shell will
+    // expand the leading `~`.
+    Ok(format!("~/{remote_path}"))
+}
+
 #[tauri::command]
 pub(crate) async fn file_upload(
     state: State<'_, AppState>,

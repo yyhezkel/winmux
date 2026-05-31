@@ -1,6 +1,7 @@
 import { For, Show, createSignal } from "solid-js";
 import { collectPanes, findPane, type Workspace, type ForwardRow } from "./types";
 import { t } from "./i18n";
+import { TechText } from "./TechText";
 
 function workspaceBadge(w: Workspace): { label: string; cls: string; title: string } {
   if (!w.layout) {
@@ -109,7 +110,10 @@ export function Sidebar(p: Props) {
                 class="ws-dot"
                 style={{ background: w.color || "#6b7682" }}
               />
-              <span class="ws-name">{w.emoji ? `${w.emoji} ${w.name}` : w.name}</span>
+              <span class="ws-name">
+  <Show when={w.emoji}>{w.emoji} </Show>
+  <TechText text={w.name} />
+</span>
               <WorkspaceBadge w={w} />
               {/* Phase 36.A: inline port-forward badge. Click opens the
                   browser (1 forward) or surfaces the workspace's Ports

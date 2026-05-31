@@ -1,6 +1,7 @@
 import { For, Show } from "solid-js";
 import { t } from "./i18n";
 import type { FeedItem } from "./types";
+import { TechText } from "./TechText";
 
 interface Props {
   items: FeedItem[];
@@ -34,7 +35,7 @@ export function FeedPanel(p: Props) {
                   ×
                 </button>
               </div>
-              <div class="feed-title">{item.title}</div>
+              <div class="feed-title"><TechText text={item.title} /></div>
               <Show when={item.summary}>
                 <div class="feed-summary">{item.summary}</div>
               </Show>

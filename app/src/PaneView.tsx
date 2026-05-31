@@ -4,6 +4,7 @@ import type { Connection, LayoutNode } from "./types";
 import { describeConnection, effectiveIdentity } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
 import { t } from "./i18n";
+import { TechText } from "./TechText";
 
 interface ClaudeSessionInfo {
   session_id: string;
@@ -387,13 +388,15 @@ export function PaneView(p: Props) {
           <Show when={liveEffective().emoji}>
             <span class="pane-emoji">{liveEffective().emoji}</span>{" "}
           </Show>
-          {p.pane.title
-            ?? p.workspaceName
-            ?? (p.pane.connection
-              ? describeConnection(p.pane.connection)
-              : p.workspaceConnection
-                ? describeConnection(p.workspaceConnection)
-                : "—")}
+          <TechText text={
+            p.pane.title
+              ?? p.workspaceName
+              ?? (p.pane.connection
+                ? describeConnection(p.pane.connection)
+                : p.workspaceConnection
+                  ? describeConnection(p.workspaceConnection)
+                  : "—")
+          } />
         </span>
         <Show when={p.pane.annotation}>
           <button

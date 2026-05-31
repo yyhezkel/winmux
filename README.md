@@ -227,12 +227,15 @@ identity (color, emoji, dynamic window title) · auto-port-forwarding via a
 
 **Coming next:**
 
-- 🔮 BiDi-aware rendering for mixed Hebrew/Latin technical content in TUIs (Claude Code, tmux output) — HTML surfaces and an opt-in PTY-stream filter
-- 🔮 Settings → Logs row with "Open logs folder" and "Copy log path"
-- 🔮 PATH auto-registration in the WiX/NSIS installer
-- 🔮 Secrets Vault — in cooperation with a parallel MCP project that holds secrets; winmux exposes egress hooks (SSH env inject, child-process spawn)
-- 🔮 Full LLM control of the app — HTTP automation API so agents can drive winmux from outside (split / screenshot / scrollback / etc.)
-- 🔮 Drag-and-drop to terminal, /doctor diagnostic endpoint, diff/patch review pane, worktree-aware workspaces, and other SHOULD items from `docs/IDEAS-RANKING.md`
+- 🔮 BiDi-aware rendering for mixed Hebrew/Latin technical content in TUI panes (Claude Code, tmux output)
+- 🔮 PortsWindow polish — clearer state, full e2e validation, smarter port-watch behavior
+- 🔮 Secrets Vault — in cooperation with a separate MCP project that holds credentials; winmux exposes egress hooks (SSH env inject, child-process spawn with env)
+- 🔮 Full LLM control surface — HTTP automation API so agents can drive winmux from outside (split, screenshot, scrollback, etc.)
+- 🔮 Drag-and-drop into the terminal — files / URLs / clipboard images, SFTP-uploaded to the remote with the path auto-injected
+- 🔮 Diff / patch review pane — track git diff of the active workspace live
+- 🔮 Worktree-aware workspaces — bind each workspace to a git worktree for parallel branches in the same repo
+- 🔮 /doctor diagnostic endpoint and richer telemetry across the RPC layer
+- 🔮 PATH auto-registration in the WiX / NSIS installer
 
 ## Documentation
 

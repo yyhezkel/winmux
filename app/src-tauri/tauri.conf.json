@@ -37,6 +37,11 @@
       "resources/remote-manifest.json",
       "resources/winmux-cli.exe",
       "resources/winmux-tmux.conf"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "installer-hooks.nsh"
+      }
+    }
   }
 }

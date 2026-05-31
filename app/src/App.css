@@ -873,6 +873,56 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   margin-top: 18px;
 }
 
+/* Phase 42: wider, height-capped Create/Edit Workspace modal. The form
+   was taller than typical viewports — its top + bottom bled off-screen.
+   Make the modal a vertical flex container so the h3 header and the
+   button footer pin in place while the middle scrolls. Scoped to
+   .ws-create-modal so other .modal users (Settings, Notes, Ports,
+   FileEditor, ProvisioningWizard, SshKeyOffer) are untouched. */
+.modal.ws-create-modal {
+  width: 100%;
+  max-width: min(820px, 92vw);
+  min-width: min(420px, 92vw);
+  max-height: min(92vh, 720px);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.modal.ws-create-modal > h3 {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid var(--w-border);
+}
+.ws-create-modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 16px 22px;
+}
+.ws-create-modal-footer {
+  flex-shrink: 0;
+  margin-top: 0;
+  padding: 10px 22px;
+  border-top: 1px solid var(--w-border);
+  background: var(--w-surface);
+}
+
+/* 2-col grid for the SSH user/host/port row (and any future side-by-side
+   pairs). Long fields and command textareas opt out with .full-width. */
+.ws-create-modal .ws-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+}
+.ws-create-modal .ws-form-grid > .full-width { grid-column: 1 / -1; }
+/* Suppress the per-label margin-bottom inside the grid — row-gap handles it. */
+.ws-create-modal .ws-form-grid > label { margin-bottom: 0; }
+
+@media (max-width: 640px) {
+  .ws-create-modal .ws-form-grid { grid-template-columns: 1fr; }
+}
+
 .modal-sep {
   border: 0;
   border-top: 1px solid var(--w-border);

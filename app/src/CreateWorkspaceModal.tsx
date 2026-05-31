@@ -497,8 +497,11 @@ export function CreateWorkspaceModal(p: Props) {
   return (
     <Show when={p.open}>
       <div class="modal-backdrop" onClick={p.onClose}>
-        <div class="modal" onClick={(e) => e.stopPropagation()}>
+        <div class="modal ws-create-modal" onClick={(e) => e.stopPropagation()}>
           <h3>{isEdit() ? t("ws.create.title.edit") : t("ws.create.title.new")}</h3>
+          {/* Phase 42: scrollable body — header (h3) above and footer
+              (modal-buttons) below stay pinned via the flex column. */}
+          <div class="ws-create-modal-body">
 
           <label>
             <span>{t("ws.create.field.name")}</span>
@@ -722,32 +725,36 @@ export function CreateWorkspaceModal(p: Props) {
                 </button>
               </div>
             </Show>
-            <label>
-              <span>{t("ws.create.field.user")}</span>
-              <input
-                value={user()}
-                onInput={(e) => setUser(e.currentTarget.value)}
-                placeholder="user"
-              />
-            </label>
-            <label>
-              <span>{t("ws.create.field.host")}</span>
-              <input
-                value={host()}
-                onInput={(e) => setHost(e.currentTarget.value)}
-                placeholder={t("ws.create.field.host.placeholder")}
-              />
-            </label>
-            <label>
-              <span>{t("ws.create.field.port")}</span>
-              <input
-                type="number"
-                value={port()}
-                onInput={(e) =>
-                  setPort(parseInt(e.currentTarget.value) || 22)
-                }
-              />
-            </label>
+            {/* Phase 42: user / host / port sit in a 2-col grid so the
+                modal can be wider without leaving acres of empty space. */}
+            <div class="ws-form-grid">
+              <label>
+                <span>{t("ws.create.field.user")}</span>
+                <input
+                  value={user()}
+                  onInput={(e) => setUser(e.currentTarget.value)}
+                  placeholder="user"
+                />
+              </label>
+              <label>
+                <span>{t("ws.create.field.host")}</span>
+                <input
+                  value={host()}
+                  onInput={(e) => setHost(e.currentTarget.value)}
+                  placeholder={t("ws.create.field.host.placeholder")}
+                />
+              </label>
+              <label>
+                <span>{t("ws.create.field.port")}</span>
+                <input
+                  type="number"
+                  value={port()}
+                  onInput={(e) =>
+                    setPort(parseInt(e.currentTarget.value) || 22)
+                  }
+                />
+              </label>
+            </div>
             {/* Phase 37: auth-mode chooser. "Password" mode saves no
                 credential — the user is prompted interactively at every
                 connect and the password is never persisted. */}
@@ -996,7 +1003,8 @@ export function CreateWorkspaceModal(p: Props) {
             </For>
           </div>
 
-          <div class="modal-buttons">
+          </div>
+          <div class="modal-buttons ws-create-modal-footer">
             <button onClick={p.onClose}>{t("common.cancel")}</button>
             <button class="primary" onClick={submit}>
               {isEdit() ? t("common.save") : t("ws.create.btn.create")}

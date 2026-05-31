@@ -1159,27 +1159,9 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 
 /* ─── Phase 7.B: notes ─── */
 
-.notes-fab {
-  position: fixed;
-  bottom: 14px;
-  right: 14px;
-  z-index: 150;
-  background: var(--w-surface);
-  color: var(--w-text);
-  border: 1px solid var(--w-border-hi);
-  border-radius: 999px;
-  padding: 7px 14px;
-  font-size: var(--w-fs-md);
-  cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  font-family: inherit;
-  transition: transform 100ms ease, background 100ms ease, border-color 100ms ease;
-}
-.notes-fab:hover {
-  background: var(--w-surface-hi);
-  border-color: var(--w-accent);
-  transform: translateY(-1px);
-}
+/* Phase 47.E: .notes-fab + .settings-fab CSS removed — the FAB buttons
+   they styled were dropped in favour of the sidebar bottom-row buttons.
+   See App.tsx Phase 47.E comment near the removed JSX. */
 
 .notes-modal {
   width: 560px;
@@ -1405,33 +1387,6 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 
 /* ─── Phase 9.A: settings modal + gear FAB ─── */
 
-.settings-fab {
-  position: fixed;
-  bottom: 14px;
-  right: 64px;
-  z-index: 150;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--w-surface);
-  color: var(--w-text);
-  border: 1px solid var(--w-border-hi);
-  border-radius: 999px;
-  font-size: 16px;
-  cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  font-family: inherit;
-  transition: transform 100ms ease, background 100ms ease, border-color 100ms ease, color 100ms ease;
-}
-.settings-fab:hover {
-  background: var(--w-surface-hi);
-  border-color: var(--w-accent);
-  color: var(--w-accent);
-  transform: translateY(-1px) rotate(35deg);
-}
 
 .settings-modal {
   width: 720px;
@@ -2698,8 +2653,6 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
    below are the remaining `position: fixed` floats. */
 
 [dir="rtl"] .feed-panel { right: auto; left: 12px; }
-[dir="rtl"] .notes-fab { right: auto; left: 14px; }
-[dir="rtl"] .settings-fab { right: auto; left: 64px; }
 [dir="rtl"] .ws-menu { left: auto; right: 12px; }
 [dir="rtl"] .pane-disc-menu { right: auto; left: 0; }
 [dir="rtl"] .feed-card { animation-name: feed-in-rtl; }

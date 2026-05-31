@@ -1,8 +1,6 @@
 {
   "sidebar.title": "winmux",
   "sidebar.new_workspace": "+ New workspace",
-  "fab.notes": "Notes",
-  "fab.settings": "Settings",
   "common.connect": "Connect",
   "common.connect_tmux": "Connect (tmux)",
   "common.disconnect": "Disconnect",

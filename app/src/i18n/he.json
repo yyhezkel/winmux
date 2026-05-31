@@ -1,8 +1,6 @@
 {
   "sidebar.title": "winmux",
   "sidebar.new_workspace": "+ סביבת עבודה חדשה",
-  "fab.notes": "הערות",
-  "fab.settings": "הגדרות",
   "common.connect": "התחבר",
   "common.connect_tmux": "התחבר (tmux)",
   "common.disconnect": "התנתק",

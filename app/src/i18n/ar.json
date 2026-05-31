@@ -1,8 +1,6 @@
 {
   "sidebar.title": "winmux",
   "sidebar.new_workspace": "+ مساحة عمل جديدة",
-  "fab.notes": "ملاحظات",
-  "fab.settings": "الإعدادات",
   "common.connect": "اتصال",
   "common.connect_tmux": "اتصال (tmux)",
   "common.disconnect": "قطع الاتصال",

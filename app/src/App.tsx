@@ -1556,22 +1556,11 @@ function App() {
         }}
       />
 
-      <button
-        class="notes-fab"
-        title={`${t("fab.notes")} (Ctrl+Shift+N)`}
-        onClick={() => setShowNotes(true)}
-      >
-        📝 {notes().filter((n) => n.status === "open").length}
-      </button>
-
-      <button
-        class="settings-fab"
-        title={t("fab.settings")}
-        onClick={() => setShowSettings(true)}
-      >
-        ⚙
-      </button>
-
+      {/* Phase 47.E: removed the floating Notes (📝 N) and Settings (⚙)
+          FABs from the workspace area — duplicates of the sidebar bottom
+          row [📝 Notes][⚙ Settings][🌐 Ports] added in Phase 39 (re-added
+          in Phase 40). The Ctrl+Shift+N keyboard shortcut for Notes
+          stays wired separately. */}
       <ProvisioningWizard
         open={showProvision()}
         onClose={() => setShowProvision(false)}

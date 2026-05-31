@@ -1,6 +1,7 @@
 import { createSignal, Show, onMount, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { TechText } from "./TechText";
 
 // Phase 17.B: minimal built-in editor. A modal with a monospace
 // <textarea>, Save / Cancel / Reload buttons, and an unsaved-changes
@@ -354,7 +355,7 @@ export function FileEditor(p: Props) {
         >
           <div class="editor-head">
             <h3>{t("editor.title", { filename: p.filename })}</h3>
-            <span class="editor-path" title={p.path}>{p.path}</span>
+            <span class="editor-path" title={p.path}><TechText text={p.path} /></span>
             {/* Phase 23: direction picker. Default "auto" handles
                  most files correctly via UAX #9 first-strong; manual
                  override is for when the heuristic guesses wrong. */}

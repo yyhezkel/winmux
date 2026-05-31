@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { t } from "./i18n";
 import { FileEditor } from "./FileEditor";
+import { TechText } from "./TechText";
 
 // Phase 15.B: dual-column file manager (local + remote SFTP).
 //
@@ -941,7 +942,7 @@ export function FileManagerPane(p: Props) {
                     onContextMenu={(ev) => openCtxMenu("local", e, ev)}
                   >
                     <span class="fm-icon">{e.is_dir ? "📁" : e.is_link ? "🔗" : "📄"}</span>
-                    <span class="fm-name">{e.name}</span>
+                    <span class="fm-name"><TechText text={e.name} /></span>
                     <span class="fm-size">{e.is_dir ? "" : fmtSize(e.size)}</span>
                     <span class="fm-time">{fmtTime(e.modified)}</span>
                   </div>
@@ -990,7 +991,7 @@ export function FileManagerPane(p: Props) {
                       onContextMenu={(ev) => openCtxMenu("remote", e, ev)}
                     >
                       <span class="fm-icon">{e.is_dir ? "📁" : e.is_link ? "🔗" : "📄"}</span>
-                      <span class="fm-name">{e.name}</span>
+                      <span class="fm-name"><TechText text={e.name} /></span>
                       <span class="fm-size">{e.is_dir ? "" : fmtSize(e.size)}</span>
                       <span class="fm-time">{fmtTime(e.modified)}</span>
                     </div>

@@ -1051,6 +1051,30 @@ function App() {
         splitOrMove(dirKey);
         return;
       }
+      // Phase 49-D: Ctrl+Alt+I/O/K/L → land the active pane in a
+      // quadrant. From a single pane: vertical split + horizontal
+      // split puts the current pane in one of the four corners. From
+      // an existing layout: navigates two split-or-move hops in the
+      // corner's direction pair. The 50-50 split convention means the
+      // result is approximate — good enough for the common 1-pane and
+      // 2-pane starts; complex layouts may land off-corner.
+      const qkey: "topLeft" | "topRight" | "bottomLeft" | "bottomRight" | null =
+        e.key === "i" || e.key === "I" ? "topLeft"
+        : e.key === "o" || e.key === "O" ? "topRight"
+        : e.key === "k" || e.key === "K" ? "bottomLeft"
+        : e.key === "l" || e.key === "L" ? "bottomRight"
+        : null;
+      if (qkey) {
+        e.preventDefault();
+        const v = qkey.startsWith("top") ? "up" : "down";
+        const h = qkey.endsWith("Left") ? "left" : "right";
+        splitOrMove(v);
+        // Tiny delay so the first split's layout update lands in
+        // file() before the second hop reads it. setTimeout(0) is
+        // enough for Solid's reactive batch + the Tauri round-trip.
+        setTimeout(() => splitOrMove(h), 0);
+        return;
+      }
     }
     // Pane-relative legacy shortcuts (split / close) still on
     // Ctrl+Shift+D/E/W until we expand the table.

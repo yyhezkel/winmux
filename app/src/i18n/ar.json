@@ -268,7 +268,7 @@
   "ports.window.title": "المنافذ — {workspace}",
   "ports.window.toggle.active": "نشط",
   "ports.window.toggle.inactive": "غير نشط",
-  "ports.window.toggle.label": "إعادة توجيه المنافذ تلقائيًا",
+  "ports.window.toggle.label": "اكتشاف المنافذ المفتوحة",
   "ports.window.empty.activeNoForwards": "لا توجد إعادة توجيه نشطة. شغّل خادمًا على الجهاز البعيد لرؤيتها هنا.",
   "ports.window.empty.toggleOff": "إعادة توجيه المنافذ التلقائية متوقفة لبيئة العمل هذه. فعّلها لبدء التتبع.",
   "ports.window.empty.noWorkspace": "اختر بيئة عمل لإدارة إعادة توجيه المنافذ الخاصة بها.",
@@ -351,7 +351,6 @@
   "ports.panel.empty": "لا توجد منافذ مُعاد توجيهها — شغّل خادمًا في الطرفية لرؤيته هنا",
   "ports.menu.copyUrl": "نسخ الرابط",
   "ports.menu.stopForward": "إيقاف التوجيه",
-  "ports.notification.opened": "localhost:{local} جاهز (من البعيد :{remote}) — انقر للفتح",
   "ports.row.activeOn": "نشط على localhost:{port}",
   "ports.row.fromRemote": "من البعيد :{remote}",
   "ports.workspaceBadge.tooltipOne": "منفذ واحد نشط",
@@ -446,5 +445,12 @@
   "ws.create.env.remove": "إزالة",
   "error.sidebarRender": "فشل في عرض الشريط الجانبي.",
   "error.layoutRender": "فشل في عرض هذا التخطيط.",
-  "sidebar.workspaceConnectedTitle": "متصل"
+  "sidebar.workspaceConnectedTitle": "متصل",
+  "ports.window.toggle.hint.on": "الاكتشاف مفعّل — انقر منفذًا لإعادة توجيهه إلى localhost.",
+  "ports.window.toggle.hint.off": "الاكتشاف متوقف — فعّله لرؤية منافذ الاستماع البعيدة.",
+  "ports.window.row.forwardAction": "إعادة توجيه",
+  "ports.window.row.openAction": "فتح",
+  "ports.window.row.stopAction": "إيقاف",
+  "ports.window.empty.detectionOn": "الاكتشاف مفعّل. في انتظار المنافذ البعيدة…",
+  "ports.window.error.unreachable": "تم فتح إعادة التوجيه ولكن localhost:{local} غير قابل للوصول. تم الإغلاق. ({msg})"
 }

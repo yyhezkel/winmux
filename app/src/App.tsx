@@ -112,11 +112,22 @@ function App() {
   const [showPalette, setShowPalette] = createSignal(false);
   // Phase 36 (#2.2): live auto port-forwards (all workspaces).
   const [portForwards, setPortForwards] = createSignal<ForwardRow[]>([]);
+  // Phase 46: ports the remote watcher has reported but the user
+  // hasn't chosen to forward yet (one click → forward + browser).
+  const [detectedPorts, setDetectedPorts] = createSignal<
+    { workspace_id: string; remote_port: number; addr: string; family: string }[]
+  >([]);
   // Phase 40: floating Ports window — scoped to the active workspace.
   const [showPortsWindow, setShowPortsWindow] = createSignal(false);
   const stopForward = (workspaceId: string, remotePort: number) => {
     void invoke("port_forward_stop", { workspaceId, remotePort });
   };
+  // Phase 46: open a forward on demand from PortsWindow. The backend
+  // sanity-probes the local port before returning, so on success we
+  // know the browser tab will actually reach something. Returns the
+  // assigned local port (or throws).
+  const startForward = (workspaceId: string, remotePort: number): Promise<number> =>
+    invoke<number>("forward_port_start", { workspaceId, remotePort });
   // Phase 35: webview zoom factor for view.zoom.* palette commands.
   const [zoomFactor, setZoomFactor] = createSignal(1);
   const applyZoom = (f: number) => {
@@ -1069,10 +1080,47 @@ function App() {
     // Phase 36 (#2.2): auto port-forward lifecycle. The backend opens a
     // local SSH forward when the remote watcher reports a new listening
     // port, and emits these events. We track them for the Ports panel
-    // and fire a single discoverable feed item per opened forward.
+    // Phase 46: ports are DETECTED on remote LISTEN, but a forward is
+    // only opened on user click. No FeedItem on either event — the
+    // PortsWindow is the only surface. Events:
+    //   port-detected      → add to detectedPorts
+    //   port-undetected    → remove from detectedPorts (also cleans
+    //                         forwards if the port was tunneled)
+    //   port-forwarded     → add to portForwards
+    //   port-forward-stopped → remove from portForwards
+    unlistens.push(
+      await listen<{ workspace_id: string; remote_port: number; addr: string; family: string }>(
+        "port-detected",
+        (e) => {
+          setDetectedPorts((prev) => [
+            ...prev.filter(
+              (p) => !(p.workspace_id === e.payload.workspace_id && p.remote_port === e.payload.remote_port),
+            ),
+            {
+              workspace_id: e.payload.workspace_id,
+              remote_port: e.payload.remote_port,
+              addr: e.payload.addr,
+              family: e.payload.family,
+            },
+          ]);
+        },
+      ),
+    );
+    unlistens.push(
+      await listen<{ workspace_id: string; remote_port: number }>(
+        "port-undetected",
+        (e) => {
+          setDetectedPorts((prev) =>
+            prev.filter(
+              (p) => !(p.workspace_id === e.payload.workspace_id && p.remote_port === e.payload.remote_port),
+            ),
+          );
+        },
+      ),
+    );
     unlistens.push(
       await listen<{ workspace_id: string; remote_addr: string; remote_port: number; local_port: number }>(
-        "port-forward-opened",
+        "port-forwarded",
         (e) => {
           const row: ForwardRow = {
             workspace_id: e.payload.workspace_id,
@@ -1087,31 +1135,12 @@ function App() {
             ),
             row,
           ]);
-          const item: FeedItem = {
-            request_id:
-              (globalThis.crypto?.randomUUID?.() ?? `pf-${Date.now()}-${Math.random()}`),
-            kind: "notification",
-            subkind: "port-forward",
-            pane_id: null,
-            workspace_id: row.workspace_id,
-            title: t("ports.notification.opened", {
-              remote: row.remote_port,
-              local: row.local_port,
-            }),
-            summary: "",
-            payload: row,
-            state: "passive",
-            created_ms: Date.now(),
-            blocking: false,
-          };
-          setFeedItems((prev) => [item, ...prev]);
-          scheduleFeedDismiss(item.request_id);
         },
       ),
     );
     unlistens.push(
       await listen<{ workspace_id: string; remote_port: number }>(
-        "port-forward-closed",
+        "port-forward-stopped",
         (e) => {
           setPortForwards((prev) =>
             prev.filter(
@@ -1535,13 +1564,17 @@ function App() {
         onClose={() => setShowPalette(false)}
       />
 
-      {/* Phase 40: floating Ports window, scoped to the active workspace. */}
+      {/* Phase 40 → 46: floating Ports window, scoped to the active
+          workspace. Detected ports show as click-to-forward; forwarded
+          ports show Open/Stop. No FeedItem on either event. */}
       <PortsWindow
         open={showPortsWindow()}
         activeWorkspace={activeWs()}
+        detectedPorts={detectedPorts()}
         forwards={portForwards()}
         onClose={() => setShowPortsWindow(false)}
         onStop={stopForward}
+        onStart={startForward}
         onToggleAutoForward={handleToggleAutoForward}
       />
 

@@ -268,7 +268,7 @@
   "ports.window.title": "פורטים — {workspace}",
   "ports.window.toggle.active": "פעיל",
   "ports.window.toggle.inactive": "כבוי",
-  "ports.window.toggle.label": "פתיחה אוטומטית של פורטים",
+  "ports.window.toggle.label": "זיהוי פורטים פתוחים",
   "ports.window.empty.activeNoForwards": "אין פורטים פעילים. הפעל שרת על המכונה המרוחקת כדי לראות אותם כאן.",
   "ports.window.empty.toggleOff": "העברת הפורטים האוטומטית כבויה עבור סביבה זו. הפעל כדי להתחיל מעקב.",
   "ports.window.empty.noWorkspace": "בחר סביבת עבודה כדי לנהל את העברת הפורטים שלה.",
@@ -351,7 +351,6 @@
   "ports.panel.empty": "אין פורטים מועברים — הפעל שרת במעטפת כדי לראות אותו כאן",
   "ports.menu.copyUrl": "העתק כתובת",
   "ports.menu.stopForward": "עצור העברה",
-  "ports.notification.opened": "localhost:{local} מוכן (מהמרוחק :{remote}) — לחץ לפתיחה",
   "ports.row.activeOn": "פעיל ב-localhost:{port}",
   "ports.row.fromRemote": "מהמרוחק :{remote}",
   "ports.workspaceBadge.tooltipOne": "פורט אחד פעיל",
@@ -446,5 +445,12 @@
   "ws.create.env.remove": "הסר",
   "error.sidebarRender": "כשל בטעינת הסיידבר.",
   "error.layoutRender": "כשל בטעינת תצוגה זו.",
-  "sidebar.workspaceConnectedTitle": "מחובר"
+  "sidebar.workspaceConnectedTitle": "מחובר",
+  "ports.window.toggle.hint.on": "זיהוי פעיל — לחץ על פורט כדי לפתוח אותו ב-localhost.",
+  "ports.window.toggle.hint.off": "זיהוי כבוי — הפעל לזיהוי פורטים מרוחקים.",
+  "ports.window.row.forwardAction": "פתח",
+  "ports.window.row.openAction": "פתח בדפדפן",
+  "ports.window.row.stopAction": "סגור",
+  "ports.window.empty.detectionOn": "זיהוי פעיל. ממתין לפורטים מרוחקים…",
+  "ports.window.error.unreachable": "הפורוורד נפתח אך localhost:{local} לא נגיש. הסתיים. ({msg})"
 }

@@ -260,7 +260,7 @@
   "ports.window.title": "Ports — {workspace}",
   "ports.window.toggle.active": "Active",
   "ports.window.toggle.inactive": "Inactive",
-  "ports.window.toggle.label": "Auto-forward listening ports",
+  "ports.window.toggle.label": "Detect open ports",
   "ports.window.empty.activeNoForwards": "No active forwards. Run a server on the remote to see them here.",
   "ports.window.empty.toggleOff": "Auto port forwarding is off for this workspace. Toggle on to start tracking.",
   "ports.window.empty.noWorkspace": "Select a workspace to manage its port forwards.",
@@ -343,7 +343,6 @@
   "ports.panel.empty": "No ports forwarded — start a server in your shell to see it here",
   "ports.menu.copyUrl": "Copy URL",
   "ports.menu.stopForward": "Stop forward",
-  "ports.notification.opened": "localhost:{local} ready (from remote :{remote}) — click to open",
   "ports.row.activeOn": "active on localhost:{port}",
   "ports.row.fromRemote": "from remote :{remote}",
   "ports.workspaceBadge.tooltipOne": "1 port active",
@@ -446,5 +445,12 @@
   "ws.create.env.remove": "remove",
   "error.sidebarRender": "Sidebar failed to render.",
   "error.layoutRender": "Failed to render this layout.",
-  "sidebar.workspaceConnectedTitle": "connected"
+  "sidebar.workspaceConnectedTitle": "connected",
+  "ports.window.toggle.hint.on": "Detection on — click a port to forward it to localhost.",
+  "ports.window.toggle.hint.off": "Detection off — enable to see remote LISTEN ports.",
+  "ports.window.row.forwardAction": "Forward",
+  "ports.window.row.openAction": "Open",
+  "ports.window.row.stopAction": "Stop",
+  "ports.window.empty.detectionOn": "Detection on. Waiting for remote ports…",
+  "ports.window.error.unreachable": "Forward opened but localhost:{local} isn't reachable. Tunnel torn down. ({msg})"
 }

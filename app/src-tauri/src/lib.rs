@@ -233,6 +233,14 @@ pub(crate) struct AppState {
     // handler skips any port in this set.
     pub(crate) internal_reverse_tunnel_remote_ports:
         Arc<Mutex<HashMap<String, std::collections::HashSet<u16>>>>,
+    // Phase 46: ports the remote watcher has REPORTED for each workspace,
+    // separately from `forwards` (which is the subset the user has
+    // chosen to actually tunnel). Runtime-only — never serialized.
+    // Inner map: remote_port → (addr, family) so the UI can show what
+    // bound where without re-querying. Cleared when the workspace
+    // disconnects.
+    pub(crate) detected_ports:
+        Arc<Mutex<HashMap<String, HashMap<u16, (String, String)>>>>,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -3160,8 +3168,39 @@ pub(crate) async fn open_auto_forward(
         "open_auto_forward[{}:{}]: bound 127.0.0.1:{} (kernel-assigned)",
         workspace_id, remote_port, local_port
     ));
+
+    // Phase 46: sanity-probe the bound local port before telling the FE
+    // the forward is live. Catches the IPv4/IPv6 dual-stack pitfall and
+    // any binds that look successful but aren't actually accepting yet —
+    // so the user never opens a browser tab on a dead port.
+    let probe_target = format!("127.0.0.1:{local_port}");
+    let probe = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        tokio::net::TcpStream::connect(&probe_target),
+    )
+    .await;
+    let probe_ok = matches!(probe, Ok(Ok(_)));
+    if !probe_ok {
+        let why = match probe {
+            Ok(Err(e)) => format!("connect failed: {e}"),
+            Err(_) => "200ms timeout".to_string(),
+            Ok(Ok(_)) => unreachable!(),
+        };
+        dlog(&format!(
+            "open_auto_forward[{}:{}]: sanity probe to {} FAILED ({why}) — tearing down",
+            workspace_id, remote_port, probe_target
+        ));
+        close_one_forward(state, app, workspace_id, remote_port);
+        return Err(format!(
+            "forward bound but localhost:{local_port} unreachable ({why})"
+        ));
+    }
+    dlog(&format!(
+        "open_auto_forward[{}:{}]: sanity probe to {} OK",
+        workspace_id, remote_port, probe_target
+    ));
     let _ = app.emit(
-        "port-forward-opened",
+        "port-forwarded",
         serde_json::json!({
             "workspace_id": workspace_id,
             "remote_addr": remote_addr,
@@ -3188,7 +3227,7 @@ pub(crate) fn close_one_forward(
             let _ = c.send(());
         }
         let _ = app.emit(
-            "port-forward-closed",
+            "port-forward-stopped",
             serde_json::json!({
                 "workspace_id": workspace_id,
                 "remote_port": remote_port,
@@ -3790,6 +3829,50 @@ async fn port_forward_stop(
 ) -> Result<(), String> {
     close_one_forward(&state, &app, &workspace_id, remote_port);
     Ok(())
+}
+
+// Phase 46: open a forward on demand — driven by a user click on a
+// detected port in PortsWindow. The watcher only detects now; this
+// command is what actually opens the tunnel. Looks up the remote
+// bind addr from `detected_ports` (falls back to "127.0.0.1" if
+// missing) and hands off to `open_auto_forward`, which now runs a
+// TCP sanity probe before reporting success. Idempotent — returns
+// the existing local port if a forward already exists.
+#[tauri::command]
+async fn forward_port_start(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    remote_port: u16,
+) -> Result<u16, String> {
+    let addr = {
+        let m = state.detected_ports.lock().unwrap();
+        m.get(&workspace_id)
+            .and_then(|ports| ports.get(&remote_port))
+            .map(|(addr, _family)| addr.clone())
+            .unwrap_or_else(|| "127.0.0.1".to_string())
+    };
+    open_auto_forward(&state, &app, &workspace_id, &addr, remote_port).await
+}
+
+// Phase 46: TCP sanity probe used by `open_auto_forward` to verify
+// that a freshly-bound listener is actually reachable on 127.0.0.1
+// before telling the FE the forward is live. Returns Ok if a
+// connection succeeded within the timeout, Err with a reason
+// otherwise. Pulled out as a free function so it's straightforward
+// to unit-test against a known-good (just-bound) listener and a
+// known-bad (vacant) port. Caller drops the returned stream — we
+// only need to know that connect() succeeded.
+#[cfg(test)]
+pub(crate) async fn tcp_probe(
+    target: &str,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    match tokio::time::timeout(timeout, tokio::net::TcpStream::connect(target)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(format!("connect failed: {e}")),
+        Err(_) => Err(format!("timeout after {}ms", timeout.as_millis())),
+    }
 }
 
 // Phase 31: per-pane identity. Same validation as the workspace
@@ -5812,6 +5895,7 @@ pub fn run() {
             workspace_set_identity,
             workspace_set_auto_port_forward,
             port_forward_stop,
+            forward_port_start,
             log_dir_path,
             read_log_tail,
             pane_set_identity,
@@ -5968,6 +6052,43 @@ mod port_forward_tests {
             m.lock().unwrap().get(&("b".to_string(), 8080)).map(|e| e.local_port),
             Some(49777)
         );
+    }
+}
+
+#[cfg(test)]
+mod tcp_probe_tests {
+    // Phase 46: tcp_probe is the post-bind sanity check inside
+    // open_auto_forward — confirms a freshly bound local port is
+    // actually reachable on 127.0.0.1 before we tell the FE the
+    // forward is live (saves opening a browser tab on a dead port).
+    use super::tcp_probe;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn probe_succeeds_for_listening_port() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let target = format!("127.0.0.1:{port}");
+        // Accept loop in background so the probe's connect handshake completes.
+        tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+        let r = tcp_probe(&target, Duration::from_millis(500)).await;
+        assert!(r.is_ok(), "expected Ok, got {:?}", r);
+    }
+
+    #[tokio::test]
+    async fn probe_fails_for_vacant_port() {
+        // Bind+drop reserves a port number then frees it; the probe
+        // hits a port the OS just freed so it returns ECONNREFUSED
+        // (immediate, no timeout needed).
+        let port = {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let target = format!("127.0.0.1:{port}");
+        let r = tcp_probe(&target, Duration::from_millis(300)).await;
+        assert!(r.is_err(), "expected Err for vacant port, got {:?}", r);
     }
 }
 

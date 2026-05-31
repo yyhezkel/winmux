@@ -1788,10 +1788,14 @@ async fn dispatch(
             Ok(json!({ "ok": true, "path": path.to_string_lossy() }))
         }
 
-        // Phase 36 (#2.2): the remote port-watcher reports listening
-        // ports here. We honour the workspace's auto_port_forward
-        // toggle: when off, the watcher keeps running but we no-op so
-        // no tunnels open.
+        // Phase 46: the remote port-watcher reports listening ports
+        // here. We DETECT only — no automatic forward, no FeedItem.
+        // The UI shows the detected port; the user clicks to open
+        // the tunnel via `forward_port_start`. The workspace's
+        // `auto_port_forward` flag still gates detection itself
+        // (watcher off = nothing reaches here in the first place,
+        // but we double-check so toggling off mid-stream stops the
+        // backend recording stale ports).
         "port.opened" => {
             let workspace_id = params
                 .get("workspace_id")
@@ -1807,10 +1811,12 @@ async fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("127.0.0.1")
                 .to_string();
-            // Phase 39: never forward winmux's own reverse-tunnel remote
-            // port — it's an HMAC endpoint, not a web app. Forwarding it
-            // would surface "WINMUX-CHALLENGE / WINMUX-DENIED" in the
-            // user's browser.
+            let family = params
+                .get("family")
+                .and_then(|v| v.as_str())
+                .unwrap_or("v4")
+                .to_string();
+            // Phase 39: never report winmux's own reverse-tunnel port.
             let is_internal = {
                 let m = state.internal_reverse_tunnel_remote_ports.lock().unwrap();
                 m.get(&workspace_id).map(|s| s.contains(&port)).unwrap_or(false)
@@ -1827,18 +1833,25 @@ async fn dispatch(
                     .unwrap_or(false)
             };
             if !enabled {
-                return Ok(json!({ "ok": true, "skipped": "auto_port_forward off" }));
+                return Ok(json!({ "ok": true, "skipped": "detection off" }));
             }
-            match crate::open_auto_forward(state, app, &workspace_id, &addr, port).await {
-                Ok(local_port) => Ok(json!({ "ok": true, "local_port": local_port })),
-                Err(e) => {
-                    let _ = app.emit(
-                        "toast",
-                        json!({ "kind": "error", "message": format!("port {port}: {e}") }),
-                    );
-                    Err(e)
-                }
+            // Record + notify FE. No forward is opened.
+            {
+                let mut m = state.detected_ports.lock().unwrap();
+                m.entry(workspace_id.clone())
+                    .or_default()
+                    .insert(port, (addr.clone(), family.clone()));
             }
+            let _ = app.emit(
+                "port-detected",
+                json!({
+                    "workspace_id": workspace_id,
+                    "addr": addr,
+                    "remote_port": port,
+                    "family": family,
+                }),
+            );
+            Ok(json!({ "ok": true, "detected": true }))
         }
 
         "port.closed" => {
@@ -1851,6 +1864,24 @@ async fn dispatch(
                 .get("port")
                 .and_then(|v| v.as_u64())
                 .ok_or("missing port")? as u16;
+            // Drop from detected set + tell the FE.
+            let was_detected = {
+                let mut m = state.detected_ports.lock().unwrap();
+                m.get_mut(&workspace_id)
+                    .map(|ports| ports.remove(&port).is_some())
+                    .unwrap_or(false)
+            };
+            if was_detected {
+                let _ = app.emit(
+                    "port-undetected",
+                    json!({
+                        "workspace_id": workspace_id,
+                        "remote_port": port,
+                    }),
+                );
+            }
+            // If this port was actually forwarded, tear that down too.
+            // close_one_forward is a no-op if no entry exists.
             crate::close_one_forward(state, app, &workspace_id, port);
             Ok(json!({ "ok": true }))
         }

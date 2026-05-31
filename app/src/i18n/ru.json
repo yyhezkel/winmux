@@ -268,7 +268,7 @@
   "ports.window.title": "Порты — {workspace}",
   "ports.window.toggle.active": "Активно",
   "ports.window.toggle.inactive": "Неактивно",
-  "ports.window.toggle.label": "Автопереброс портов",
+  "ports.window.toggle.label": "Обнаружение открытых портов",
   "ports.window.empty.activeNoForwards": "Нет активных пробросов. Запустите сервер на удалённой машине, чтобы увидеть их здесь.",
   "ports.window.empty.toggleOff": "Автопереброс портов выключен для этого пространства. Включите, чтобы начать отслеживание.",
   "ports.window.empty.noWorkspace": "Выберите рабочее пространство, чтобы управлять перебросом портов.",
@@ -351,7 +351,6 @@
   "ports.panel.empty": "Нет проброшенных портов — запустите сервер в терминале, чтобы увидеть его здесь",
   "ports.menu.copyUrl": "Копировать URL",
   "ports.menu.stopForward": "Остановить проброс",
-  "ports.notification.opened": "localhost:{local} готов (с удалённого :{remote}) — нажмите, чтобы открыть",
   "ports.row.activeOn": "активен на localhost:{port}",
   "ports.row.fromRemote": "с удалённого :{remote}",
   "ports.workspaceBadge.tooltipOne": "1 активный порт",
@@ -446,5 +445,12 @@
   "ws.create.env.remove": "Удалить",
   "error.sidebarRender": "Не удалось отобразить боковую панель.",
   "error.layoutRender": "Не удалось отобразить этот макет.",
-  "sidebar.workspaceConnectedTitle": "Подключено"
+  "sidebar.workspaceConnectedTitle": "Подключено",
+  "ports.window.toggle.hint.on": "Обнаружение включено — нажмите порт, чтобы открыть его в localhost.",
+  "ports.window.toggle.hint.off": "Обнаружение выключено — включите, чтобы видеть удалённые LISTEN-порты.",
+  "ports.window.row.forwardAction": "Открыть",
+  "ports.window.row.openAction": "Открыть",
+  "ports.window.row.stopAction": "Остановить",
+  "ports.window.empty.detectionOn": "Обнаружение включено. Ожидание удалённых портов…",
+  "ports.window.error.unreachable": "Перенаправление открыто, но localhost:{local} недоступен. Отключено. ({msg})"
 }

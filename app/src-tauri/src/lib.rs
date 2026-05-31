@@ -5882,6 +5882,22 @@ fn feed_decide(
     decide_feed(&state, &app, &request_id, &decision)
 }
 
+// Phase 48-D: frontend stall instrumentation. The FE drives a 100ms
+// heartbeat and a longtask PerformanceObserver; when either spots
+// >threshold gaps, it calls this to record them in debug.log with a
+// `[ui]` prefix so post-hoc support tickets can correlate UI jank
+// with backend activity.
+#[tauri::command]
+fn diag_log(level: String, msg: String) -> Result<(), String> {
+    let lvl = match level.to_ascii_lowercase().as_str() {
+        "error" => "ERROR",
+        "warn" | "warning" => "WARN",
+        _ => "INFO",
+    };
+    dlog(&format!("[ui] {lvl}: {msg}"));
+    Ok(())
+}
+
 #[tauri::command]
 fn pty_resize(
     state: State<'_, AppState>,
@@ -6152,6 +6168,7 @@ pub fn run() {
             dev_console_log,
             pty_write,
             pty_resize,
+            diag_log,
             notifications_list,
             notifications_clear,
             pane_status_get,

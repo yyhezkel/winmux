@@ -1014,6 +1014,45 @@ function App() {
   };
 
   onMount(async () => {
+    // Phase 48-D: lightweight UI-stall instrumentation. A 100ms heartbeat
+    // measures actual elapsed vs expected and reports gaps >300ms; a
+    // PerformanceObserver on `longtask` reports any single task >200ms.
+    // Both go to debug.log via the `diag_log` tauri command so future
+    // support tickets can correlate UI jank with backend activity.
+    // No cleanup: these run for the app's lifetime.
+    {
+      const HEARTBEAT_MS = 100;
+      const STALL_THRESHOLD_MS = 300;
+      const LONGTASK_THRESHOLD_MS = 200;
+      let lastTick = performance.now();
+      window.setInterval(() => {
+        const now = performance.now();
+        const gap = now - lastTick;
+        lastTick = now;
+        if (gap > STALL_THRESHOLD_MS) {
+          void invoke("diag_log", {
+            level: "warn",
+            msg: `UI stall: ${Math.round(gap)}ms (expected ~${HEARTBEAT_MS}ms)`,
+          }).catch(() => {});
+        }
+      }, HEARTBEAT_MS);
+      try {
+        const obs = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (entry.duration > LONGTASK_THRESHOLD_MS) {
+              void invoke("diag_log", {
+                level: "warn",
+                msg: `longtask ${entry.name || "(anon)"} ${Math.round(entry.duration)}ms`,
+              }).catch(() => {});
+            }
+          }
+        });
+        obs.observe({ entryTypes: ["longtask"] });
+      } catch {
+        // Some WebView versions don't support the longtask entry type — skip.
+      }
+    }
+
     // Phase 9.A: load + apply settings as early as possible so the splash
     // colors don't pop to a different palette on first paint.
     try {

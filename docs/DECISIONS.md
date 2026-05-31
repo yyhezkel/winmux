@@ -28,20 +28,13 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 ### 2026-05-27 — Competitive-scan ideas inventory (triage in progress)
 - **Context:** Survey of 8 winmux GitHub projects produced an inventory of ~25 ideas to potentially adopt. Highest-impact triple: HTTP Automation API for LLM control (#2.1), Auto port forwarding (#2.2), Secrets Vault (#3.2).
 - **Source docs:** `docs/COMPETITIVE-SCAN.md` (full report + Secrets Vault design), `docs/IDEAS-RANKING.md` (decision table).
-- **Status:** 5 MUST closed in Phase 35 (`bddc0b0`), auto port forwarding closed in Phase 36 / 36.A (`95de6f1`). 3 MUST remain (Pipe hardening deferred, Secrets Vault deferred → external MCP integration, Full LLM control on the roadmap), plus 10 SHOULD + 6 COULD. As individual items are decided, move them to their own Decided / Open entries with phase + commit references. Master inventory stays here until fully triaged.
+- **Status:** 5 MUST closed in Phase 35 (`bddc0b0`), auto port forwarding closed in Phase 36 / 36.A (`95de6f1`). Pipe hardening landed in Phase 44 (`c65b0c5`). Phase 48 closed several SHOULD/COULD items: #1.4 Ctrl+Alt+Arrow split-or-move, #3.3 ADR + threat-model docs, #4.9 /doctor diagnostic endpoint, #4.10 frontend stall instrumentation, plus BiDi 33A (HTML-surface tokens). 2 MUST remain (Secrets Vault deferred → external MCP integration, Full LLM control on the roadmap). As individual items are decided, move them to their own Decided / Open entries with phase + commit references. Master inventory stays here until fully triaged.
 - **Also flagged:** the `winmux` name is taken by 8 projects on GitHub — rebrand caveat (see scan doc's "Naming Caveat" section).
 
-### 2026-05-27 — Bidi mixed-content rendering
-- **Context:** Hebrew + Latin tokens (DEV, MAIN) in Claude Code CLI output mislead readers visually in xterm.js. User confirmed approach 1+2.
-- **Plan:**
-  - 33A — `<code>` styling + `<bdi>` wrapping for technical tokens on HTML surfaces (chat, editor, modals, file manager)
-  - 33B — opt-in PTY bidi filter for Claude Code panes (FSI/PDI around Latin runs in plain text lines; leave ANSI escapes and box-drawing untouched)
-- **Status:** Paused while Help discovery (Phase 34) shipped first. Resume next.
-
-### 2026-05-27 — PATH auto-registration in the WiX/NSIS installer
-- **Context:** v0.1.0 README "Coming next" item. Splits off from the now-closed long-standing roadmap block because it's small and in scope (everything else in that block went to out-of-scope).
-- **Effort:** ~1 hour. Modify the NSIS installer script to add winmux's install dir to PATH on install, remove on uninstall.
-- **Status:** Open, low priority but cheap to ship.
+### 2026-05-27 — BiDi 33B: opt-in PTY filter for Claude Code panes
+- **Context:** Phase 48-A shipped 33A (HTML-surface `<TechText>` + `<bdi>` wrapping). 33B remains: an opt-in filter on the PTY byte stream itself that wraps Latin runs in FSI/PDI inside plain text lines, leaving ANSI escapes and box-drawing untouched.
+- **Why deferred:** PTY filtering risks breaking display in subtle ways (cursor positioning, line wrapping, color sequences). Wait until 33A has proven out in production before touching xterm.js.
+- **Status:** Open, paused. Reassess when there's appetite + a Claude Code workflow that 33A doesn't already cover.
 
 ### 2026-05-27 — Full LLM control of the app (= scan #2.1, HTTP Automation API)
 - **Context:** Today Claude runs *inside* winmux panes; goal is to also let Claude *drive* winmux from the outside — "open me a pane on server X and run cargo build", "read me the scrollback of pane #3", "screenshot the workspace", etc.
@@ -57,6 +50,20 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 ---
 
 ## Decided
+
+### 2026-05-31 — Sprint 2 batch: BiDi 33A, /doctor, stall telemetry, Ctrl+Alt+Arrow, PATH installer, ADR + threat model, FAB cleanup (Phase 48, `5a14540`..`52facf8`)
+- **Context:** Yossi greenlit "run on the whole list together" — a single Phase 48 covering multiple SHOULD/COULD items from the competitive-scan inventory plus deferred BiDi 33A and PATH installer.
+- **Decision (6 of 7 shipped, 1 deferred, sub-commits):**
+  - **48-G** (`5a14540`) — `docs/ADR.md` (7 entries: Tauri/Solid/russh/named-pipe/ureq/DPAPI/per-workspace-identity) + `docs/SECURITY.md` (threat model: assets, adversaries A1-A5, per-adversary mitigations, explicit out-of-scope, open security questions).
+  - **48-D** (`b224da0`) — frontend stall instrumentation: 100ms heartbeat + `PerformanceObserver({longtask})` → new `diag_log` tauri command writes to debug.log with `[ui]` prefix.
+  - **48-C** (`89cb820`) — `/doctor` snapshot shared across tauri command, RPC method `"doctor"`, and `winmux doctor` CLI subcommand. Includes version, workspace + SSH counts, PTY count, RPC pipe/pool/handler-counter, bundled Linux CLI sha256, last 10 ERROR/WARN log lines. Lifted Phase 44 `HANDLER_SEQ` to `pub(crate)`. Run-Doctor button in SettingsModal Logs tab.
+  - **48-A** (`f092d0c`) — BiDi 33A: `<TechText>` SolidJS component detects technical tokens (ALL_CAPS, paths, URLs, SHAs, common git ref words) and wraps each in `<code class="tech-token"><bdi>...</bdi></code>`. Applied at the 3 highest-visibility sites (Feed titles, Sidebar workspace names, PaneView pane titles). xterm.js NOT touched — 33B stays Open.
+  - **48-E** (`ec58541`) — Ctrl+Alt+Arrow split-or-move: layout tree walk finds nearest pane in the requested direction; focuses it if found, else `splitPane(current, horizontal|vertical)`.
+  - **48-B** (`1e28af5` + fixup `52facf8`) — NSIS installer hooks for HKCU PATH registration. First attempt used `${StrLoc}` standalone (broke NSIS compile with "STRFUNC_CALL_StrLoc requires 5 parameter(s)"); fixup dropped StrFunc, uses only `WordReplace` from WordFunc.nsh with the standard `!insertmacro` activation. WiX MSI Environment element NOT done — needs a separate fragment file + WiX-side testing (filed for a follow-up; MSI installers won't auto-PATH).
+- **Deferred (1):**
+  - **48-F** — per-workspace browser session dir. The browser pane is iframe-based (`HTMLIFrameElement`), not a separate Tauri WebView, so `additional_browser_args --user-data-dir=...` has no plumbing point with the current architecture. A real fix needs browser-pane-as-WebView (architecture-level change) as its own phase.
+- **Validation:** cargo check clean, 41 Rust tests pass, tsc clean across all sub-commits; debug build BUILD_EXIT 0 after the 48-B fixup. app.exe ~31.1 MB. No version bump — batches into v0.2.7.
+- **Open→Decided moves performed alongside this entry:** "BiDi mixed-content rendering" replaced with a 33B-only Open entry; "PATH auto-registration" removed (now Decided in 48-B); ADR + threat model docs were #3.3 of the master inventory, status line updated.
 
 ### 2026-05-31 — Headless connect now bootstraps the reverse tunnel (Phase 47.A, `7c38594`)
 - **Context:** Phase 47 closed most of the "stuck searching" report but left a known limitation: a workspace whose detection toggle was on but with no terminal pane ever opened couldn't bootstrap the port-watcher. Phase 41's headless connect set up SSH auth and stored a `Session::Ssh`, but never called `tcpip_forward` — so `workspace_tunnel_tokens[ws]` + `internal_reverse_tunnel_remote_ports[ws]` stayed empty and `try_ensure_port_watcher` bailed with "needs a pane to bootstrap." Yossi's actual usage pattern is: open a workspace and look at ports without necessarily opening any pane — so the limitation was painful in practice.

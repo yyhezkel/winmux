@@ -1197,7 +1197,7 @@ function App() {
       <ErrorBoundary
         fallback={(err) => (
           <div class="sidebar-error">
-            <p>Sidebar failed to render.</p>
+            <p>{t("error.sidebarRender")}</p>
             <pre>{String(err)}</pre>
             <button class="primary" onClick={() => setShowCreate(true)}>
               + New workspace
@@ -1334,7 +1334,7 @@ function App() {
             <ErrorBoundary
               fallback={(err, _reset) => (
                 <div class="layout-error">
-                  <p>Failed to render this layout.</p>
+                  <p>{t("error.layoutRender")}</p>
                   <pre class="layout-error-detail">{String(err)}</pre>
                   <button
                     class="primary"

@@ -733,7 +733,7 @@ export function CreateWorkspaceModal(p: Props) {
                 <input
                   value={user()}
                   onInput={(e) => setUser(e.currentTarget.value)}
-                  placeholder="user"
+                  placeholder={t("ws.create.field.user.placeholder")}
                 />
               </label>
               <label>
@@ -966,7 +966,7 @@ export function CreateWorkspaceModal(p: Props) {
               {(row, i) => (
                 <div class="env-row">
                   <input
-                    placeholder="KEY"
+                    placeholder={t("ws.create.env.key.placeholder")}
                     value={row.key}
                     onInput={(e) => {
                       const next = [...envRows()];
@@ -976,7 +976,7 @@ export function CreateWorkspaceModal(p: Props) {
                   />
                   <span class="env-eq">=</span>
                   <input
-                    placeholder="value"
+                    placeholder={t("ws.create.env.value.placeholder")}
                     value={row.value}
                     onInput={(e) => {
                       const next = [...envRows()];
@@ -989,7 +989,7 @@ export function CreateWorkspaceModal(p: Props) {
                   />
                   <button
                     class="env-remove"
-                    title="remove"
+                    title={t("ws.create.env.remove")}
                     onClick={() => {
                       const next = [...envRows()];
                       next.splice(i(), 1);

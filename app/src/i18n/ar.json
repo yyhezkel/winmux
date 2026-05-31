@@ -58,7 +58,7 @@
   "settings.reset_all": "إعادة تعيين الكل",
   "settings.saving": "يحفظ…",
   "settings.saved": "تم الحفظ ✓",
-  "settings.theme.preset": "القالب",
+  "settings.theme.preset": "إعداد جاهز للسمة",
   "settings.theme.base_colors": "الألوان الأساسية",
   "settings.theme.advanced": "لوحة ANSI (16 لون)",
   "settings.font.ui": "خط الواجهة",
@@ -66,11 +66,11 @@
   "settings.font.family": "العائلة",
   "settings.font.size": "الحجم (pt)",
   "settings.terminal.cursor": "المؤشر",
-  "settings.terminal.buffer": "Buffer",
-  "settings.terminal.scrollback": "أسطر التمرير",
+  "settings.terminal.buffer": "ذاكرة مؤقتة",
+  "settings.terminal.scrollback": "التمرير الرجعي",
   "settings.terminal.bidi": "إعادة ترتيب BiDi (عربي/عبري)",
   "settings.terminal.allow_proposed": "السماح بـ proposed API لـ xterm.js (لازم لـ WebGL)",
-  "settings.hooks.title": "Hooks الوكلاء",
+  "settings.hooks.title": "خطافات الوكيل",
   "settings.hooks.enabled": "توجيه طلبات الإذن من وكلاء الذكاء الاصطناعي عبر winmux",
   "settings.hooks.policy_preset": "قالب السياسة",
   "settings.hooks.preset.paranoid": "بارانويا — كل أداة تطلب إذنًا",
@@ -78,7 +78,7 @@
   "settings.hooks.preset.relaxed": "مرن — سماح تلقائي للأدوات الموثوقة",
   "settings.hooks.preset.auto": "تلقائي — لا يطلب أبدًا (مهجور)",
   "settings.hooks.cli_hint": "لتثبيت/تحديث hooks النظام، شغل {cmd} في أي طرفية.",
-  "settings.notifications.toasts": "Toasts",
+  "settings.notifications.toasts": "إشعارات",
   "settings.notifications.toast_enabled": "إظهار إشعارات النظام (أحداث مساحة العمل، التحديثات)",
   "settings.notifications.sound_enabled": "تشغيل صوت على بطاقات طلب الإذن",
   "settings.updates.title": "فحص التحديثات",
@@ -111,9 +111,7 @@
   "notes.btn.reopen": "إعادة فتح",
   "notes.btn.mark_done": "تحديد كمنجز",
   "notes.btn.delete": "حذف",
-
   "feed.btn.dismiss": "إلغاء",
-
   "browser.btn.back": "السابق",
   "browser.btn.reload": "إعادة تحميل",
   "browser.btn.home": "الرئيسية",
@@ -124,7 +122,6 @@
   "browser.btn.close": "إغلاق اللوحة",
   "browser.waiting_ssh": "في انتظار جلسة SSH…",
   "browser.empty_url": "أدخل عنوان URL أعلاه لتحميل صفحة.",
-
   "ws.create.title.new": "بيئة عمل جديدة",
   "ws.create.title.edit": "تعديل بيئة العمل",
   "ws.create.field.name": "الاسم",
@@ -138,7 +135,7 @@
   "ws.create.field.type": "النوع",
   "ws.create.field.type.local": "PTY محلي",
   "ws.create.field.type.ssh": "SSH",
-  "ws.create.field.shell": "Shell",
+  "ws.create.field.shell": "صدفة",
   "ws.create.field.shell.placeholder": "(تلقائي: pwsh→powershell→cmd)",
   "ws.create.field.user": "المستخدم",
   "ws.create.field.host": "المضيف",
@@ -160,7 +157,6 @@
   "ws.create.field.env": "متغيرات البيئة",
   "ws.create.btn.add_env": "+ إضافة",
   "ws.create.btn.create": "إنشاء",
-
   "wizard.import_btn": "استيراد من SSH config",
   "wizard.import_no_hosts": "لم يتم العثور على hosts في ~/.ssh/config",
   "wizard.import_hosts_tooltip": "اختر من {n} hosts في ssh_config",
@@ -176,7 +172,6 @@
   "wizard.test_meta": "الطريقة: {method} · المرحلة: {stage} · {ms} م.ث",
   "wizard.picker.title": "اختر host من ~/.ssh/config",
   "wizard.picker.empty": "لم يتم العثور على Host blocks. أضف بعضها إلى ~/.ssh/config.",
-
   "provisioning.title": "إعداد خادم جديد",
   "provisioning.step.connect": "1 / 4 · اتصال",
   "provisioning.step.configure": "2 / 4 · تكوين",
@@ -206,7 +201,6 @@
   "provisioning.run.starting": "(يبدأ…)",
   "provisioning.btn.mark_done": "وضع علامة كمنجز",
   "provisioning.done.message": "اكتمل الإعداد. يمكنك إغلاق هذا الحوار.",
-
   "fm.btn.up": "أعلى",
   "fm.btn.refresh": "تحديث",
   "fm.btn.new_folder": "مجلد جديد",
@@ -235,7 +229,6 @@
   "fm.btn.copy_path_current": "نسخ المسار الحالي",
   "fm.action.copy_path": "نسخ المسار",
   "fm.toast.path_copied": "تم النسخ: {path}",
-
   "settings.font.web.title": "خط ويب (اختياري)",
   "settings.font.web.url": "عنوان Stylesheet",
   "settings.font.web.hint": "يدخل وسم CSS link في وقت التشغيل. بعد التحميل، اكتب اسم العائلة في الحقول أعلاه (مثل {example}).",
@@ -251,12 +244,10 @@
   "settings.terminal.use_winmux_tmux_config.hint": "ينشر ملف tmux.conf إلى ~/.winmux/tmux.conf بحيث يقوم تمرير العجلة بالتمرير في الذاكرة المؤقتة بدلاً من سجل الصدفة، buffer بحجم 50,000 سطر، دعم truecolour. أوقف للعودة إلى ~/.tmux.conf الخاص بك. يسري عند الاتصال التالي للوحة.",
   "settings.autoConnect.label": "اتصال تلقائي عند تحديد بيئة العمل",
   "settings.autoConnect.hint": "عند التفعيل، يؤدي الانتقال إلى بيئة عمل SSH إلى إنشاء اتصال في الخلفية بحيث تظهر جلسات tmux وملفاتك فورًا. عطّله لتأجيل الاتصال حتى فتح لوحة طرفية.",
-
   "ws_header.add_browser": "🌐 + متصفح",
   "ws_header.add_filemanager": "🗂 + ملفات",
   "ws_header.split_browser_title": "تقسيم إلى لوحة متصفح",
   "ws_header.split_filemanager_title": "تقسيم إلى لوحة مدير الملفات (محلي + SFTP)",
-
   "sidebar.provision_server": "☁ إعداد خادم",
   "sidebar.provision_server_tooltip": "إعداد خادم جديد بمستخدمين ومفاتيح وأدوات",
   "sidebar.settings.tooltip": "الإعدادات",
@@ -281,10 +272,9 @@
   "ports.window.empty.activeNoForwards": "لا توجد إعادة توجيه نشطة. شغّل خادمًا على الجهاز البعيد لرؤيتها هنا.",
   "ports.window.empty.toggleOff": "إعادة توجيه المنافذ التلقائية متوقفة لبيئة العمل هذه. فعّلها لبدء التتبع.",
   "ports.window.empty.noWorkspace": "اختر بيئة عمل لإدارة إعادة توجيه المنافذ الخاصة بها.",
-
   "ws.create.mode.wizard": "معالج",
   "ws.create.mode.custom": "أمر مخصص",
-  "ws.create.shell.label": "Shell",
+  "ws.create.shell.label": "صدفة",
   "ws.create.shell.pwsh": "PowerShell 7",
   "ws.create.shell.powershell": "Windows PowerShell",
   "ws.create.shell.cmd": "Command Prompt",
@@ -297,7 +287,6 @@
   "ws.create.cwd.defaults": "مواقع شائعة",
   "ws.create.custom_cmd.label": "الأمر",
   "ws.create.custom_cmd.placeholder": "مثل: pwsh.exe -NoLogo, wsl bash -l, cmd.exe /K cd",
-
   "provisioning.agents.section_title": "وكلاء البرمجة بالذكاء الاصطناعي",
   "provisioning.agents.help": "كل العوامل اختيارية. Codex و Gemini يحتاجان Node.js (فعّل تلك الخطوة أيضًا).",
   "provisioning.step.install_claude.label": "Claude Code (Anthropic) — مثبّت curl",
@@ -308,7 +297,6 @@
   "provisioning.step.install_gemini.auth_hint": "شغّل `gemini` لتسجيل الدخول بـ Google، أو عيّن GEMINI_API_KEY للوضع headless.",
   "provisioning.step.add_winmux_to_path.label": "إضافة winmux إلى PATH",
   "provisioning.step.add_winmux_to_path.description": "إلحاق ~/.winmux/bin بملف rc الخاص بـ shell المستخدم (bash / zsh / fish). متكرر-آمن.",
-
   "provisioning.field.workspace_name": "اسم بيئة العمل",
   "provisioning.field.workspace_name.placeholder": "(يُشتق تلقائيًا من المضيف)",
   "provisioning.done.workspace_created": "✓ تم إنشاء بيئة العمل \"{name}\" وهي جاهزة.",
@@ -368,7 +356,6 @@
   "ports.row.fromRemote": "من البعيد :{remote}",
   "ports.workspaceBadge.tooltipOne": "منفذ واحد نشط",
   "ports.workspaceBadge.tooltipMany": "{count} منافذ نشطة",
-
   "settings.tab.shortcuts": "اختصارات",
   "settings.shortcuts.title": "اختصارات لوحة المفاتيح",
   "settings.shortcuts.hint": "انقر على اختصار لتسجيل تركيبة جديدة. Esc يلغي. تركيبات بمفاتيح تعديل فقط (Ctrl لوحده، إلخ) ترفض.",
@@ -381,14 +368,12 @@
   "settings.shortcuts.toggle_settings": "تبديل عرض الإعدادات",
   "settings.shortcuts.ctrl_c_copy": "عند تحديد نص، Ctrl+C ينسخ بدلاً من إرسال SIGINT",
   "settings.shortcuts.recording": "اضغط تركيبة مفاتيح…",
-
   "fm.checkbox.show_local": "إظهار المحلي",
   "fm.empty.connect_terminal_first": "وصل لوحة طرفية في بيئة العمل هذه لتحميل ملفات الخادم.",
   "fm.action.open": "فتح",
   "fm.action.edit": "تحرير",
   "fm.toast.opened_local": "تم فتح: {file}",
   "fm.toast.opened_remote": "تم تنزيله إلى temp وفتحه: {file} (التغييرات لن تُزامن للخادم)",
-
   "common.loading": "جارٍ التحميل…",
   "common.saving": "جارٍ الحفظ…",
   "editor.title": "{filename} — محرر",
@@ -412,7 +397,6 @@
   "editor.replace.placeholder": "استبدال بـ…",
   "editor.replace.one": "استبدال",
   "editor.replace.all": "استبدال الكل",
-
   "settings.tab.claude": "claude",
   "settings.claude.title": "ملخص جلسة Claude",
   "settings.claude.hint": "يمرر آخر N محادثات من جلسة Claude Code عبر `claude -p` على البعيد، يحفظ النتيجة كملاحظة winmux بوسم `summary`. التشغيل اليدوي عبر اختصار لوحة المفاتيح؛ التلقائي عبر التفعيل أدناه.",
@@ -424,7 +408,6 @@
   "claude.summary.toast": "تم حفظ الملخص كملاحظة ({count} رسائل)",
   "claude.summary.no_workspace": "لا توجد بيئة عمل نشطة.",
   "claude.summary.empty": "لم يتم العثور على رسائل في الجلسة.",
-
   "hooks_update.banner.title": "تحديث Hooks متاح",
   "hooks_update.banner.text": "{agent} hooks v{current} → v{latest} على هذا الخادم",
   "hooks_update.btn.update": "تحديث الآن",
@@ -433,28 +416,35 @@
   "hooks_update.toast_done": "تم تحديث Hooks إلى v{version}. أعد تشغيل العميل.",
   "settings.hooks_updates.title": "شعارات تحديث Hooks",
   "settings.hooks_updates.show_banners": "إظهار شعار عندما تكون hooks العميل قديمة",
-
   "tmux_picker.title": "الاتصال بجلسة tmux",
   "tmux_picker.new_session": "جلسة جديدة",
   "tmux_picker.new_session_hint": "أنشئ جلسة tmux جديدة باسم هذه اللوحة.",
   "tmux_picker.loading": "جارٍ تحميل الجلسات…",
   "tmux_picker.empty": "لا توجد جلسات حالية — اختر \"جلسة جديدة\" أعلاه.",
-  "tmux_picker.pane_id_target": "→ pane id",
+  "tmux_picker.pane_id_target": "← معرف اللوحة",
   "tmux_picker.attached": "⚠ متصلة",
   "tmux_picker.window": "{n} نافذة",
   "tmux_picker.windows": "{n} نوافذ",
   "tmux_picker.rename": "إعادة تسمية",
   "tmux_picker.rename_prompt": "اسم جديد لـ \"{name}\":",
   "tmux_picker.invalid_name": "لا يمكن أن يحتوي الاسم على مسافات أو نقاط أو نقطتين رأسيتين.",
-
   "claude_picker.title": "استئناف جلسة Claude Code",
   "claude_picker.loading": "جارٍ التحميل…",
   "claude_picker.empty": "لم يتم العثور على جلسات Claude Code على هذا المضيف.",
   "claude_picker.user_prefix": "المستخدم:",
   "claude_picker.assistant_prefix": "Claude:",
-
   "tmux_picker.new_session_hint_v2": "أنشئ جلسة جديدة باسم فريد يتم توليده تلقائيًا",
-  "tmux_picker.label_secondary": "session: {name}",
-
-  "_phase24d_note": "Phase 24.D removed ws_header.add_chat / .add_claudelog and the chat.* / cl.* key namespaces with the ClaudeChat (Phase 22) + ClaudeLog (Phase 24.B) panes."
+  "tmux_picker.label_secondary": "جلسة: {name}",
+  "_phase24d_note": "Phase 24.D removed ws_header.add_chat / .add_claudelog and the chat.* / cl.* key namespaces with the ClaudeChat (Phase 22) + ClaudeLog (Phase 24.B) panes.",
+  "settings.font.ui.placeholder": "system-ui أو أي خط مثبت",
+  "settings.font.terminal.placeholder": "Cascadia Mono / JetBrains Mono / …",
+  "settings.terminal.buffer.title": "ذاكرة مؤقتة",
+  "settings.notifications.toasts.title": "إشعارات",
+  "ws.create.field.user.placeholder": "مستخدم",
+  "ws.create.env.key.placeholder": "مفتاح",
+  "ws.create.env.value.placeholder": "قيمة",
+  "ws.create.env.remove": "إزالة",
+  "error.sidebarRender": "فشل في عرض الشريط الجانبي.",
+  "error.layoutRender": "فشل في عرض هذا التخطيط.",
+  "sidebar.workspaceConnectedTitle": "متصل"
 }

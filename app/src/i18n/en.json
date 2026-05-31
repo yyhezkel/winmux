@@ -416,7 +416,6 @@
   "editor.replace.placeholder": "Replace with…",
   "editor.replace.one": "Replace",
   "editor.replace.all": "Replace all",
-
   "tmux_picker.title": "Attach to tmux session",
   "tmux_picker.new_session": "New session",
   "tmux_picker.new_session_hint": "Create a fresh tmux session named after this pane.",
@@ -429,15 +428,23 @@
   "tmux_picker.rename": "Rename",
   "tmux_picker.rename_prompt": "New name for \"{name}\":",
   "tmux_picker.invalid_name": "Name can't contain spaces, dots, or colons.",
-
   "claude_picker.title": "Resume Claude Code session",
   "claude_picker.loading": "Loading…",
   "claude_picker.empty": "No Claude Code sessions found on this host.",
   "claude_picker.user_prefix": "U:",
   "claude_picker.assistant_prefix": "A:",
-
   "tmux_picker.new_session_hint_v2": "Create a fresh session with a unique auto-generated name",
   "tmux_picker.label_secondary": "session: {name}",
-
-  "_phase24d_note": "Phase 24.D removed ws_header.add_chat / .add_claudelog and the chat.* / cl.* key namespaces with the ClaudeChat (Phase 22) + ClaudeLog (Phase 24.B) panes."
+  "_phase24d_note": "Phase 24.D removed ws_header.add_chat / .add_claudelog and the chat.* / cl.* key namespaces with the ClaudeChat (Phase 22) + ClaudeLog (Phase 24.B) panes.",
+  "settings.font.ui.placeholder": "system-ui or any installed font",
+  "settings.font.terminal.placeholder": "Cascadia Mono / JetBrains Mono / …",
+  "settings.terminal.buffer.title": "Buffer",
+  "settings.notifications.toasts.title": "Toasts",
+  "ws.create.field.user.placeholder": "user",
+  "ws.create.env.key.placeholder": "KEY",
+  "ws.create.env.value.placeholder": "value",
+  "ws.create.env.remove": "remove",
+  "error.sidebarRender": "Sidebar failed to render.",
+  "error.layoutRender": "Failed to render this layout.",
+  "sidebar.workspaceConnectedTitle": "connected"
 }

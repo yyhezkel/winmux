@@ -213,7 +213,7 @@ export function SettingsModal(p: Props) {
               {/* ── Theme ────────────────────────────────────────────── */}
               <Show when={tab() === "theme"}>
                 <section>
-                  <h4>Preset</h4>
+                  <h4>{t("settings.theme.preset")}</h4>
                   <div class="settings-preset-grid">
                     <For each={presets()}>
                       {(pr) => (
@@ -239,7 +239,7 @@ export function SettingsModal(p: Props) {
                   </div>
                 </section>
                 <section>
-                  <h4>Base colors</h4>
+                  <h4>{t("settings.theme.base_colors")}</h4>
                   <div class="settings-color-grid">
                     <ColorRow label="Accent" value={p.settings.theme.accent} onInput={(v) => setTheme({ accent: v })} />
                     <ColorRow label="Background" value={p.settings.theme.background} onInput={(v) => setTheme({ background: v })} />
@@ -281,13 +281,13 @@ export function SettingsModal(p: Props) {
                   the "Web font URL" field below can fetch one at runtime). */}
               <Show when={tab() === "font"}>
                 <section>
-                  <h4>UI font</h4>
+                  <h4>{t("settings.font.ui")}</h4>
                   <label>
-                    <span>Family</span>
+                    <span>{t("settings.font.family")}</span>
                     <input
                       type="text"
                       list="winmux-ui-fonts"
-                      placeholder="system-ui or any installed font"
+                      placeholder={t("settings.font.ui.placeholder")}
                       value={p.settings.font.ui_family}
                       onChange={(e) => update("font", { ...p.settings.font, ui_family: e.currentTarget.value })}
                       onBlur={(e) => update("font", { ...p.settings.font, ui_family: e.currentTarget.value })}
@@ -313,13 +313,13 @@ export function SettingsModal(p: Props) {
                   </label>
                 </section>
                 <section>
-                  <h4>Terminal font</h4>
+                  <h4>{t("settings.font.terminal")}</h4>
                   <label>
-                    <span>Family</span>
+                    <span>{t("settings.font.family")}</span>
                     <input
                       type="text"
                       list="winmux-mono-fonts"
-                      placeholder="Cascadia Mono / JetBrains Mono / …"
+                      placeholder={t("settings.font.terminal.placeholder")}
                       value={p.settings.font.terminal_family}
                       onChange={(e) => update("font", { ...p.settings.font, terminal_family: e.currentTarget.value })}
                       onBlur={(e) => update("font", { ...p.settings.font, terminal_family: e.currentTarget.value })}
@@ -366,7 +366,7 @@ export function SettingsModal(p: Props) {
               {/* ── Terminal ─────────────────────────────────────────── */}
               <Show when={tab() === "terminal"}>
                 <section>
-                  <h4>Cursor</h4>
+                  <h4>{t("settings.terminal.cursor")}</h4>
                   <div class="settings-radio-row">
                     <For each={["block", "bar", "underline"] as const}>
                       {(c) => (
@@ -385,9 +385,9 @@ export function SettingsModal(p: Props) {
                   </div>
                 </section>
                 <section>
-                  <h4>Buffer</h4>
+                  <h4>{t("settings.terminal.buffer.title")}</h4>
                   <label>
-                    <span>Scrollback</span>
+                    <span>{t("settings.terminal.scrollback")}</span>
                     <input
                       type="number"
                       min="100"
@@ -562,17 +562,17 @@ export function SettingsModal(p: Props) {
               {/* ── Hooks ────────────────────────────────────────────── */}
               <Show when={tab() === "hooks"}>
                 <section>
-                  <h4>Agent hooks</h4>
+                  <h4>{t("settings.hooks.title")}</h4>
                   <label class="settings-checkbox">
                     <input
                       type="checkbox"
                       checked={p.settings.hooks.enabled}
                       onChange={(e) => update("hooks", { ...p.settings.hooks, enabled: e.currentTarget.checked })}
                     />
-                    <span>Pipe AI agent permission requests through winmux</span>
+                    <span>{t("settings.hooks.enabled")}</span>
                   </label>
                   <label>
-                    <span>Policy preset</span>
+                    <span>{t("settings.hooks.policy_preset")}</span>
                     <select
                       value={p.settings.hooks.policy_preset}
                       onChange={(e) => update("hooks", { ...p.settings.hooks, policy_preset: e.currentTarget.value })}
@@ -594,7 +594,7 @@ export function SettingsModal(p: Props) {
               {/* ── Notifications ────────────────────────────────────── */}
               <Show when={tab() === "notifications"}>
                 <section>
-                  <h4>Toasts</h4>
+                  <h4>{t("settings.notifications.toasts.title")}</h4>
                   <label class="settings-checkbox">
                     <input
                       type="checkbox"
@@ -609,7 +609,7 @@ export function SettingsModal(p: Props) {
                       checked={p.settings.notifications.sound_enabled}
                       onChange={(e) => update("notifications", { ...p.settings.notifications, sound_enabled: e.currentTarget.checked })}
                     />
-                    <span>Play sound on permission-request cards</span>
+                    <span>{t("settings.notifications.sound_enabled")}</span>
                   </label>
                 </section>
               </Show>
@@ -617,17 +617,17 @@ export function SettingsModal(p: Props) {
               {/* ── Updates ──────────────────────────────────────────── */}
               <Show when={tab() === "updates"}>
                 <section>
-                  <h4>Update check</h4>
+                  <h4>{t("settings.updates.title")}</h4>
                   <label class="settings-checkbox">
                     <input
                       type="checkbox"
                       checked={p.settings.updates.check_on_startup}
                       onChange={(e) => update("updates", { ...p.settings.updates, check_on_startup: e.currentTarget.checked })}
                     />
-                    <span>Check for updates on startup</span>
+                    <span>{t("settings.updates.check_on_startup")}</span>
                   </label>
                   <label>
-                    <span>Manifest URL</span>
+                    <span>{t("settings.updates.manifest_url")}</span>
                     <input
                       type="text"
                       value={p.settings.updates.manifest_url ?? ""}

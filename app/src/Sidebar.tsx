@@ -137,7 +137,7 @@ export function Sidebar(p: Props) {
                 );
               })()}
               <Show when={p.connectedIds.has(w.id)}>
-                <span class="ws-live" title="connected" />
+                <span class="ws-live" title={t("sidebar.workspaceConnectedTitle")} />
               </Show>
               <Show when={menuFor() === w.id}>
                 <div

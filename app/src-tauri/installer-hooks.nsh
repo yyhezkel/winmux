@@ -9,19 +9,25 @@
 ; Wired via tauri.conf.json bundle.windows.nsis.installerHooks. Tauri
 ; 2 invokes these macros at the documented install/uninstall lifecycle
 ; points.
+;
+; Uses WordFunc's WordReplace as both a presence check and a removal
+; primitive — when `$out == $in` after a WordReplace, the substring
+; wasn't found. Avoids StrFunc, which needs a different activation
+; pattern that bit us in 48-B's first attempt.
 
-!include "StrFunc.nsh"
 !include "WordFunc.nsh"
-${StrLoc}
-${UnStrLoc}
+!insertmacro WordReplace
+!insertmacro un.WordReplace
 
 !macro NSIS_HOOK_POSTINSTALL
   Push $0
   Push $1
   ReadRegStr $0 HKCU "Environment" "Path"
-  ; Skip if our INSTDIR is already on the PATH (idempotent).
-  ${StrLoc} $1 "$0" "$INSTDIR" ">"
-  ${If} $1 == ""
+  ; Presence check: WordReplace returns the original string unchanged
+  ; when the search substring isn't found. So $1 == $0 means INSTDIR
+  ; isn't currently on PATH.
+  ${WordReplace} "$0" "$INSTDIR" "" "+" $1
+  ${If} $1 == $0
     ${If} $0 == ""
       WriteRegExpandStr HKCU "Environment" "Path" "$INSTDIR"
     ${Else}
@@ -44,12 +50,12 @@ ${UnStrLoc}
   Push $2
   ReadRegStr $0 HKCU "Environment" "Path"
   ${If} $0 != ""
-    ; Best-effort removal: try the two common forms ";$INSTDIR" and
-    ; "$INSTDIR;" then bare "$INSTDIR". Each ${WordReplace} no-ops if
-    ; the substring isn't found.
-    ${WordReplace} "$0" ";$INSTDIR" "" "+" $1
-    ${WordReplace} "$1" "$INSTDIR;" "" "+" $2
-    ${WordReplace} "$2" "$INSTDIR" "" "+" $1
+    ; Try the two common forms ";$INSTDIR" and "$INSTDIR;" then bare
+    ; "$INSTDIR". Each ${un.WordReplace} no-ops if its substring isn't
+    ; found, so chaining them is safe.
+    ${un.WordReplace} "$0" ";$INSTDIR" "" "+" $1
+    ${un.WordReplace} "$1" "$INSTDIR;" "" "+" $2
+    ${un.WordReplace} "$2" "$INSTDIR" "" "+" $1
     ${If} $1 != $0
       WriteRegExpandStr HKCU "Environment" "Path" "$1"
       System::Call 'user32::SendMessageTimeoutW(p 0xFFFF, i 0x1A, p 0, w "Environment", i 0, i 5000, *p .r2)'

@@ -1536,9 +1536,13 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 
 
 .settings-modal {
-  width: 720px;
+  /* Phase 49.A: widened from 720→900 so Hebrew/Arabic text in tab
+     content (hints, labels) stops wrapping awkwardly. Height stays
+     capped to a viewport fraction with a hard ceiling so a tall
+     window doesn't stretch the modal beyond what fits a 13" laptop. */
+  width: 900px;
   max-width: 92vw;
-  max-height: 86vh;
+  max-height: min(92vh, 760px);
   display: flex;
   flex-direction: column;
   padding: 0;

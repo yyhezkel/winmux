@@ -471,5 +471,6 @@
   "diff.pane.notGitRepo": "This workspace isn't a git repository.",
   "cmd.pane.openDiff": "Open Diff Pane",
   "ws_header.add_diff": "+ diff",
-  "ws_header.split_diff_title": "Open a live git-diff pane for this workspace"
+  "ws_header.split_diff_title": "Open a live git-diff pane for this workspace",
+  "settings.tab.general": "general"
 }

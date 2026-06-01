@@ -471,5 +471,6 @@
   "diff.pane.notGitRepo": "Эта среда не является git-репозиторием.",
   "cmd.pane.openDiff": "Открыть панель diff",
   "ws_header.add_diff": "+ diff",
-  "ws_header.split_diff_title": "Открыть живую панель git-diff для этой среды"
+  "ws_header.split_diff_title": "Открыть живую панель git-diff для этой среды",
+  "settings.tab.general": "общие"
 }

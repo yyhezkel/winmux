@@ -471,5 +471,6 @@
   "diff.pane.notGitRepo": "بيئة العمل هذه ليست مستودع git.",
   "cmd.pane.openDiff": "فتح لوحة Diff",
   "ws_header.add_diff": "+ diff",
-  "ws_header.split_diff_title": "افتح لوحة git-diff حية لبيئة العمل"
+  "ws_header.split_diff_title": "افتح لوحة git-diff حية لبيئة العمل",
+  "settings.tab.general": "عام"
 }

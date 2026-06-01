@@ -27,7 +27,7 @@ interface Props {
   onChange: (next: Settings) => void;
 }
 
-type Tab = "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "updates" | "logs" | "language";
+type Tab = "general" | "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "updates" | "logs" | "language";
 
 export function SettingsModal(p: Props) {
   const [tab, setTab] = createSignal<Tab>("theme");
@@ -203,7 +203,7 @@ export function SettingsModal(p: Props) {
 
           <div class="settings-body">
             <nav class="settings-tabs">
-              <For each={["theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "updates", "logs", "language"] as Tab[]}>
+              <For each={["general", "theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "updates", "logs", "language"] as Tab[]}>
                 {(name) => (
                   <button
                     class={`settings-tab ${tab() === name ? "active" : ""}`}
@@ -221,6 +221,33 @@ export function SettingsModal(p: Props) {
 
             <div class="settings-pane">
               {/* ── Theme ────────────────────────────────────────────── */}
+              {/* Phase 49.A: General tab — workspace-lifecycle settings
+                  (auto-destroy of empty workspaces). Kept separate from
+                  the Terminal tab since these are not terminal-specific. */}
+              <Show when={tab() === "general"}>
+                <section>
+                  <h4>{t("settings.tab.general")}</h4>
+                  <label>
+                    <span>{t("settings.autoDestroy.label")}</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="90"
+                      placeholder={t("settings.autoDestroy.disabled")}
+                      value={p.settings.auto_destroy_empty_workspaces_days ?? ""}
+                      onInput={(e) => {
+                        const raw = e.currentTarget.value.trim();
+                        const n = raw === "" ? null : Math.min(90, Math.max(1, parseInt(raw, 10) || 0)) || null;
+                        update("auto_destroy_empty_workspaces_days", n ?? undefined);
+                      }}
+                    />
+                  </label>
+                  <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
+                    {t("settings.autoDestroy.hint")}
+                  </p>
+                </section>
+              </Show>
+
               <Show when={tab() === "theme"}>
                 <section>
                   <h4>{t("settings.theme.preset")}</h4>
@@ -436,25 +463,6 @@ export function SettingsModal(p: Props) {
                   </label>
                   <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
                     {t("settings.autoConnect.hint")}
-                  </p>
-                  {/* Phase 49-C: auto-destroy empty workspaces after N days. */}
-                  <label>
-                    <span>{t("settings.autoDestroy.label")}</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="90"
-                      placeholder={t("settings.autoDestroy.disabled")}
-                      value={p.settings.auto_destroy_empty_workspaces_days ?? ""}
-                      onInput={(e) => {
-                        const raw = e.currentTarget.value.trim();
-                        const n = raw === "" ? null : Math.min(90, Math.max(1, parseInt(raw, 10) || 0)) || null;
-                        update("auto_destroy_empty_workspaces_days", n ?? undefined);
-                      }}
-                    />
-                  </label>
-                  <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
-                    {t("settings.autoDestroy.hint")}
                   </p>
                 </section>
                 <section>

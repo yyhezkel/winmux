@@ -471,5 +471,6 @@
   "diff.pane.notGitRepo": "ה-workspace הזה אינו git repository.",
   "cmd.pane.openDiff": "פתח חוצץ diff",
   "ws_header.add_diff": "+ diff",
-  "ws_header.split_diff_title": "פתח חוצץ git-diff חי עבור סביבת העבודה"
+  "ws_header.split_diff_title": "פתח חוצץ git-diff חי עבור סביבת העבודה",
+  "settings.tab.general": "כללי"
 }

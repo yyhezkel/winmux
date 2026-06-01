@@ -462,5 +462,14 @@
   "ws.worktree.hint": "Создаёт новый git worktree (соседний каталог) и переключает cwd среды на него. Новые панели открываются там. Исходный репо не трогается.",
   "pane.drop.uploading": "Загрузка {name}…",
   "pane.drop.uploaded": "{name} загружен",
-  "pane.drop.failed": "Загрузка {name} не удалась: {err}"
+  "pane.drop.failed": "Загрузка {name} не удалась: {err}",
+  "diff.pane.source.working": "Рабочее дерево",
+  "diff.pane.source.head": "Рабочее vs HEAD",
+  "diff.pane.source.ref": "Рабочее vs ref…",
+  "diff.pane.refresh": "Обновить",
+  "diff.pane.empty": "Изменений нет. Отредактируйте файл или смените источник выше.",
+  "diff.pane.notGitRepo": "Эта среда не является git-репозиторием.",
+  "cmd.pane.openDiff": "Открыть панель diff",
+  "ws_header.add_diff": "+ diff",
+  "ws_header.split_diff_title": "Открыть живую панель git-diff для этой среды"
 }

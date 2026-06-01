@@ -699,7 +699,7 @@ function App() {
   const splitPane = async (
     paneId: string,
     direction: SplitDirection,
-    kind: "terminal" | "browser" | "filemanager" = "terminal",
+    kind: "terminal" | "browser" | "filemanager" | "diff" = "terminal",
     browserUrl?: string
   ) => {
     const ws = activeWs();
@@ -1534,6 +1534,18 @@ function App() {
                 }}
               >
                 {t("ws_header.add_filemanager")}
+              </button>
+              {/* Phase 50: add a Diff pane (#2.4). Same split mechanic
+                  as the other kinds. */}
+              <button
+                class="ws-header-btn"
+                title={t("ws_header.split_diff_title")}
+                onClick={() => {
+                  const pid = activePaneId();
+                  if (pid) splitPane(pid, "horizontal", "diff");
+                }}
+              >
+                {t("ws_header.add_diff")}
               </button>
               {/* Phase 24.D: removed + chat / + claude log buttons.
                   The two pane kinds + their backends are rolled back

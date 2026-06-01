@@ -1,6 +1,7 @@
 import { Match, Show, Switch } from "solid-js";
 import { Divider } from "./Divider";
 import { BrowserPane } from "./BrowserPane";
+import { DiffPane } from "./DiffPane";
 import { FileManagerPane } from "./FileManagerPane";
 import { HelpPane } from "./HelpPane";
 import { t } from "./i18n";
@@ -177,6 +178,17 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
             />
           </div>
         </div>
+      </Match>
+      <Match when={kind() === "diff"}>
+        {/* Phase 50 (#2.4): live git diff pane. Self-contained — owns
+            its own header (source dropdown + Refresh) and body. */}
+        <DiffPane
+          workspaceId={props.all.workspaceId}
+          pane={props.pane}
+          isActive={isActive()}
+          onFocus={props.all.onFocus}
+          onClose={props.all.onClose}
+        />
       </Match>
       <Match when={kind() === "help"}>
         {/* Phase 33: in-app help pane. Self-contained — no SSH/PTY,

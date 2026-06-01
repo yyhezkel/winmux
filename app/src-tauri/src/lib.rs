@@ -3,6 +3,7 @@ mod claude_log;
 mod claude_summary;
 mod connect_wizard;
 mod dev;
+mod diff_pane;
 mod file_manager;
 mod local_wizard;
 mod notes;
@@ -250,6 +251,11 @@ pub(crate) struct AppState {
     // already done auth + tunnel setup. Inserted by spawn_ssh; absent
     // means "no pane has connected yet, watcher cannot dial back."
     pub(crate) workspace_tunnel_tokens: Arc<Mutex<HashMap<String, Arc<String>>>>,
+    // Phase 50: cancellable handles for running diff-pane watcher tasks,
+    // keyed by pane_id. Inserted by diff_pane_set_source / on-mount,
+    // aborted on pane close. Each task polls `git diff` ~every 800ms,
+    // emits diff-pane-updated when the output hash changes.
+    pub(crate) diff_pane_watchers: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -329,6 +335,31 @@ pub(crate) enum PaneKind {
     /// keyed by `help_topic` on the pane node (e.g. "ssh-key-setup").
     /// Carries no remote state — entirely local, no SSH/PTY.
     Help,
+    /// Phase 50 (#2.4): live unified-diff view of a workspace's git
+    /// repo. The pane node carries an optional `diff_source` that
+    /// selects working-vs-index, working-vs-HEAD, or working-vs-<ref>.
+    /// A background watcher polls `git diff` every ~800ms and emits a
+    /// `diff-pane-updated` event when the output hash changes.
+    Diff,
+}
+
+// Phase 50: which diff a Diff pane shows. Default = Working (git diff
+// with no ref → working tree vs index). `#[serde(tag = "kind")]` so
+// the JSON shape mirrors PaneKind's pattern and is easy to switch on
+// in TypeScript.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum DiffSource {
+    Working,
+    Head,
+    Ref { git_ref: String },
+}
+
+impl Default for DiffSource {
+    fn default() -> Self {
+        DiffSource::Working
+    }
 }
 
 fn is_terminal_kind(k: &PaneKind) -> bool {
@@ -429,6 +460,11 @@ pub(crate) enum LayoutNode {
         // present for Help panes, absent for everything else.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         help_topic: Option<String>,
+        // Phase 50: which diff the Diff pane shows. Present for Diff
+        // panes, absent for everything else. None on a Diff pane is
+        // treated as DiffSource::Working by the backend watcher.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diff_source: Option<DiffSource>,
     },
     Split {
         split_id: String,
@@ -743,6 +779,7 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
                 color: None,
                 emoji: None,
                 help_topic: None,
+                diff_source: None,
             });
             migrated = true;
         }
@@ -896,6 +933,7 @@ pub(crate) fn update_browser_pane(
             color,
             emoji,
             help_topic,
+            diff_source,
         } => {
             if pane_id == target && pane_kind == PaneKind::Browser {
                 if let Some(b) = browser.as_mut() {
@@ -912,6 +950,7 @@ pub(crate) fn update_browser_pane(
                 color,
                 emoji,
                 help_topic,
+                diff_source,
             }
         }
         LayoutNode::Split {
@@ -988,18 +1027,13 @@ pub(crate) fn split_pane_in(
             color,
             emoji,
             help_topic,
+            diff_source,
         } => {
             if pane_id == target {
-                // Phase 24.D: 3-tuple after ClaudeChat / ClaudeLog
-                // were removed (was 5-tuple with new_chat /
-                // new_claudelog). The legacy variant names alias to
-                // Terminal in PaneKind's serde, so an existing
-                // workspaces.json with kind=claudechat just shows up
-                // here as Terminal — same handling.
-                // Phase 33: extended to 4-tuple — Help panes carry a
-                // help_topic that the frontend uses to pick which
-                // markdown doc to render.
-                let (new_kind_resolved, new_conn, new_browser, new_help_t) = match new_kind {
+                // Phase 50: extended to 5-tuple — Diff panes carry a
+                // diff_source. None on a non-Diff pane stays None.
+                let (new_kind_resolved, new_conn, new_browser, new_help_t, new_diff_s) =
+                    match new_kind {
                     PaneKind::Terminal => {
                         // Inherit chain: source pane's own connection →
                         // workspace-level fallback (any terminal pane or
@@ -1011,7 +1045,7 @@ pub(crate) fn split_pane_in(
                             .clone()
                             .or(workspace_terminal_fallback.clone())
                             .unwrap_or(Connection::Local { shell: None });
-                        (PaneKind::Terminal, Some(conn), None, None)
+                        (PaneKind::Terminal, Some(conn), None, None, None)
                     }
                     PaneKind::Browser => {
                         let url = new_browser_url
@@ -1024,14 +1058,14 @@ pub(crate) fn split_pane_in(
                             forward_localhost: true,
                             last_loaded_url: None,
                         };
-                        (PaneKind::Browser, None, Some(bs), None)
+                        (PaneKind::Browser, None, Some(bs), None, None)
                     }
                     PaneKind::FileManager => {
                         // File-manager panes carry no per-pane state in
                         // workspaces.json — local cwd / show_hidden live in
                         // frontend signals; the right column uses whatever
                         // SSH session the workspace currently has.
-                        (PaneKind::FileManager, None, None, None)
+                        (PaneKind::FileManager, None, None, None, None)
                     }
                     PaneKind::Help => {
                         // Phase 33: in-app help. Topic defaults to
@@ -1041,7 +1075,13 @@ pub(crate) fn split_pane_in(
                         let topic = new_help_topic
                             .clone()
                             .unwrap_or_else(|| "ssh-key-setup".to_string());
-                        (PaneKind::Help, None, None, Some(topic))
+                        (PaneKind::Help, None, None, Some(topic), None)
+                    }
+                    PaneKind::Diff => {
+                        // Phase 50: new Diff panes default to Working
+                        // (git diff = working tree vs index). The user
+                        // can switch via the source dropdown later.
+                        (PaneKind::Diff, None, None, None, Some(DiffSource::Working))
                     }
                 };
                 let new_pane = LayoutNode::Pane {
@@ -1057,6 +1097,7 @@ pub(crate) fn split_pane_in(
                     color: None,
                     emoji: None,
                     help_topic: new_help_t,
+                    diff_source: new_diff_s,
                 };
                 let original = LayoutNode::Pane {
                     pane_id,
@@ -1071,6 +1112,7 @@ pub(crate) fn split_pane_in(
                     color,
                     emoji,
                     help_topic,
+                    diff_source,
                 };
                 (
                     LayoutNode::Split {
@@ -1094,6 +1136,7 @@ pub(crate) fn split_pane_in(
                         color,
                         emoji,
                         help_topic,
+                        diff_source,
                     },
                     false,
                 )
@@ -1165,6 +1208,7 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
             color,
             emoji,
             help_topic,
+            diff_source,
         } => {
             // Last pane — can't remove; return unchanged whether or not target matches.
             let _ = pane_id == target;
@@ -1179,6 +1223,7 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
                     color,
                     emoji,
                     help_topic,
+                    diff_source,
                 }),
                 None,
             )
@@ -1254,6 +1299,7 @@ pub(crate) fn update_pane_in(
             color,
             emoji,
             help_topic,
+            diff_source,
         } => {
             if pane_id == target {
                 LayoutNode::Pane {
@@ -1266,6 +1312,7 @@ pub(crate) fn update_pane_in(
                     color,
                     emoji,
                     help_topic,
+                    diff_source,
                 }
             } else {
                 LayoutNode::Pane {
@@ -1278,6 +1325,7 @@ pub(crate) fn update_pane_in(
                     color,
                     emoji,
                     help_topic,
+                    diff_source,
                 }
             }
         }
@@ -3563,6 +3611,7 @@ fn workspace_create(
             color: None,
             emoji: None,
             help_topic: None,
+            diff_source: None,
         }),
         setup_command: input.setup_command,
         teardown_command: input.teardown_command,
@@ -3699,6 +3748,7 @@ fn workspace_reset_layout(
             color: None,
             emoji: None,
             help_topic: None,
+            diff_source: None,
         });
     }
     persist(&state)?;
@@ -3790,6 +3840,7 @@ fn backfill_terminal_connections(
             color,
             emoji,
             help_topic,
+            diff_source,
         } => {
             let needs_fix =
                 matches!(pane_kind, PaneKind::Terminal) && connection.is_none();
@@ -3813,6 +3864,7 @@ fn backfill_terminal_connections(
                     color,
                     emoji,
                     help_topic,
+                    diff_source,
                 },
                 needs_fix,
             )
@@ -4762,6 +4814,11 @@ fn workspace_close_pane(
             .unwrap_or(false);
         ws.layout = new_root;
         removed_pane = removed;
+    }
+    if let Some(pid) = removed_pane.as_ref() {
+        // Phase 50: stop any diff-pane watcher bound to the removed
+        // pane. Idempotent — no-op for non-Diff panes.
+        diff_pane::stop_watcher(&state, pid);
     }
     if let Some(pid) = removed_pane {
         // Always unbind the pane from its session — the pane is gone.
@@ -6469,6 +6526,8 @@ pub fn run() {
             file_manager::file_upload,
             file_manager::file_upload_bytes,
             file_manager::pane_upload_dropped,
+            diff_pane::diff_pane_set_source,
+            diff_pane::diff_pane_refresh,
             file_manager::file_download,
             file_manager::file_open_local,
             file_manager::file_open_remote,

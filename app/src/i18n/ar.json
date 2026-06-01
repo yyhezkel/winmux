@@ -462,5 +462,14 @@
   "ws.worktree.hint": "ينشئ git worktree جديدًا (مجلد شقيق) ويبدل cwd الخاص ببيئة العمل إليه. تنشأ اللوحات الجديدة هناك. لا يُمس المستودع الأصلي.",
   "pane.drop.uploading": "جارٍ رفع {name}…",
   "pane.drop.uploaded": "تم رفع {name}",
-  "pane.drop.failed": "فشل رفع {name}: {err}"
+  "pane.drop.failed": "فشل رفع {name}: {err}",
+  "diff.pane.source.working": "شجرة العمل",
+  "diff.pane.source.head": "العمل مقابل HEAD",
+  "diff.pane.source.ref": "العمل مقابل ref…",
+  "diff.pane.refresh": "تحديث",
+  "diff.pane.empty": "لا توجد تغييرات. عدّل ملفًا أو غيّر المصدر أعلاه.",
+  "diff.pane.notGitRepo": "بيئة العمل هذه ليست مستودع git.",
+  "cmd.pane.openDiff": "فتح لوحة Diff",
+  "ws_header.add_diff": "+ diff",
+  "ws_header.split_diff_title": "افتح لوحة git-diff حية لبيئة العمل"
 }

@@ -275,6 +275,7 @@ async fn dispatch(
                     color: None,
                     emoji: None,
                     help_topic: None,
+                    diff_source: None,
                 }),
                 setup_command: input.setup_command,
                 teardown_command: input.teardown_command,
@@ -1562,6 +1563,7 @@ async fn dispatch(
                     color: None,
                     emoji: None,
                     help_topic: None,
+                    diff_source: None,
                 });
             }
             persist(state)?;

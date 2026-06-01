@@ -1030,6 +1030,7 @@ fn finalize_workspace(
         color: None,
         emoji: None,
         help_topic: None,
+        diff_source: None,
     };
     let ws = Workspace {
         id: new_workspace_id(),

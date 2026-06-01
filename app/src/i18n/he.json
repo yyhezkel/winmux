@@ -462,5 +462,14 @@
   "ws.worktree.hint": "יוצר git worktree טרי (תיקיית-אחות) ומחליף את ה-cwd של סביבת העבודה אליו. panes חדשים ייפתחו שם. הריפו המקורי לא נגוע.",
   "pane.drop.uploading": "מעלה את {name}…",
   "pane.drop.uploaded": "{name} הועלה",
-  "pane.drop.failed": "ההעלאה של {name} נכשלה: {err}"
+  "pane.drop.failed": "ההעלאה של {name} נכשלה: {err}",
+  "diff.pane.source.working": "עץ עבודה",
+  "diff.pane.source.head": "עבודה מול HEAD",
+  "diff.pane.source.ref": "עבודה מול ref…",
+  "diff.pane.refresh": "רענון",
+  "diff.pane.empty": "אין שינויים. ערוך קובץ או שנה מקור למעלה.",
+  "diff.pane.notGitRepo": "ה-workspace הזה אינו git repository.",
+  "cmd.pane.openDiff": "פתח חוצץ diff",
+  "ws_header.add_diff": "+ diff",
+  "ws_header.split_diff_title": "פתח חוצץ git-diff חי עבור סביבת העבודה"
 }

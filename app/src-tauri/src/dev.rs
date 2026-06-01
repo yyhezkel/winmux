@@ -76,6 +76,7 @@ pub(crate) fn build_state_value(
                     crate::PaneKind::Browser => "browser",
                     crate::PaneKind::FileManager => "file_manager",
                     crate::PaneKind::Help => "help",
+                    crate::PaneKind::Diff => "diff",
                 };
                 *breakdown.entry(key).or_insert(0) += 1;
             });

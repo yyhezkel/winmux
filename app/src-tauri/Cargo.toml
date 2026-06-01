@@ -60,3 +60,8 @@ ureq = { version = "2", features = ["tls", "json"] }
 # `cargo test` regenerates app/src/bindings/*.ts; the frontend imports
 # from there instead of hand-mirroring the data model.
 ts-rs = "8"
+
+[dev-dependencies]
+# Phase 50 (#2.4): integration test for diff_pane::fetch_diff against a
+# real git repo seeded under a temporary directory.
+tempfile = "3"

@@ -1,0 +1,13 @@
+[package]
+name = "winmux-types"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Phase 51.A: pure data types shared across the winmux crates"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# Phase 35 (#1.5): generate TypeScript bindings. The ts() export_to
+# paths in this crate use `../../../src/bindings/` so they resolve to
+# `app/src/bindings/` from this nested manifest location.
+ts-rs = "8"

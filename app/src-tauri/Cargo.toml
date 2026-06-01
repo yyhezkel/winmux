@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "cli", "mcp"]
+members = [".", "cli", "mcp", "crates/winmux-types"]
 resolver = "2"
 
 # Pre-public hardening: strip symbols from release builds. The
@@ -60,6 +60,9 @@ ureq = { version = "2", features = ["tls", "json"] }
 # `cargo test` regenerates app/src/bindings/*.ts; the frontend imports
 # from there instead of hand-mirroring the data model.
 ts-rs = "8"
+# Phase 51.A (#3.1): pure data types live in a sub-crate so future
+# splits can depend on the type-set without dragging in tauri.
+winmux-types = { path = "crates/winmux-types" }
 
 [dev-dependencies]
 # Phase 50 (#2.4): integration test for diff_pane::fetch_diff against a

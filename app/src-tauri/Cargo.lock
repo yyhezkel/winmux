@@ -182,6 +182,7 @@ dependencies = [
  "ts-rs",
  "ureq",
  "whoami",
+ "winmux-types",
 ]
 
 [[package]]
@@ -6817,6 +6818,14 @@ dependencies = [
  "serde_json",
  "tokio",
  "whoami",
+]
+
+[[package]]
+name = "winmux-types"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "ts-rs",
 ]
 
 [[package]]

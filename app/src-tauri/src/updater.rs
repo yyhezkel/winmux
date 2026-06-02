@@ -376,7 +376,7 @@ pub(crate) async fn ssh_exec_in_workspace(
     cmd: String,
 ) -> Result<String, String> {
     let handle = {
-        let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        let sessions = state.core.sessions.lock().map_err(|e| e.to_string())?;
         sessions.values().find_map(|s| match s {
             crate::Session::Ssh(ssh) if ssh.workspace_id == workspace_id => {
                 Some(ssh.handle.clone())

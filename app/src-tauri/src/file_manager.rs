@@ -179,7 +179,7 @@ fn pick_ssh_handle_for_workspace(
     state: &AppState,
     workspace_id: &str,
 ) -> Option<Arc<SshHandle<SshClient>>> {
-    let sessions = state.sessions.lock().ok()?;
+    let sessions = state.core.sessions.lock().ok()?;
     for sess in sessions.values() {
         if let Session::Ssh(s) = sess {
             if s.workspace_id == workspace_id {

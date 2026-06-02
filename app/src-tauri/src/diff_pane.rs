@@ -166,7 +166,7 @@ pub(crate) fn start_watcher(app: AppHandle, state: AppState, pane_id: String) {
             tokio::time::sleep(Duration::from_millis(POLL_INTERVAL_MS)).await;
         }
     });
-    state
+    state.core
         .diff_pane_watchers
         .lock()
         .unwrap()
@@ -175,7 +175,7 @@ pub(crate) fn start_watcher(app: AppHandle, state: AppState, pane_id: String) {
 
 /// Abort the watcher for `pane_id` if one is running. Idempotent.
 fn stop_watcher_inner(state: &AppState, pane_id: &str) {
-    if let Some(h) = state.diff_pane_watchers.lock().unwrap().remove(pane_id) {
+    if let Some(h) = state.core.diff_pane_watchers.lock().unwrap().remove(pane_id) {
         h.abort();
     }
 }

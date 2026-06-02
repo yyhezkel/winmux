@@ -47,7 +47,7 @@ fn iso_now() -> String {
 }
 
 fn pick_handle(state: &AppState, workspace_id: &str) -> Option<std::sync::Arc<SshHandle<SshClient>>> {
-    let sessions = state.sessions.lock().ok()?;
+    let sessions = state.core.sessions.lock().ok()?;
     sessions.values().find_map(|s| match s {
         Session::Ssh(ssh) if ssh.workspace_id == workspace_id => Some(ssh.handle.clone()),
         _ => None,

@@ -85,7 +85,7 @@ fn local_jsonl_path(workspace_id: &str, session_id: &str) -> Result<PathBuf, Str
 // ─── SSH/SFTP helpers (parallel to file_manager's private versions) ────────
 
 fn pick_ssh_handle(state: &AppState, workspace_id: &str) -> Option<Arc<SshHandle<SshClient>>> {
-    let sessions = state.sessions.lock().ok()?;
+    let sessions = state.core.sessions.lock().ok()?;
     sessions.values().find_map(|s| match s {
         Session::Ssh(ssh) if ssh.workspace_id == workspace_id => Some(ssh.handle.clone()),
         _ => None,

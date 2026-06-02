@@ -489,3 +489,30 @@ pub struct ForwardEntry {
 
 pub type ForwardMap = Arc<Mutex<HashMap<(String, u16), ForwardEntry>>>;
 pub type SessionMap = Arc<Mutex<HashMap<String, Session>>>;
+pub type PaneSessionMap = Arc<Mutex<HashMap<String, String>>>;
+
+// ─── CoreState ───────────────────────────────────────────────────────
+
+/// Phase 51.B4: the russh/PTY/forward runtime state that every future
+/// split crate (tunnel, bootstrap, ssh, pty, rpc) will need, factored
+/// out of AppState so winmux-core owns it instead of app. The outer
+/// `AppState` (in `app/lib.rs`) holds a `core: CoreState` plus the
+/// fields that depend on tauri / notes / settings / dev modules.
+///
+/// All fields are `Arc<Mutex<…>>` and `Clone`able, so cloning
+/// CoreState (e.g. for spawning a tokio task that holds its own
+/// reference) only clones the Arcs, not the data behind them.
+#[derive(Default, Clone)]
+pub struct CoreState {
+    pub sessions: SessionMap,
+    pub pane_sessions: PaneSessionMap,
+    pub forwards: ForwardMap,
+    pub port_watchers: Arc<Mutex<std::collections::HashSet<String>>>,
+    pub internal_reverse_tunnel_remote_ports:
+        Arc<Mutex<HashMap<String, std::collections::HashSet<u16>>>>,
+    pub detected_ports:
+        Arc<Mutex<HashMap<String, HashMap<u16, (String, String)>>>>,
+    pub port_watcher_tasks: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+    pub workspace_tunnel_tokens: Arc<Mutex<HashMap<String, Arc<String>>>>,
+    pub diff_pane_watchers: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+}

@@ -389,14 +389,14 @@ async fn dispatch(
                     .unwrap_or_default()
             };
             for pane_id in &panes_to_kill {
-                if let Some(sid) = state.pane_sessions.lock().unwrap().remove(pane_id) {
-                    if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+                if let Some(sid) = state.core.pane_sessions.lock().unwrap().remove(pane_id) {
+                    if let Some(mut s) = state.core.sessions.lock().unwrap().remove(&sid) {
                         crate::kill_session_inner(&mut s);
                     }
                 }
             }
             // Phase 8.B: tear down any port forwards for the workspace.
-            crate::close_workspace_forwards(&state.forwards, &id);
+            crate::close_workspace_forwards(&state.core.forwards, &id);
             {
                 let mut file = state.workspaces.lock().unwrap();
                 file.workspaces.retain(|w| w.id != id);
@@ -419,7 +419,7 @@ async fn dispatch(
                 .get("data")
                 .and_then(|v| v.as_str())
                 .ok_or("missing data")?;
-            let sid = state
+            let sid = state.core
                 .pane_sessions
                 .lock()
                 .unwrap()
@@ -441,7 +441,7 @@ async fn dispatch(
                 .and_then(|v| v.as_str())
                 .ok_or("missing key")?;
             let bytes = translate_key(key);
-            let sid = state
+            let sid = state.core
                 .pane_sessions
                 .lock()
                 .unwrap()
@@ -1312,8 +1312,8 @@ async fn dispatch(
                 .and_then(|v| v.as_str())
                 .ok_or("missing pane_id")?
                 .to_string();
-            let pane_sessions = state.pane_sessions.lock().unwrap().clone();
-            let sessions = state.sessions.lock().unwrap();
+            let pane_sessions = state.core.pane_sessions.lock().unwrap().clone();
+            let sessions = state.core.sessions.lock().unwrap();
             let tmux = pane_sessions
                 .get(&pane_id)
                 .and_then(|sid| sessions.get(sid))
@@ -1332,9 +1332,9 @@ async fn dispatch(
                 .to_string();
             // Mirror what pane_disconnect Tauri command does, minus the
             // teardown_command path (which only matters for app shutdown).
-            let sid = state.pane_sessions.lock().unwrap().remove(&pane_id);
+            let sid = state.core.pane_sessions.lock().unwrap().remove(&pane_id);
             if let Some(sid) = sid {
-                if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+                if let Some(mut s) = state.core.sessions.lock().unwrap().remove(&sid) {
                     crate::kill_session_inner(&mut s);
                 }
             }
@@ -1349,10 +1349,10 @@ async fn dispatch(
                 .to_string();
             // Same flow as the Tauri command — open a fresh exec channel,
             // run `tmux kill-session`, then close.
-            let sid_opt = state.pane_sessions.lock().unwrap().get(&pane_id).cloned();
+            let sid_opt = state.core.pane_sessions.lock().unwrap().get(&pane_id).cloned();
             if let Some(sid) = sid_opt {
                 let (handle_arc, tmux_name) = {
-                    let sessions = state.sessions.lock().unwrap();
+                    let sessions = state.core.sessions.lock().unwrap();
                     match sessions.get(&sid) {
                         Some(crate::Session::Ssh(s)) => {
                             (Some(s.handle.clone()), s.tmux_session.clone())
@@ -1387,9 +1387,9 @@ async fn dispatch(
                         let _ = ch.close().await;
                     }
                 }
-                let sid = state.pane_sessions.lock().unwrap().remove(&pane_id);
+                let sid = state.core.pane_sessions.lock().unwrap().remove(&pane_id);
                 if let Some(sid) = sid {
-                    if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+                    if let Some(mut s) = state.core.sessions.lock().unwrap().remove(&sid) {
                         crate::kill_session_inner(&mut s);
                     }
                 }
@@ -1417,7 +1417,7 @@ async fn dispatch(
             // lookup here. NOTE: pane_list_claude_sessions(_impl)? helper
             // could be factored later.
             let handle_opt = {
-                let sessions = state.sessions.lock().unwrap();
+                let sessions = state.core.sessions.lock().unwrap();
                 sessions
                     .iter()
                     .find_map(|(_sid, sess)| match sess {
@@ -1502,8 +1502,8 @@ async fn dispatch(
             }
         }
         "pane.persistence.list" => {
-            let pane_sessions = state.pane_sessions.lock().unwrap().clone();
-            let sessions = state.sessions.lock().unwrap();
+            let pane_sessions = state.core.pane_sessions.lock().unwrap().clone();
+            let sessions = state.core.sessions.lock().unwrap();
             let mut out = serde_json::Map::new();
             for (pane, sid) in pane_sessions {
                 if let Some(crate::Session::Ssh(ssh)) = sessions.get(&sid) {
@@ -1833,7 +1833,7 @@ async fn dispatch(
                 .to_string();
             // Phase 39: never report winmux's own reverse-tunnel port.
             let is_internal = {
-                let m = state.internal_reverse_tunnel_remote_ports.lock().unwrap();
+                let m = state.core.internal_reverse_tunnel_remote_ports.lock().unwrap();
                 m.get(&workspace_id).map(|s| s.contains(&port)).unwrap_or(false)
             };
             if is_internal {
@@ -1852,7 +1852,7 @@ async fn dispatch(
             }
             // Record + notify FE. No forward is opened.
             {
-                let mut m = state.detected_ports.lock().unwrap();
+                let mut m = state.core.detected_ports.lock().unwrap();
                 m.entry(workspace_id.clone())
                     .or_default()
                     .insert(port, (addr.clone(), family.clone()));
@@ -1881,7 +1881,7 @@ async fn dispatch(
                 .ok_or("missing port")? as u16;
             // Drop from detected set + tell the FE.
             let was_detected = {
-                let mut m = state.detected_ports.lock().unwrap();
+                let mut m = state.core.detected_ports.lock().unwrap();
                 m.get_mut(&workspace_id)
                     .map(|ports| ports.remove(&port).is_some())
                     .unwrap_or(false)
@@ -1947,8 +1947,8 @@ fn build_dev_state(state: &AppState, log_tail_n: usize, console_tail_n: usize) -
     };
 
     let sessions_summary: Vec<dev::SessionSummary> = {
-        let pane_sessions = state.pane_sessions.lock().unwrap().clone();
-        let sessions = state.sessions.lock().unwrap();
+        let pane_sessions = state.core.pane_sessions.lock().unwrap().clone();
+        let sessions = state.core.sessions.lock().unwrap();
         pane_sessions
             .iter()
             .filter_map(|(pane_id, sid)| {
@@ -1977,7 +1977,7 @@ fn build_dev_state(state: &AppState, log_tail_n: usize, console_tail_n: usize) -
     };
 
     let forwards_summary: Vec<dev::ForwardSummary> = {
-        let m = state.forwards.lock().unwrap();
+        let m = state.core.forwards.lock().unwrap();
         m.iter()
             .map(|((ws_id, remote_port), entry)| dev::ForwardSummary {
                 workspace_id: ws_id.clone(),

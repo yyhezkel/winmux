@@ -39,11 +39,12 @@ static SPLIT_COUNTER: AtomicU64 = AtomicU64::new(0);
 // moved to winmux-core. Re-exported below so existing crate::Session,
 // crate::SshSession, crate::SshCmd references resolve unchanged.
 pub(crate) use winmux_core::{LocalSession, Session, SessionMap, SshCmd, SshSession};
-type PaneSessionMap = Arc<Mutex<HashMap<String, String>>>;
+// PaneSessionMap moved to winmux-core (51.B4).
 type WorkspacesState = Arc<Mutex<WorkspacesFile>>;
 
 // Phase 51.B3: ForwardEntry + ForwardMap moved to winmux-core.
-pub(crate) use winmux_core::{ForwardEntry, ForwardMap};
+// Phase 51.B4: PaneSessionMap + CoreState live in winmux-core too.
+pub(crate) use winmux_core::{CoreState, ForwardEntry, ForwardMap, PaneSessionMap};
 
 // Phase 8.C: pending request → response map for browser-pane operations that
 // need to round-trip through the frontend (eval, screenshot). Keyed by request_id.
@@ -126,10 +127,15 @@ pub(crate) struct FeedStore {
 #[allow(dead_code)] // used as documentation; rpc_server has its own copy
 const FEED_MAX_ITEMS: usize = 50;
 
+/// Phase 51.B4: the 9 russh/session/forwards/tunnel runtime fields
+/// previously inline here moved into `winmux_core::CoreState`. The
+/// outer AppState now wraps it and adds the tauri/notes/settings/
+/// dev/feed/browser/claude/console/iframe fields that the
+/// application shell needs. Callsites access russh state through
+/// `state.core.<field>` (e.g. `state.core.sessions.lock()`).
 #[derive(Default, Clone)]
 pub(crate) struct AppState {
-    pub(crate) sessions: SessionMap,
-    pub(crate) pane_sessions: PaneSessionMap,
+    pub(crate) core: CoreState,
     pub(crate) workspaces: WorkspacesState,
     pub(crate) load_state: Arc<Mutex<Option<LoadState>>>,
     pub(crate) notifications: Arc<Mutex<Vec<NotificationItem>>>,
@@ -140,8 +146,6 @@ pub(crate) struct AppState {
     pub(crate) settings: Arc<Mutex<settings::Settings>>,
     // Phase 12.C: small history of recently-used cwds for local PTY workspaces.
     pub(crate) recent_paths: Arc<Mutex<local_wizard::RecentPathsFile>>,
-    // Phase 8.B: per-(workspace, remote_port) port forwards.
-    pub(crate) forwards: ForwardMap,
     // Phase 8.C: pending browser requests (eval/screenshot) awaiting frontend reply.
     pub(crate) browser_pending: BrowserPending,
     // Phase 8.C: pending browser-wait waiters, drained on iframe onload.
@@ -158,41 +162,6 @@ pub(crate) struct AppState {
     /// (SSH execs do NOT source ~/.bashrc, so a `claude` only on
     /// the user's interactive PATH is otherwise invisible).
     pub(crate) claude_paths: Arc<Mutex<HashMap<String, String>>>,
-    // Phase 36 (#2.2): workspaces that currently have a remote
-    // port-watcher running, so spawn_ssh launches at most one per
-    // workspace even when multiple panes connect. Cleared when the
-    // workspace's last SSH session ends.
-    pub(crate) port_watchers: Arc<Mutex<std::collections::HashSet<String>>>,
-    // Phase 39: per-workspace set of REMOTE ports that winmux's own
-    // reverse tunnels listen on (from `tcpip_forward`). The auto-port
-    // watcher sees these as LISTEN sockets and would otherwise forward
-    // them — exposing winmux's internal HMAC endpoint to the browser
-    // ("WINMUX-CHALLENGE / WINMUX-DENIED bad-format"). The port.opened
-    // handler skips any port in this set.
-    pub(crate) internal_reverse_tunnel_remote_ports:
-        Arc<Mutex<HashMap<String, std::collections::HashSet<u16>>>>,
-    // Phase 46: ports the remote watcher has REPORTED for each workspace,
-    // separately from `forwards` (which is the subset the user has
-    // chosen to actually tunnel). Runtime-only — never serialized.
-    // Inner map: remote_port → (addr, family) so the UI can show what
-    // bound where without re-querying. Cleared when the workspace
-    // disconnects.
-    pub(crate) detected_ports:
-        Arc<Mutex<HashMap<String, HashMap<u16, (String, String)>>>>,
-    // Phase 47: cancellable handles to running port-watcher tasks per
-    // workspace. .abort() kills the task → drops the SSH exec channel →
-    // remote port-watch process exits. Toggling detection off uses this.
-    pub(crate) port_watcher_tasks: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
-    // Phase 47: the WINMUX_TUNNEL_TOKEN baked into a workspace's live SSH
-    // handler — needed to start a watcher AFTER the initial spawn_ssh has
-    // already done auth + tunnel setup. Inserted by spawn_ssh; absent
-    // means "no pane has connected yet, watcher cannot dial back."
-    pub(crate) workspace_tunnel_tokens: Arc<Mutex<HashMap<String, Arc<String>>>>,
-    // Phase 50: cancellable handles for running diff-pane watcher tasks,
-    // keyed by pane_id. Inserted by diff_pane_set_source / on-mount,
-    // aborted on pane close. Each task polls `git diff` ~every 800ms,
-    // emits diff-pane-updated when the output hash changes.
-    pub(crate) diff_pane_watchers: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1331,8 +1300,8 @@ fn spawn_local_pty(
     let id_for_thread = id.clone();
     let pane_for_thread = pane_id.clone();
     let app_for_thread = app.clone();
-    let sessions_for_thread = state.sessions.clone();
-    let pane_sessions_for_thread = state.pane_sessions.clone();
+    let sessions_for_thread = state.core.sessions.clone();
+    let pane_sessions_for_thread = state.core.pane_sessions.clone();
     thread::spawn(move || {
         let mut leftover: Vec<u8> = Vec::new();
         let mut osc = osc_notify::OscNotifyParser::new();
@@ -1361,7 +1330,7 @@ fn spawn_local_pty(
         emit_exit(&app_for_thread, &id_for_thread, None);
     });
 
-    state.sessions.lock().unwrap().insert(
+    state.core.sessions.lock().unwrap().insert(
         id.clone(),
         Session::Local(LocalSession {
             writer,
@@ -2106,7 +2075,7 @@ async fn spawn_ssh(
 
     // Phase 47.A: the watcher launch moved into
     // `setup_workspace_reverse_tunnel` above so the headless connect
-    // path gets it too. Dedup via state.port_watchers still applies.
+    // path gets it too. Dedup via state.core.port_watchers still applies.
 
     let mut channel = handle
         .channel_open_session()
@@ -2175,13 +2144,13 @@ async fn spawn_ssh(
     let id_for_task = id.clone();
     let pane_for_task = pane_id.clone();
     let app_for_task = app.clone();
-    let sessions_for_task = state.sessions.clone();
-    let pane_sessions_for_task = state.pane_sessions.clone();
-    let forwards_for_task = state.forwards.clone();
+    let sessions_for_task = state.core.sessions.clone();
+    let pane_sessions_for_task = state.core.pane_sessions.clone();
+    let forwards_for_task = state.core.forwards.clone();
     let workspace_for_task = workspace_id.clone();
     // Phase 39: clean up this session's reverse-tunnel remote port from
     // the internal-ports set when the session ends.
-    let internal_ports_for_task = state.internal_reverse_tunnel_remote_ports.clone();
+    let internal_ports_for_task = state.core.internal_reverse_tunnel_remote_ports.clone();
     let reverse_port_for_task = remote_port as u16;
     tokio::spawn(async move {
         let mut leftover: Vec<u8> = Vec::new();
@@ -2294,7 +2263,7 @@ async fn spawn_ssh(
     } else {
         None
     };
-    state.sessions.lock().unwrap().insert(
+    state.core.sessions.lock().unwrap().insert(
         id.clone(),
         Session::Ssh(SshSession {
             tx: Some(tx),
@@ -2321,7 +2290,7 @@ async fn spawn_ssh(
     // stale ones from the original creation. The `2>/dev/null` swallows
     // the harmless "no server running" message when this is the first attach.
     if let Some(name) = &tmux_name {
-        let sessions_clone = state.sessions.clone();
+        let sessions_clone = state.core.sessions.clone();
         let id_clone = id.clone();
         let name_clone = name.clone();
         let socket_addr = if remote_port != 0 {
@@ -2450,7 +2419,7 @@ async fn setup_workspace_reverse_tunnel(
     }
     // Phase 39: record winmux's own reverse-tunnel remote port so the
     // auto-port watcher skips it (it's an HMAC endpoint).
-    state
+    state.core
         .internal_reverse_tunnel_remote_ports
         .lock()
         .unwrap()
@@ -2460,7 +2429,7 @@ async fn setup_workspace_reverse_tunnel(
     // Phase 47: stash the tunnel token so a later
     // workspace_ensure_port_watcher can spawn the watcher without
     // having to rebuild the SSH session.
-    state
+    state.core
         .workspace_tunnel_tokens
         .lock()
         .unwrap()
@@ -2473,9 +2442,9 @@ async fn setup_workspace_reverse_tunnel(
 }
 
 /// Phase 47: spawn the remote `winmux port-watch` for a workspace.
-/// Deduplicated via `state.port_watchers` — calling twice in a row is
+/// Deduplicated via `state.core.port_watchers` — calling twice in a row is
 /// a no-op the second time. Stores the spawned task's JoinHandle in
-/// `state.port_watcher_tasks` so toggling detection off can `.abort()`
+/// `state.core.port_watcher_tasks` so toggling detection off can `.abort()`
 /// it. Returns Err on channel/exec failure; on success the task
 /// detaches and the watcher streams events back through the reverse
 /// tunnel (dispatched by `port.opened` / `port.closed` in rpc_server).
@@ -2488,7 +2457,7 @@ async fn spawn_port_watcher(
 ) -> Result<(), String> {
     // Dedup: if a watcher's already running for this workspace, no-op.
     {
-        let mut set = state.port_watchers.lock().unwrap();
+        let mut set = state.core.port_watchers.lock().unwrap();
         if set.contains(workspace_id) {
             return Ok(());
         }
@@ -2498,7 +2467,7 @@ async fn spawn_port_watcher(
         Ok(c) => c,
         Err(e) => {
             dlog(&format!("port-watch[{workspace_id}]: channel_open_session failed: {e}"));
-            state.port_watchers.lock().unwrap().remove(workspace_id);
+            state.core.port_watchers.lock().unwrap().remove(workspace_id);
             return Err(format!("channel_open: {e}"));
         }
     };
@@ -2515,12 +2484,12 @@ async fn spawn_port_watcher(
     );
     if let Err(e) = wchan.exec(true, cmd.as_str()).await {
         dlog(&format!("port-watch[{workspace_id}]: exec failed: {e}"));
-        state.port_watchers.lock().unwrap().remove(workspace_id);
+        state.core.port_watchers.lock().unwrap().remove(workspace_id);
         return Err(format!("exec failed: {e}"));
     }
     let ws_guard = workspace_id.to_string();
-    let watchers = state.port_watchers.clone();
-    let tasks = state.port_watcher_tasks.clone();
+    let watchers = state.core.port_watchers.clone();
+    let tasks = state.core.port_watcher_tasks.clone();
     let task = tokio::spawn(async move {
         loop {
             match wchan.wait().await {
@@ -2534,7 +2503,7 @@ async fn spawn_port_watcher(
             "port-watch[{ws_guard}]: channel closed, watcher slot freed"
         ));
     });
-    state
+    state.core
         .port_watcher_tasks
         .lock()
         .unwrap()
@@ -2550,16 +2519,16 @@ async fn spawn_port_watcher(
 /// when no watcher is running.
 fn clear_workspace_detection(state: &AppState, app: &AppHandle, workspace_id: &str) {
     let aborted = {
-        let mut tasks = state.port_watcher_tasks.lock().unwrap();
+        let mut tasks = state.core.port_watcher_tasks.lock().unwrap();
         tasks.remove(workspace_id).map(|h| {
             h.abort();
             true
         })
     };
     if aborted.is_some() {
-        state.port_watchers.lock().unwrap().remove(workspace_id);
+        state.core.port_watchers.lock().unwrap().remove(workspace_id);
     }
-    state
+    state.core
         .detected_ports
         .lock()
         .unwrap()
@@ -2578,7 +2547,7 @@ fn find_ssh_handle_for_workspace(
     state: &AppState,
     workspace_id: &str,
 ) -> Option<Arc<client::Handle<SshClient>>> {
-    let sessions = state.sessions.lock().unwrap();
+    let sessions = state.core.sessions.lock().unwrap();
     for s in sessions.values() {
         if let Session::Ssh(ssh) = s {
             if ssh.workspace_id == workspace_id {
@@ -2604,7 +2573,7 @@ pub(crate) async fn open_forward(
         workspace_id, remote_port
     ));
     {
-        let m = state.forwards.lock().unwrap();
+        let m = state.core.forwards.lock().unwrap();
         if let Some(e) = m.get(&(workspace_id.to_string(), remote_port)) {
             dlog(&format!(
                 "open_forward: cache hit ws={} remote={} -> local={}",
@@ -2630,7 +2599,7 @@ pub(crate) async fn open_forward(
     let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
 
     let ws_for_task = workspace_id.to_string();
-    let forwards_for_task = state.forwards.clone();
+    let forwards_for_task = state.core.forwards.clone();
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -2685,7 +2654,7 @@ pub(crate) async fn open_forward(
             .remove(&(ws_for_task.clone(), remote_port));
     });
 
-    state.forwards.lock().unwrap().insert(
+    state.core.forwards.lock().unwrap().insert(
         (workspace_id.to_string(), remote_port),
         ForwardEntry {
             local_port,
@@ -2714,7 +2683,7 @@ pub(crate) async fn open_auto_forward(
     remote_port: u16,
 ) -> Result<u16, String> {
     {
-        let m = state.forwards.lock().unwrap();
+        let m = state.core.forwards.lock().unwrap();
         if let Some(e) = m.get(&(workspace_id.to_string(), remote_port)) {
             return Ok(e.local_port);
         }
@@ -2733,7 +2702,7 @@ pub(crate) async fn open_auto_forward(
 
     let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
     let ws_for_task = workspace_id.to_string();
-    let forwards_for_task = state.forwards.clone();
+    let forwards_for_task = state.core.forwards.clone();
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -2769,7 +2738,7 @@ pub(crate) async fn open_auto_forward(
             .remove(&(ws_for_task, remote_port));
     });
 
-    state.forwards.lock().unwrap().insert(
+    state.core.forwards.lock().unwrap().insert(
         (workspace_id.to_string(), remote_port),
         ForwardEntry {
             local_port,
@@ -2831,7 +2800,7 @@ pub(crate) fn close_one_forward(
     remote_port: u16,
 ) {
     let removed = {
-        let mut m = state.forwards.lock().unwrap();
+        let mut m = state.core.forwards.lock().unwrap();
         m.remove(&(workspace_id.to_string(), remote_port))
     };
     if let Some(mut e) = removed {
@@ -3009,7 +2978,7 @@ fn collect_pane_connection_kinds(node: &LayoutNode, is_ssh: &mut bool) {
 
 // Phase 23.B: does the layout contain a non-terminal pane that depends on
 // a live workspace-level SSH handle? FileManager and Browser panes pull
-// the SSH handle out of `state.sessions` at runtime via
+// the SSH handle out of `state.core.sessions` at runtime via
 // `pick_ssh_handle_for_workspace`; if we tear down the last terminal pane's
 // SSH session, those panes go dark with no in-UI way to reconnect.
 // ClaudeChat is local, doesn't count.
@@ -3232,7 +3201,7 @@ fn live_ssh_connection_for_workspace(
     state: &AppState,
     workspace_id: &str,
 ) -> Option<Connection> {
-    let sessions = state.sessions.lock().ok()?;
+    let sessions = state.core.sessions.lock().ok()?;
     for sess in sessions.values() {
         if let Session::Ssh(s) = sess {
             if s.workspace_id == workspace_id {
@@ -3337,7 +3306,7 @@ async fn workspace_set_auto_port_forward(
         // Phase 47: turning detection off should ACTUALLY stop the
         // watcher (not just suppress events) and wipe what we've seen.
         clear_workspace_detection(&state, &app, &workspace_id);
-        close_workspace_forwards(&state.forwards, &workspace_id);
+        close_workspace_forwards(&state.core.forwards, &workspace_id);
     } else {
         // Phase 47: turning detection on while a session is already up
         // should start the watcher immediately. Best-effort: no-op if
@@ -3366,11 +3335,11 @@ async fn try_ensure_port_watcher(state: &AppState, workspace_id: &str) {
         }
     };
     let remote_port = {
-        let m = state.internal_reverse_tunnel_remote_ports.lock().unwrap();
+        let m = state.core.internal_reverse_tunnel_remote_ports.lock().unwrap();
         m.get(workspace_id).and_then(|s| s.iter().next().copied())
     };
     let token = {
-        let m = state.workspace_tunnel_tokens.lock().unwrap();
+        let m = state.core.workspace_tunnel_tokens.lock().unwrap();
         m.get(workspace_id).cloned()
     };
     match (remote_port, token) {
@@ -3414,7 +3383,7 @@ async fn list_detected_ports(
     state: State<'_, AppState>,
     workspace_id: String,
 ) -> Result<Vec<DetectedPortInfo>, String> {
-    let m = state.detected_ports.lock().unwrap();
+    let m = state.core.detected_ports.lock().unwrap();
     let mut out: Vec<DetectedPortInfo> = m
         .get(&workspace_id)
         .map(|ports| {
@@ -3460,7 +3429,7 @@ async fn forward_port_start(
     remote_port: u16,
 ) -> Result<u16, String> {
     let addr = {
-        let m = state.detected_ports.lock().unwrap();
+        let m = state.core.detected_ports.lock().unwrap();
         m.get(&workspace_id)
             .and_then(|ports| ports.get(&remote_port))
             .map(|(addr, _family)| addr.clone())
@@ -3595,14 +3564,14 @@ fn workspace_delete(
             .unwrap_or_default()
     };
     for pane_id in &panes_to_kill {
-        if let Some(sid) = state.pane_sessions.lock().unwrap().remove(pane_id) {
-            if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+        if let Some(sid) = state.core.pane_sessions.lock().unwrap().remove(pane_id) {
+            if let Some(mut s) = state.core.sessions.lock().unwrap().remove(&sid) {
                 kill_session_inner(&mut s);
             }
         }
     }
     // Phase 8.B: tear down any port forwards for the workspace.
-    close_workspace_forwards(&state.forwards, &workspace_id);
+    close_workspace_forwards(&state.core.forwards, &workspace_id);
     // Phase 39: drop the workspace's notes (the UI warns first when any
     // exist). Best-effort — failure here shouldn't block the delete.
     notes::delete_for_workspace(&state, &app, &workspace_id);
@@ -4181,14 +4150,14 @@ fn workspace_close_pane(
     }
     if let Some(pid) = removed_pane {
         // Always unbind the pane from its session — the pane is gone.
-        let sid_opt = state.pane_sessions.lock().unwrap().remove(&pid);
+        let sid_opt = state.core.pane_sessions.lock().unwrap().remove(&pid);
         if let Some(sid) = sid_opt {
             // Decide whether to actually drop the session. If the
             // session is SSH AND the workspace still has a consumer
             // (file-manager / browser pane), keep it alive so those
             // panes stay functional. Otherwise drop and clean up.
             let is_ssh_for_workspace = {
-                let sessions = state.sessions.lock().unwrap();
+                let sessions = state.core.sessions.lock().unwrap();
                 matches!(
                     sessions.get(&sid),
                     Some(Session::Ssh(ssh)) if ssh.workspace_id == workspace_id
@@ -4198,10 +4167,10 @@ fn workspace_close_pane(
                 tracing::info!(
                     "workspace_close_pane: keeping SSH session {sid} alive — workspace {workspace_id} still has FileManager/Browser pane(s)"
                 );
-                // Leave the session in state.sessions; it has no pane
+                // Leave the session in state.core.sessions; it has no pane
                 // binding now but `pick_ssh_handle_for_workspace`
                 // will still find it via its workspace_id.
-            } else if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+            } else if let Some(mut s) = state.core.sessions.lock().unwrap().remove(&sid) {
                 kill_session_inner(&mut s);
             }
         }
@@ -4261,13 +4230,13 @@ fn pane_set_title(
     // experience without crossing the FFI panic boundary.
     if let Some(label_text) = normalized.as_deref() {
         let tmux_target = {
-            let pane_sessions = state.pane_sessions.lock().ok();
+            let pane_sessions = state.core.pane_sessions.lock().ok();
             let sid = pane_sessions
                 .as_ref()
                 .and_then(|m| m.get(&pane_id).cloned());
             drop(pane_sessions);
             sid.and_then(|sid| {
-                state.sessions.lock().ok().and_then(|sessions| {
+                state.core.sessions.lock().ok().and_then(|sessions| {
                     match sessions.get(&sid) {
                         Some(Session::Ssh(s)) => s.tmux_session.clone(),
                         _ => None,
@@ -4297,10 +4266,10 @@ fn lookup_tmux_for_pane(
     state: &AppState,
     pane_id: &str,
 ) -> Option<(String, Arc<client::Handle<SshClient>>, String)> {
-    let pane_sessions = state.pane_sessions.lock().ok()?;
+    let pane_sessions = state.core.pane_sessions.lock().ok()?;
     let sid = pane_sessions.get(pane_id)?.clone();
     drop(pane_sessions);
-    let sessions = state.sessions.lock().ok()?;
+    let sessions = state.core.sessions.lock().ok()?;
     match sessions.get(&sid) {
         Some(Session::Ssh(s)) => s
             .tmux_session
@@ -4444,7 +4413,7 @@ async fn workspace_ensure_connected(
             // Quick idempotency pre-check (a pane may have already
             // connected). If so, drop the spare handle now.
             {
-                let sessions = state.sessions.lock().unwrap();
+                let sessions = state.core.sessions.lock().unwrap();
                 let already = sessions
                     .values()
                     .any(|s| matches!(s, Session::Ssh(ssh) if ssh.workspace_id == workspace_id));
@@ -4469,7 +4438,7 @@ async fn workspace_ensure_connected(
             // Re-check + insert under the lock. If a pane raced in during
             // tunnel setup, drop the spare (its handle Drop tears the
             // tunnel down with it).
-            let mut sessions = state.sessions.lock().unwrap();
+            let mut sessions = state.core.sessions.lock().unwrap();
             let already = sessions
                 .values()
                 .any(|s| matches!(s, Session::Ssh(ssh) if ssh.workspace_id == workspace_id));
@@ -4611,8 +4580,8 @@ async fn pane_connect(
     };
 
     // Kill any prior session for this pane.
-    if let Some(old_sid) = state.pane_sessions.lock().unwrap().remove(&pane_id) {
-        if let Some(mut s) = state.sessions.lock().unwrap().remove(&old_sid) {
+    if let Some(old_sid) = state.core.pane_sessions.lock().unwrap().remove(&pane_id) {
+        if let Some(mut s) = state.core.sessions.lock().unwrap().remove(&old_sid) {
             kill_session_inner(&mut s);
         }
     }
@@ -4655,7 +4624,7 @@ async fn pane_connect(
             .await?
         }
     };
-    state
+    state.core
         .pane_sessions
         .lock()
         .unwrap()
@@ -4663,7 +4632,7 @@ async fn pane_connect(
 
     // Phase 7.C: inject env exports + setup_command after a 500ms grace period.
     schedule_setup_injection(
-        state.sessions.clone(),
+        state.core.sessions.clone(),
         session_id.clone(),
         shell_kind,
         ws_env,
@@ -4677,7 +4646,7 @@ async fn pane_connect(
     // back to a clean prompt only when the command exits.
     let smart_mode = mode.clone();
     if matches!(smart_mode.as_deref(), Some("cmd") | Some("claude")) {
-        let sessions_clone = state.sessions.clone();
+        let sessions_clone = state.core.sessions.clone();
         let session_id_clone = session_id.clone();
         let mode_str = smart_mode.unwrap_or_default();
         let cwd_str = cwd_override.clone();
@@ -4759,7 +4728,7 @@ async fn pane_list_tmux_sessions(
     // terminal pane authenticates, re-opening the picker will list the
     // real sessions over the now-live handle.
     let handle = {
-        let sessions = state.sessions.lock().unwrap();
+        let sessions = state.core.sessions.lock().unwrap();
         sessions
             .iter()
             .find_map(|(_sid, sess)| match sess {
@@ -4945,7 +4914,7 @@ async fn tmux_rename_session(
         return Err("old_name cannot be empty".into());
     }
     let handle = {
-        let sessions = state.sessions.lock().unwrap();
+        let sessions = state.core.sessions.lock().unwrap();
         sessions
             .iter()
             .find_map(|(_sid, sess)| match sess {
@@ -4989,7 +4958,7 @@ async fn pane_list_claude_sessions(
     // Locate any live SSH handle for this workspace. The shell command runs
     // on the remote where Claude Code is actually installed.
     let handle_opt = {
-        let sessions = state.sessions.lock().unwrap();
+        let sessions = state.core.sessions.lock().unwrap();
         sessions
             .iter()
             .find_map(|(_sid, sess)| match sess {
@@ -5189,10 +5158,10 @@ fn pane_persistence_get(
     state: State<'_, AppState>,
     pane_id: String,
 ) -> Option<String> {
-    let sessions_map = state.pane_sessions.lock().unwrap();
+    let sessions_map = state.core.pane_sessions.lock().unwrap();
     let sid = sessions_map.get(&pane_id)?.clone();
     drop(sessions_map);
-    let sessions = state.sessions.lock().unwrap();
+    let sessions = state.core.sessions.lock().unwrap();
     if let Some(Session::Ssh(s)) = sessions.get(&sid) {
         return s.tmux_session.clone();
     }
@@ -5207,8 +5176,8 @@ fn pane_persistence_list(
     state: State<'_, AppState>,
 ) -> std::collections::HashMap<String, String> {
     let mut out = std::collections::HashMap::new();
-    let pane_sessions = state.pane_sessions.lock().unwrap().clone();
-    let sessions = state.sessions.lock().unwrap();
+    let pane_sessions = state.core.pane_sessions.lock().unwrap().clone();
+    let sessions = state.core.sessions.lock().unwrap();
     for (pane, sid) in pane_sessions {
         if let Some(Session::Ssh(s)) = sessions.get(&sid) {
             if let Some(name) = &s.tmux_session {
@@ -5229,14 +5198,14 @@ async fn pane_kill_session(
     state: State<'_, AppState>,
     pane_id: String,
 ) -> Result<(), String> {
-    let sid_opt = state.pane_sessions.lock().unwrap().get(&pane_id).cloned();
+    let sid_opt = state.core.pane_sessions.lock().unwrap().get(&pane_id).cloned();
     let Some(sid) = sid_opt else {
         return Ok(());
     };
     // Snapshot the SSH handle + tmux name without holding the lock across the
     // .await — russh's Handle is shared as Arc<> so this is cheap.
     let (handle_arc, tmux_name) = {
-        let sessions = state.sessions.lock().unwrap();
+        let sessions = state.core.sessions.lock().unwrap();
         match sessions.get(&sid) {
             Some(Session::Ssh(s)) => (Some(s.handle.clone()), s.tmux_session.clone()),
             _ => (None, None),
@@ -5271,9 +5240,9 @@ async fn pane_kill_session(
     // Now close the shell + remove session bookkeeping. This re-uses the
     // existing pane_disconnect logic by removing from pane_sessions and
     // killing the underlying session.
-    let sid = state.pane_sessions.lock().unwrap().remove(&pane_id);
+    let sid = state.core.pane_sessions.lock().unwrap().remove(&pane_id);
     if let Some(sid) = sid {
-        if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+        if let Some(mut s) = state.core.sessions.lock().unwrap().remove(&sid) {
             kill_session_inner(&mut s);
         }
     }
@@ -5285,7 +5254,7 @@ async fn pane_disconnect(
     state: State<'_, AppState>,
     pane_id: String,
 ) -> Result<(), String> {
-    let sid = state.pane_sessions.lock().unwrap().remove(&pane_id);
+    let sid = state.core.pane_sessions.lock().unwrap().remove(&pane_id);
     let Some(sid) = sid else {
         return Ok(());
     };
@@ -5308,7 +5277,7 @@ async fn pane_disconnect(
     if let Some(t) = teardown {
         let bytes = format!("{}\r\n", t).into_bytes();
         {
-            let mut sessions = state.sessions.lock().unwrap();
+            let mut sessions = state.core.sessions.lock().unwrap();
             if let Some(s) = sessions.get_mut(&sid) {
                 match s {
                     Session::Local(l) => {
@@ -5325,7 +5294,7 @@ async fn pane_disconnect(
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 
-    if let Some(mut s) = state.sessions.lock().unwrap().remove(&sid) {
+    if let Some(mut s) = state.core.sessions.lock().unwrap().remove(&sid) {
         kill_session_inner(&mut s);
     }
     Ok(())
@@ -5334,7 +5303,7 @@ async fn pane_disconnect(
 // ─── Session-level commands (write/resize) ───────────────────────────────────
 
 pub(crate) fn write_to_session(state: &AppState, session_id: &str, data: &[u8]) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().unwrap();
+    let mut sessions = state.core.sessions.lock().unwrap();
     let s = sessions
         .get_mut(session_id)
         .ok_or_else(|| format!("no such session {session_id}"))?;
@@ -5430,7 +5399,7 @@ pub(crate) fn build_doctor_snapshot(state: &AppState) -> serde_json::Value {
     let workspace_count = workspaces.len();
     // Count which workspaces have a live SSH session (any pane or the
     // headless Phase 41 entry counts).
-    let sessions = state.sessions.lock().unwrap();
+    let sessions = state.core.sessions.lock().unwrap();
     let mut ssh_connected = std::collections::HashSet::new();
     let mut pty_count = 0usize;
     for s in sessions.values() {
@@ -5520,7 +5489,7 @@ fn pty_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
+    let sessions = state.core.sessions.lock().unwrap();
     let s = sessions
         .get(&session_id)
         .ok_or_else(|| format!("no such session {session_id}"))?;

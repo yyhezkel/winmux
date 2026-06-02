@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "cli", "mcp", "crates/winmux-types", "crates/winmux-core", "crates/winmux-tunnel"]
+members = [".", "cli", "mcp", "crates/winmux-types", "crates/winmux-core", "crates/winmux-tunnel", "crates/winmux-bootstrap"]
 resolver = "2"
 
 # Pre-public hardening: strip symbols from release builds. The
@@ -69,6 +69,8 @@ winmux-types = { path = "crates/winmux-types" }
 winmux-core = { path = "crates/winmux-core" }
 # Phase 51.C: HMAC handshake + bridge_to_pipe (the reverse-tunnel).
 winmux-tunnel = { path = "crates/winmux-tunnel" }
+# Phase 51.D: remote CLI bootstrap (russh+sftp deploy logic).
+winmux-bootstrap = { path = "crates/winmux-bootstrap" }
 
 [dev-dependencies]
 # Phase 50 (#2.4): integration test for diff_pane::fetch_diff against a

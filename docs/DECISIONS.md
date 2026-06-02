@@ -47,6 +47,12 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 - **Sources:** `docs/COMPETITIVE-SCAN.md` §2.1 (full design borrowed from editnori/WinMux's `NativeAutomationServer.cs`), `docs/IDEAS-RANKING.md` row 2.1 (✅ MUST).
 - **Status:** Moved to bottom of Open 2026-05-28 — Yossi: "not ready yet, keep on roadmap." The big-ticket next focus once the Sprint 1 quick wins settle.
 
+### 2026-06-02 — Speech-to-text with local-model option
+- **Context:** Yossi wants voice input → text in winmux. Specifically with the option to point at a model running LOCALLY (no cloud dependency).
+- **Likely architecture:** native Web Speech API as the default fallback (Chrome/Edge engines provide it for free), plus a configurable endpoint for a local server (Whisper.cpp HTTP, Vosk, etc.). User toggles between them in Settings.
+- **Surface ideas:** push-to-talk shortcut in any focused text field (chat, file editor, terminal write-buffer pre-send), or a "Voice input" button.
+- **Status:** Open, not yet scoped further. Triage when ready.
+
 ---
 
 ## Decided

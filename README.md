@@ -231,6 +231,7 @@ identity (color, emoji, dynamic window title) · auto-port-forwarding via a
 - 🔮 PortsWindow polish — clearer state, full e2e validation, smarter port-watch behavior
 - 🔮 Secrets Vault — in cooperation with a separate MCP project that holds credentials; winmux exposes egress hooks (SSH env inject, child-process spawn with env)
 - 🔮 Full LLM control surface — HTTP automation API so agents can drive winmux from outside (split, screenshot, scrollback, etc.)
+- 🔮 Speech-to-text input with optional local-model endpoint (Whisper.cpp etc.)
 - 🔮 Drag-and-drop into the terminal — files / URLs / clipboard images, SFTP-uploaded to the remote with the path auto-injected
 - 🔮 Diff / patch review pane — track git diff of the active workspace live
 - 🔮 Worktree-aware workspaces — bind each workspace to a git worktree for parallel branches in the same repo

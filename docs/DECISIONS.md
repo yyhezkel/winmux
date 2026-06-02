@@ -57,6 +57,27 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Decided
 
+### 2026-06-02 — lib.rs split — Phase 51 complete (51.A through 51.H)
+- **Context:** Scan #3.1 (last SHOULD item). Closes the multi-day refactor that started with the 51.A POC and proceeded under option A2 (architectural redesign with AppState split). The full kitchen-sink target proved too ambitious in practice — see commit-level notes below — but the architectural pivot is done and the codebase now reflects a clean separation between **infrastructure crates** (own no AppState, no Tauri) and the **application shell** (orchestration code tied to AppState).
+- **What landed:** 5 sub-crates under `app/src-tauri/crates/`:
+
+| Crate | LOC | Phase | Owns |
+|---|---|---|---|
+| `winmux-types` | 303 | 51.A `e0d6d71` | wire/persistence types (Workspace, LayoutNode, Connection, DiffSource, …) + ts-rs derives |
+| `winmux-core` | 533 | 51.B1-B4 `3a4bbd5`/`1eaece5`/`71bb6b7`/`e5cb7c9` | dlog, shell_quote, pure layout walkers, SshClient + russh::client::Handler impl, Session/SshSession/SshCmd/LocalSession/ForwardEntry, pipe_name, **CoreState struct** (sessions / forwards / port_watchers / detected_ports / port_watcher_tasks / workspace_tunnel_tokens / internal_reverse_tunnel_remote_ports / diff_pane_watchers / pane_sessions) |
+| `winmux-tunnel` | 247 | 51.C `c71c9b1` | HMAC handshake + bridge_to_pipe + generate_token + write_remote_env_file + spawn_bridge |
+| `winmux-bootstrap` | 426 | 51.D `47678a4` | Linux CLI deploy via russh+sftp (closure-injected resource loader, no tauri dep — Yossi's option-c choice) |
+| `winmux-ssh` | 307 | 51.H `5553ef7` | try_authenticate, try_agent_auth, pkwh/pkwh_pub, AuthMethod, key_load_needs_passphrase |
+
+- **AppState restructure (51.B4):** `pub struct CoreState` in winmux-core; `AppState` in `app` now wraps `core: CoreState` plus the 13 fields that depend on tauri / notes / settings / dev / browser / feed (which can't move out of `app` without dragging those modules along). ~93 `state.<field>` → `state.core.<field>` callsite rewrites done in one mechanical sed pass (line-internal + multi-line split patterns).
+- **Option β for the russh circular dep:** `SshClient` in winmux-core takes a caller-injected `bridge_spawner: Option<Arc<dyn Fn(Channel, Arc<String>) + Send + Sync>>` (51.B2). The `app` crate's construction site passes `Arc::new(tunnel::spawn_bridge)` so the russh `Handler` impl can fire the tunnel without core depending on tunnel.
+- **What didn't move (51.E rpc, 51.F feed, 51.G workspaces, 51.H pty, 51.I ssh-flow):** all hit the same structural blocker — the orchestration code takes `&AppState + &AppHandle` and stitches helpers from `notes`/`settings`/`local_wizard`/`dev`/`feed`. Moving them either (a) requires pulling those modules into a sub-crate too, recreating the monolith we were trying to escape, or (b) needs facade-trait dispatch (option C, rejected earlier as a permanent ergonomic tax). Honest call per checkpoint discipline: these modules genuinely belong with the application shell.
+- **Final lib.rs LOC:** **5,765** (was 6,439 pre-Phase 51 — 674 LOC out). Scan #3.1's "lib.rs < 2,500" target was not reached. The remaining content is real orchestration: spawn_local_pty / spawn_ssh / connect_and_authenticate / setup_workspace_reverse_tunnel / spawn_port_watcher / open_auto_forward / and the ~30 tauri commands that wire it all together. Not splittable without addressing AppState's coupling to the 4 sibling modules, which is a separate Phase 5x project (likely "make lib.rs thinner via in-crate module relocation").
+- **Total commits in Phase 51:** 11 (`e0d6d71` 51.A, `3a4bbd5` 51.B1, `1eaece5` 51.B2, `71bb6b7` 51.B3, `e5cb7c9` 51.B4, `c71c9b1` 51.C, `47678a4` 51.D, `5553ef7` 51.H, `e4450a1` cleanup-trim, plus `039d896` and `2ba9280` DECISIONS docs).
+- **Validation throughout:** every commit passed `cargo check --workspace` + `cargo test --workspace` green. Final test totals: **49 passing** (36 app + 5 cli + 8 winmux-types + 0 winmux-core/tunnel/bootstrap/ssh — those crates carry no test code yet). `tsc --noEmit` clean. ts-rs bindings byte-identical to pre-Phase-51 (verified by inspection of Workspace.ts / PaneKind.ts after each commit).
+- **Scan #3.1 status:** moved from SHOULD-open → Decided. Remaining SHOULD inventory is now 0 items.
+- **Next:** Phase 52 (BiDi 33B — PTY-stream FSI/PDI wrapping for xterm.js).
+
 ### 2026-06-02 — lib.rs split — POC: pure data types crate (Phase 51.A, `e0d6d71`)
 - **Context:** Scan #3.1 (last SHOULD item). lib.rs grew to ~5,300 lines through 50 phases; the scan recommends an 8-crate workspace split. After a scope-check conversation Yossi agreed to a POC-first approach: do the smallest, lowest-coupling extraction (pure data types) as Phase 51.A before committing to the remaining 7 sub-phases.
 - **Decision:** New crate `app/src-tauri/crates/winmux-types/` holds 8 wire/persistence types (`Connection`, `SplitDirection`, `PaneKind`, `DiffSource`, `BrowserState`, `LayoutNode`, `EnvVar`, `Workspace`) + the serde-helper functions (`is_terminal_kind`, `default_true`, `is_true`) + `BROWSER_HISTORY_MAX` const + the two `Default` impls. Field visibility raised from `pub(crate)` → `pub` (now cross-crate). Re-exported from `app/src-tauri/src/lib.rs` as `pub(crate) use winmux_types::{...}` so every existing `crate::Connection` / `crate::Workspace` callsite resolves unchanged. Cargo workspace gained `crates/winmux-types` member; `app` declares `winmux-types = { path = "crates/winmux-types" }`.

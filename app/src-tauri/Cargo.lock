@@ -6818,10 +6818,12 @@ dependencies = [
  "async-trait",
  "chrono",
  "dirs 5.0.1",
+ "portable-pty",
  "russh",
  "russh-keys",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
  "winmux-types",
 ]

@@ -35,78 +35,15 @@ static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 static PANE_COUNTER: AtomicU64 = AtomicU64::new(0);
 static SPLIT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-// ─── Session types ───────────────────────────────────────────────────────────
-
-pub(crate) enum Session {
-    Local(LocalSession),
-    Ssh(SshSession),
-}
-
-pub(crate) struct LocalSession {
-    pub(crate) writer: Box<dyn Write + Send>,
-    pub(crate) master: Box<dyn MasterPty + Send>,
-    pub(crate) killer: Box<dyn ChildKiller + Send + Sync>,
-}
-
-pub(crate) struct SshSession {
-    // Phase 41: `None` for a headless session — one established by
-    // `workspace_ensure_connected` to back the tmux picker / file manager
-    // with no PTY behind it. Pane-backed sessions always carry `Some`.
-    pub(crate) tx: Option<tokio::sync::mpsc::UnboundedSender<SshCmd>>,
-    // Phase 8.B: shared russh client handle. The I/O task and any port-forward
-    // accept loop both hold an Arc; russh's Handle methods take &self, so
-    // concurrent users send commands through the underlying mpsc sender.
-    pub(crate) handle: Arc<client::Handle<SshClient>>,
-    // Phase 8.B: workspace this session belongs to, so port-forward bookkeeping
-    // can clean up when the workspace is deleted or all SSH sessions exit.
-    pub(crate) workspace_id: String,
-    // Phase 11.A: when this session was started with `persistent=true` we wrap
-    // the shell in a tmux attach-or-create. Storing the name lets us send
-    // `tmux kill-session -t NAME` via a separate exec channel on demand.
-    pub(crate) tmux_session: Option<String>,
-    // Phase 23.C: connection metadata so we can rehydrate a `Connection`
-    // value from a live session — used by `live_ssh_connection_for_workspace`
-    // when the user adds a new terminal pane to an SSH workspace whose
-    // connection details no longer live in any pane (e.g. all terminals
-    // closed but a FileManager pane kept the SSH handle alive).
-    pub(crate) host: String,
-    pub(crate) user: String,
-    pub(crate) port: u16,
-    pub(crate) key_path: Option<String>,
-}
-
-impl SshSession {
-    /// Phase 41: forward a command to the PTY task. Headless sessions have
-    /// no PTY (`tx == None`), so this is a no-op for them. Pane operations
-    /// only ever look sessions up by pane id, so in practice this only
-    /// reaches `Some` senders — the `None` arm is the safety net.
-    pub(crate) fn try_send(&self, cmd: SshCmd) -> Result<(), String> {
-        match &self.tx {
-            Some(tx) => tx.send(cmd).map_err(|e| e.to_string()),
-            None => Ok(()),
-        }
-    }
-}
-
-#[derive(Debug)]
-enum SshCmd {
-    Data(Vec<u8>),
-    Resize(u32, u32),
-    Kill,
-}
-
-type SessionMap = Arc<Mutex<HashMap<String, Session>>>;
+// Phase 51.B3: Session/LocalSession/SshSession/SshCmd + SessionMap
+// moved to winmux-core. Re-exported below so existing crate::Session,
+// crate::SshSession, crate::SshCmd references resolve unchanged.
+pub(crate) use winmux_core::{LocalSession, Session, SessionMap, SshCmd, SshSession};
 type PaneSessionMap = Arc<Mutex<HashMap<String, String>>>;
 type WorkspacesState = Arc<Mutex<WorkspacesFile>>;
 
-// Phase 8.B: SSH local port forwards (browser pane → remote dev server).
-// Key = (workspace_id, remote_port). Value carries the local listener port and
-// a oneshot to cancel the accept loop on cleanup.
-pub(crate) struct ForwardEntry {
-    pub(crate) local_port: u16,
-    pub(crate) cancel: Option<tokio::sync::oneshot::Sender<()>>,
-}
-pub(crate) type ForwardMap = Arc<Mutex<HashMap<(String, u16), ForwardEntry>>>;
+// Phase 51.B3: ForwardEntry + ForwardMap moved to winmux-core.
+pub(crate) use winmux_core::{ForwardEntry, ForwardMap};
 
 // Phase 8.C: pending request → response map for browser-pane operations that
 // need to round-trip through the frontend (eval, screenshot). Keyed by request_id.

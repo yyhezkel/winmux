@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "cli", "mcp", "crates/winmux-types", "crates/winmux-core", "crates/winmux-tunnel", "crates/winmux-bootstrap"]
+members = [".", "cli", "mcp", "crates/winmux-types", "crates/winmux-core", "crates/winmux-tunnel", "crates/winmux-bootstrap", "crates/winmux-ssh"]
 resolver = "2"
 
 # Pre-public hardening: strip symbols from release builds. The
@@ -71,6 +71,8 @@ winmux-core = { path = "crates/winmux-core" }
 winmux-tunnel = { path = "crates/winmux-tunnel" }
 # Phase 51.D: remote CLI bootstrap (russh+sftp deploy logic).
 winmux-bootstrap = { path = "crates/winmux-bootstrap" }
+# Phase 51.H: SSH auth primitives (try_authenticate + try_agent_auth).
+winmux-ssh = { path = "crates/winmux-ssh" }
 
 [dev-dependencies]
 # Phase 50 (#2.4): integration test for diff_pane::fetch_diff against a

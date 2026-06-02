@@ -184,6 +184,7 @@ dependencies = [
  "whoami",
  "winmux-bootstrap",
  "winmux-core",
+ "winmux-ssh",
  "winmux-tunnel",
  "winmux-types",
 ]
@@ -6853,6 +6854,16 @@ dependencies = [
  "serde_json",
  "tokio",
  "whoami",
+]
+
+[[package]]
+name = "winmux-ssh"
+version = "0.0.0"
+dependencies = [
+ "russh",
+ "russh-keys",
+ "tokio",
+ "winmux-core",
 ]
 
 [[package]]

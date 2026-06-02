@@ -12,7 +12,7 @@ use crate::SshClient;
 
 // Re-export the public surface so existing crate::remote_bootstrap::*
 // callsites continue to resolve unchanged.
-pub use winmux_bootstrap::{BootstrapStatus, ManifestEntry, PATH_RC_SNIPPET};
+pub use winmux_bootstrap::{BootstrapStatus, PATH_RC_SNIPPET};
 
 fn read_manifest_text(app: &AppHandle) -> Result<String, String> {
     let path = app

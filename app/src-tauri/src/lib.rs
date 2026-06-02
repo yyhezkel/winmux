@@ -24,14 +24,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use russh::client;
 use russh::ChannelMsg;
-use russh_keys::key::PrivateKeyWithHashAlg;
-use russh_keys::{HashAlg, PrivateKey};
+// Phase 51.H: russh-keys imports removed (now used only inside winmux-ssh).
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 static PANE_COUNTER: AtomicU64 = AtomicU64::new(0);

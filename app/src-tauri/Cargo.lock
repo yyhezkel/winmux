@@ -183,6 +183,7 @@ dependencies = [
  "ureq",
  "whoami",
  "winmux-core",
+ "winmux-tunnel",
  "winmux-types",
 ]
 
@@ -6825,6 +6826,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "whoami",
  "winmux-types",
 ]
 
@@ -6836,6 +6838,19 @@ dependencies = [
  "serde_json",
  "tokio",
  "whoami",
+]
+
+[[package]]
+name = "winmux-tunnel"
+version = "0.0.0"
+dependencies = [
+ "hmac",
+ "rand 0.8.6",
+ "russh",
+ "sha2",
+ "tokio",
+ "tracing",
+ "winmux-core",
 ]
 
 [[package]]

@@ -12,8 +12,10 @@ mod provisioning;
 mod remote_bootstrap;
 mod rpc_server;
 mod settings;
-mod tunnel;
 mod updater;
+// Phase 51.C: `mod tunnel` moved to its own crate winmux-tunnel.
+// Existing crate::tunnel::* callsites still resolve via this alias.
+use winmux_tunnel as tunnel;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};

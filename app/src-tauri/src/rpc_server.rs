@@ -20,13 +20,8 @@ use crate::{
 
 const FEED_MAX_ITEMS_LIMIT: usize = 50;
 
-pub fn pipe_name() -> String {
-    let user = std::env::var("USERNAME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| whoami::username());
-    format!(r"\\.\pipe\winmux-{}", user)
-}
+// Phase 51.C: pipe_name moved to winmux-core (shared with winmux-tunnel).
+pub use winmux_core::pipe_name;
 
 // Phase 39.A: removed the 8-cap that caused ERROR_PIPE_NOT_AVAILABLE
 // storms under concurrent RPC.

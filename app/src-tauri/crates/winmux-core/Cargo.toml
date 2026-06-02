@@ -21,3 +21,5 @@ tracing = "0.1"
 # Phase 51.B3: Session/SshSession/ForwardEntry runtime types.
 tokio = { version = "1", features = ["sync", "rt", "macros"] }
 portable-pty = "0.8"
+# Phase 51.C: pipe_name resolution for the Named Pipe RPC endpoint.
+whoami = "1"

@@ -491,6 +491,21 @@ pub type ForwardMap = Arc<Mutex<HashMap<(String, u16), ForwardEntry>>>;
 pub type SessionMap = Arc<Mutex<HashMap<String, Session>>>;
 pub type PaneSessionMap = Arc<Mutex<HashMap<String, String>>>;
 
+// ─── pipe_name ───────────────────────────────────────────────────────
+
+/// Phase 51.C: the per-user Windows Named Pipe path that the RPC
+/// server binds to and the remote tunnel bridges into. Lives in
+/// winmux-core so both winmux-tunnel (bridge_to_pipe) and the future
+/// winmux-rpc (server bind) can reach it without depending on each
+/// other.
+pub fn pipe_name() -> String {
+    let user = std::env::var("USERNAME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| whoami::username());
+    format!(r"\\.\pipe\winmux-{}", user)
+}
+
 // ─── CoreState ───────────────────────────────────────────────────────
 
 /// Phase 51.B4: the russh/PTY/forward runtime state that every future

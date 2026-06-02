@@ -1,6 +1,10 @@
 //! Phase 6.3: bridge a remote-forwarded TCP channel to the local Named Pipe RPC server.
 //! Phase 6.4: replace the plain-token preamble with an HMAC-SHA256 challenge-response
 //! handshake so the shared secret never travels in cleartext.
+//!
+//! Phase 51.C: moved out of `app/src-tauri/src/tunnel.rs` into its own
+//! crate. Depends on `winmux-core` for `dlog`, `pipe_name`, and the
+//! `SshClient` type alias used in russh `Handle<SshClient>` signatures.
 
 use hmac::{Hmac, Mac};
 use rand::RngCore;
@@ -8,7 +12,7 @@ use russh::{Channel, ChannelMsg};
 use sha2::Sha256;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufStream};
 
-use crate::dlog;
+use winmux_core::{dlog, pipe_name, SshClient};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -136,7 +140,7 @@ pub async fn bridge_to_pipe(
     // server no longer turns a transient busy into a hard error +
     // log spam. Per-attempt waits are silent (tracing::debug only);
     // a genuine give-up surfaces via spawn_bridge's dlog.
-    let pipe_name = crate::rpc_server::pipe_name();
+    let pipe_name = pipe_name();
     let mut backoff_ms = 25u64;
     let mut pipe = loop {
         match tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe_name) {
@@ -184,7 +188,7 @@ pub fn generate_token() -> String {
 /// `WINMUX_SOCKET_ADDR` and `WINMUX_TUNNEL_TOKEN` even if sshd's `AcceptEnv` rejects
 /// the per-channel `set_env` requests.
 pub async fn write_remote_env_file(
-    handle: &mut russh::client::Handle<crate::SshClient>,
+    handle: &mut russh::client::Handle<SshClient>,
     home: &str,
     socket_addr: &str,
     token: &str,
@@ -208,7 +212,7 @@ pub async fn write_remote_env_file(
 }
 
 async fn exec_simple(
-    handle: &mut russh::client::Handle<crate::SshClient>,
+    handle: &mut russh::client::Handle<SshClient>,
     cmd: &str,
 ) -> Result<(), String> {
     let mut chan = handle

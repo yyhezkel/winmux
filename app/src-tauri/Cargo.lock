@@ -182,6 +182,7 @@ dependencies = [
  "ts-rs",
  "ureq",
  "whoami",
+ "winmux-core",
  "winmux-types",
 ]
 
@@ -6808,6 +6809,14 @@ dependencies = [
  "sha2",
  "tokio",
  "whoami",
+]
+
+[[package]]
+name = "winmux-core"
+version = "0.0.0"
+dependencies = [
+ "dirs 5.0.1",
+ "winmux-types",
 ]
 
 [[package]]

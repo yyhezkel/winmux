@@ -1,0 +1,12 @@
+[package]
+name = "winmux-core"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Phase 51.B: core infrastructure shared across the winmux backend"
+
+[dependencies]
+# Pure data types — already extracted in 51.A.
+winmux-types = { path = "../winmux-types" }
+# Config-dir resolution for the debug-log path.
+dirs = "5"

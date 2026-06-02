@@ -351,27 +351,15 @@ pub(crate) fn new_workspace_id() -> String {
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
-fn config_dir() -> Result<PathBuf, String> {
-    // Override hook so users / tests can pin the state directory regardless of
-    // how the Windows binary resolves it. If `WINMUX_CONFIG_DIR` is set we use
-    // it verbatim; otherwise default to `dirs::config_dir()/winmux` which on
-    // Windows resolves to `%APPDATA%\Roaming\winmux`.
-    if let Ok(custom) = std::env::var("WINMUX_CONFIG_DIR") {
-        let p = PathBuf::from(custom);
-        std::fs::create_dir_all(&p).map_err(|e| format!("create {:?}: {e}", p))?;
-        return Ok(p);
-    }
-    let dir = dirs::config_dir()
-        .ok_or_else(|| "no config dir available".to_string())?
-        .join("winmux");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("create {:?}: {e}", dir))?;
-    Ok(dir)
-}
-
-/// Same as `config_dir` but visible to other modules.
-pub(crate) fn config_dir_pub() -> Result<PathBuf, String> {
-    config_dir()
-}
+// Phase 51.B1: config_dir + dlog + shell_quote + pure layout walkers
+// moved to winmux-core. Re-exported below so every existing
+// `crate::dlog` / `crate::shell_quote` / `crate::collect_panes` /
+// `crate::first_terminal_connection_pub` / `crate::backfill_terminal_connections`
+// callsite resolves unchanged.
+pub(crate) use winmux_core::{
+    backfill_terminal_connections, collect_panes, collect_panes_with_kind, config_dir,
+    config_dir_pub, dlog, first_terminal_connection, first_terminal_connection_pub, shell_quote,
+};
 
 /// Phase 38: absolute path to the debug log, for the Settings → Logs
 /// UI ("Open folder" / "Copy path"). Single source of truth — matches
@@ -417,24 +405,6 @@ fn read_log_tail(n: usize) -> Result<String, String> {
 
 fn config_path() -> Result<PathBuf, String> {
     Ok(config_dir()?.join("workspaces.json"))
-}
-
-pub(crate) fn dlog(msg: &str) {
-    if let Ok(dir) = config_dir() {
-        let p = dir.join("debug.log");
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&p)
-            .and_then(|mut f| {
-                use std::io::Write as _;
-                writeln!(f, "[{ts}] {msg}")
-            });
-    }
 }
 
 fn save_to_disk(file: &WorkspacesFile) -> Result<(), String> {
@@ -717,27 +687,7 @@ pub(crate) fn update_browser_pane(
 // ClaudeLog pane kinds. The browser walker stays (active feature);
 // claude_log_pane_set in claude_log.rs was also removed.
 
-pub(crate) fn collect_panes(node: &LayoutNode, out: &mut Vec<String>) {
-    match node {
-        LayoutNode::Pane { pane_id, .. } => out.push(pane_id.clone()),
-        LayoutNode::Split { first, second, .. } => {
-            collect_panes(first, out);
-            collect_panes(second, out);
-        }
-    }
-}
-
-// Phase 8.E: visit every leaf pane and report its kind to the callback. Used
-// by the `dev.get-state` summary builder.
-pub(crate) fn collect_panes_with_kind(node: &LayoutNode, f: &mut dyn FnMut(PaneKind)) {
-    match node {
-        LayoutNode::Pane { pane_kind, .. } => f(*pane_kind),
-        LayoutNode::Split { first, second, .. } => {
-            collect_panes_with_kind(first, f);
-            collect_panes_with_kind(second, f);
-        }
-    }
-}
+// Phase 51.B1: collect_panes + collect_panes_with_kind moved to winmux-core.
 
 // Phase 8.A: `new_kind` decides whether the spawned sibling is a terminal (default,
 // inherits the existing pane's connection) or a browser (with `new_browser_url` as
@@ -1251,22 +1201,6 @@ pub(crate) fn sanitize_tmux_session_name_for_title(title: &str) -> Option<String
     } else {
         Some(trimmed_out)
     }
-}
-
-/// Minimal POSIX single-quote escape. Wraps the value in single quotes and
-/// rewrites any internal single-quote as `'\''`. Safe for /bin/sh-style.
-pub(crate) fn shell_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    for c in s.chars() {
-        if c == '\'' {
-            out.push_str("'\\''");
-        } else {
-            out.push(c);
-        }
-    }
-    out.push('\'');
-    out
 }
 
 fn schedule_setup_injection(
@@ -3499,9 +3433,7 @@ fn workspace_reset_layout(
     Ok(state.workspaces.lock().unwrap().clone())
 }
 
-pub(crate) fn first_terminal_connection_pub(node: &LayoutNode) -> Option<Connection> {
-    first_terminal_connection(node)
-}
+// Phase 51.B1: first_terminal_connection_pub moved to winmux-core.
 
 /// Phase 23.C: visible to other modules (rpc_server) for the same
 /// inheritance chain when splits come in via RPC.
@@ -3539,101 +3471,8 @@ fn live_ssh_connection_for_workspace(
     None
 }
 
-fn first_terminal_connection(node: &LayoutNode) -> Option<Connection> {
-    match node {
-        LayoutNode::Pane {
-            pane_kind,
-            connection,
-            ..
-        } => {
-            if matches!(pane_kind, PaneKind::Terminal) {
-                connection.clone()
-            } else {
-                None
-            }
-        }
-        LayoutNode::Split { first, second, .. } => {
-            first_terminal_connection(first).or_else(|| first_terminal_connection(second))
-        }
-    }
-}
-
-/// Phase 24.D: walk the layout tree and give every Terminal pane
-/// that has no connection one — either the workspace's canonical
-/// `connection` or a Local fallback. The common case this catches:
-/// a pane that USED to be ClaudeChat or ClaudeLog (those kinds got
-/// aliased to Terminal during deserialize in 24.D) but never had a
-/// `connection` field set. Without this rescue, that pane would
-/// show up as a Terminal with no Connect target.
-///
-/// Returns (new_layout, true) when at least one pane changed,
-/// (new_layout, false) when nothing was touched.
-fn backfill_terminal_connections(
-    node: LayoutNode,
-    workspace_conn: &Option<Connection>,
-) -> (LayoutNode, bool) {
-    match node {
-        LayoutNode::Pane {
-            pane_id,
-            pane_kind,
-            connection,
-            browser,
-            title,
-            annotation,
-            color,
-            emoji,
-            help_topic,
-            diff_source,
-        } => {
-            let needs_fix =
-                matches!(pane_kind, PaneKind::Terminal) && connection.is_none();
-            let new_conn = if needs_fix {
-                Some(
-                    workspace_conn
-                        .clone()
-                        .unwrap_or(Connection::Local { shell: None }),
-                )
-            } else {
-                connection
-            };
-            (
-                LayoutNode::Pane {
-                    pane_id,
-                    pane_kind,
-                    connection: new_conn,
-                    browser,
-                    title,
-                    annotation,
-                    color,
-                    emoji,
-                    help_topic,
-                    diff_source,
-                },
-                needs_fix,
-            )
-        }
-        LayoutNode::Split {
-            split_id,
-            direction,
-            first,
-            second,
-            ratio,
-        } => {
-            let (new_first, c1) = backfill_terminal_connections(*first, workspace_conn);
-            let (new_second, c2) = backfill_terminal_connections(*second, workspace_conn);
-            (
-                LayoutNode::Split {
-                    split_id,
-                    direction,
-                    first: Box::new(new_first),
-                    second: Box::new(new_second),
-                    ratio,
-                },
-                c1 || c2,
-            )
-        }
-    }
-}
+// Phase 51.B1: first_terminal_connection + backfill_terminal_connections
+// moved to winmux-core.
 
 #[tauri::command]
 fn workspace_rename(

@@ -13,7 +13,14 @@
 //! handler impl, Session/SshSession types, ForwardEntry, AppState +
 //! CoreState. Those land in subsequent 51.B sub-commits.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use russh::client;
+use russh::Channel;
+use russh_keys::HashAlg;
+use serde::{Deserialize, Serialize};
 use winmux_types::{Connection, LayoutNode, PaneKind};
 
 // ─── config dir + debug.log ──────────────────────────────────────────
@@ -208,5 +215,198 @@ pub fn backfill_terminal_connections(
                 c1 || c2,
             )
         }
+    }
+}
+
+// ─── Known-hosts (TOFU) ──────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct KnownHost {
+    #[serde(rename = "type")]
+    pub key_type: String,
+    pub fingerprint: String,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct KnownHostsFile {
+    #[serde(default)]
+    pub hosts: HashMap<String, KnownHost>,
+}
+
+pub fn known_hosts_path() -> Result<PathBuf, String> {
+    Ok(config_dir()?.join("known_hosts.json"))
+}
+
+pub fn load_known_hosts() -> KnownHostsFile {
+    if let Ok(p) = known_hosts_path() {
+        if let Ok(text) = std::fs::read_to_string(&p) {
+            if let Ok(f) = serde_json::from_str::<KnownHostsFile>(&text) {
+                return f;
+            }
+        }
+    }
+    KnownHostsFile::default()
+}
+
+pub fn save_known_hosts(file: &KnownHostsFile) -> Result<(), String> {
+    let path = known_hosts_path()?;
+    let tmp = path.with_extension("json.tmp");
+    let text = serde_json::to_string_pretty(file).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, text).map_err(|e| format!("write tmp: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("rename: {e}"))?;
+    Ok(())
+}
+
+pub fn iso_now() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct HostCheckOutcome {
+    pub fingerprint: String,
+    pub key_type: String,
+    pub matched: bool,
+    pub is_unknown: bool,
+    pub mismatch_old: Option<String>,
+}
+
+// ─── SshClient (russh Handler) ───────────────────────────────────────
+
+/// Callback type for forwarded-tcpip bridge. The app crate (or a
+/// future `winmux-tunnel`) supplies a closure; `winmux-core` calls it
+/// when the SSH server forwards a connection back to us. Phase 51.B2
+/// option β: this is how we break the SshClient → tunnel circular dep
+/// without folding tunnel into core.
+pub type BridgeSpawner = Arc<dyn Fn(Channel<client::Msg>, Arc<String>) + Send + Sync>;
+
+pub struct SshClient {
+    pub target: String,
+    pub accept_unknown: bool,
+    pub result: Arc<Mutex<HostCheckOutcome>>,
+    /// If set, the handler accepts forwarded-tcpip channels and bridges
+    /// them via `bridge_spawner` after validating this token on the
+    /// first line.
+    pub tunnel_token: Option<Arc<String>>,
+    /// Phase 51.B2: caller-injected spawner so this crate avoids a
+    /// dep on winmux-tunnel. Forwarded channels are dropped if either
+    /// `tunnel_token` or `bridge_spawner` is None.
+    pub bridge_spawner: Option<BridgeSpawner>,
+}
+
+impl SshClient {
+    /// Construct a tolerant client for one-shot operations (the connect
+    /// wizard test, provisioning steps). Accepts any server key,
+    /// doesn't touch known_hosts, no tunnel token / spawner. The
+    /// host-check outcome is captured but never persisted.
+    pub fn new_anonymous(target: String) -> Self {
+        Self {
+            target,
+            accept_unknown: true,
+            result: Arc::new(Mutex::new(HostCheckOutcome {
+                fingerprint: String::new(),
+                key_type: String::new(),
+                matched: true,
+                is_unknown: false,
+                mismatch_old: None,
+            })),
+            tunnel_token: None,
+            bridge_spawner: None,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl client::Handler for SshClient {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &russh_keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        let fp = server_public_key.fingerprint(HashAlg::Sha256).to_string();
+        let key_type = server_public_key.algorithm().as_str().to_string();
+        let mut known = load_known_hosts();
+        let mut outcome = HostCheckOutcome {
+            fingerprint: fp.clone(),
+            key_type: key_type.clone(),
+            matched: false,
+            is_unknown: false,
+            mismatch_old: None,
+        };
+        let now = iso_now();
+        let existing = known.hosts.get(&self.target).cloned();
+        let accept = match existing {
+            Some(entry) if entry.fingerprint == fp => {
+                outcome.matched = true;
+                if let Some(h) = known.hosts.get_mut(&self.target) {
+                    h.last_seen = now;
+                    let _ = save_known_hosts(&known);
+                }
+                true
+            }
+            Some(entry) => {
+                outcome.mismatch_old = Some(entry.fingerprint);
+                if self.accept_unknown {
+                    // User explicitly said "replace" — overwrite the known_hosts entry.
+                    known.hosts.insert(
+                        self.target.clone(),
+                        KnownHost {
+                            key_type,
+                            fingerprint: fp,
+                            first_seen: now.clone(),
+                            last_seen: now,
+                        },
+                    );
+                    let _ = save_known_hosts(&known);
+                    true
+                } else {
+                    false
+                }
+            }
+            None => {
+                outcome.is_unknown = true;
+                if self.accept_unknown {
+                    known.hosts.insert(
+                        self.target.clone(),
+                        KnownHost {
+                            key_type,
+                            fingerprint: fp,
+                            first_seen: now.clone(),
+                            last_seen: now,
+                        },
+                    );
+                    let _ = save_known_hosts(&known);
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+        *self.result.lock().unwrap() = outcome;
+        Ok(accept)
+    }
+
+    /// Phase 6.3: when the server forwards a connection back to us (via reverse
+    /// tunnel `tcpip-forward`), bridge it to the local Named Pipe RPC server.
+    /// Phase 51.B2: the actual bridge spawn is delegated to a caller-injected
+    /// closure so winmux-core stays decoupled from the tunnel impl.
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<russh::client::Msg>,
+        _connected_address: &str,
+        _connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut russh::client::Session,
+    ) -> Result<(), Self::Error> {
+        match (self.tunnel_token.clone(), self.bridge_spawner.clone()) {
+            (Some(token), Some(spawn)) => spawn(channel, token),
+            _ => tracing::warn!(
+                "forwarded-tcpip channel arrived but no tunnel_token/bridge_spawner set; dropping"
+            ),
+        }
+        Ok(())
     }
 }

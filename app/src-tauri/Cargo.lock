@@ -6815,7 +6815,14 @@ dependencies = [
 name = "winmux-core"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "dirs 5.0.1",
+ "russh",
+ "russh-keys",
+ "serde",
+ "serde_json",
+ "tracing",
  "winmux-types",
 ]
 

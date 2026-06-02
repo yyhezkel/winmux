@@ -472,5 +472,9 @@
   "cmd.pane.openDiff": "Открыть панель diff",
   "ws_header.add_diff": "+ diff",
   "ws_header.split_diff_title": "Открыть живую панель git-diff для этой среды",
-  "settings.tab.general": "общие"
+  "settings.tab.general": "общие",
+  "pane.smartBidi.label": "Умное BiDi",
+  "pane.smartBidi.hint": "Оборачивать латинские фрагменты bidi-изоляторами, когда панель смешивает RTL и латиницу. Экспериментально; рекомендуется для Claude Code TUI.",
+  "pane.smartBidi.on": "Умное BiDi: вкл",
+  "pane.smartBidi.off": "Умное BiDi: выкл"
 }

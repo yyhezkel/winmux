@@ -472,5 +472,9 @@
   "cmd.pane.openDiff": "Open Diff Pane",
   "ws_header.add_diff": "+ diff",
   "ws_header.split_diff_title": "Open a live git-diff pane for this workspace",
-  "settings.tab.general": "general"
+  "settings.tab.general": "general",
+  "pane.smartBidi.label": "Smart bidi",
+  "pane.smartBidi.hint": "Wrap Latin runs with bidi isolates when the pane mixes RTL + Latin. Experimental; recommended for Claude Code TUI panes.",
+  "pane.smartBidi.on": "Smart bidi: on",
+  "pane.smartBidi.off": "Smart bidi: off"
 }

@@ -169,6 +169,7 @@ pub fn backfill_terminal_connections(
             emoji,
             help_topic,
             diff_source,
+            smart_bidi,
         } => {
             let needs_fix =
                 matches!(pane_kind, PaneKind::Terminal) && connection.is_none();
@@ -193,6 +194,7 @@ pub fn backfill_terminal_connections(
                     emoji,
                     help_topic,
                     diff_source,
+                    smart_bidi,
                 },
                 needs_fix,
             )

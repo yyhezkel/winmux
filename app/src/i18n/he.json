@@ -472,5 +472,9 @@
   "cmd.pane.openDiff": "פתח חוצץ diff",
   "ws_header.add_diff": "+ diff",
   "ws_header.split_diff_title": "פתח חוצץ git-diff חי עבור סביבת העבודה",
-  "settings.tab.general": "כללי"
+  "settings.tab.general": "כללי",
+  "pane.smartBidi.label": "Bidi חכם",
+  "pane.smartBidi.hint": "עוטף רצפי לטינית בבידודים דו-כיווניים כשה-pane משלב RTL + לטיני. ניסיוני; מומלץ לפאנלים של Claude Code TUI.",
+  "pane.smartBidi.on": "Bidi חכם: פעיל",
+  "pane.smartBidi.off": "Bidi חכם: כבוי"
 }

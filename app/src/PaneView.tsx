@@ -612,6 +612,25 @@ export function PaneView(p: Props) {
             </Show>
           </div>
         </Show>
+        {/* Phase 52 (BiDi 33B): per-pane opt-in PTY-stream bidi filter.
+            Default off; click toggles via pane_set_smart_bidi. ⇆ glyph
+            picked from "left right arrow" since the filter swaps RTL
+            isolates around Latin runs. */}
+        <button
+          class={`pane-btn ${p.pane.smart_bidi === true ? "active" : ""}`}
+          title={t(p.pane.smart_bidi === true ? "pane.smartBidi.on" : "pane.smartBidi.off") + " — " + t("pane.smartBidi.hint")}
+          onClick={(e) => {
+            e.stopPropagation();
+            const next = !(p.pane.smart_bidi === true);
+            void invoke("pane_set_smart_bidi", {
+              workspaceId: p.workspaceId,
+              paneId: p.pane.pane_id,
+              enabled: next,
+            }).catch((err) => console.error("pane_set_smart_bidi failed", err));
+          }}
+        >
+          ⇆
+        </button>
         <button class="pane-btn" title="Split right (Ctrl+Shift+D)" onClick={() => p.onSplit(p.pane.pane_id, "horizontal")}>↔</button>
         <button class="pane-btn" title="Split down (Ctrl+Shift+E)" onClick={() => p.onSplit(p.pane.pane_id, "vertical")}>↕</button>
         <button class="pane-btn pane-close" title="Close pane (Ctrl+Shift+W)" onClick={() => p.onClose(p.pane.pane_id)}>×</button>

@@ -1,4 +1,5 @@
 // Phase 24.D: claude_chat module deleted with the ClaudeChat pane.
+mod bidi_filter;
 mod claude_log;
 mod claude_summary;
 mod connect_wizard;
@@ -163,6 +164,11 @@ pub(crate) struct AppState {
     /// (SSH execs do NOT source ~/.bashrc, so a `claude` only on
     /// the user's interactive PATH is otherwise invisible).
     pub(crate) claude_paths: Arc<Mutex<HashMap<String, String>>>,
+    /// Phase 52 (BiDi 33B): per-pane PTY-stream bidi filter state. The
+    /// filter type lives in `app` (not winmux-core) since it's a
+    /// feature concern, not core russh/sessions. Lazy-created on
+    /// first chunk per pane; toggled via `pane_set_smart_bidi`.
+    pub(crate) bidi_filters: bidi_filter::BidiFilterMap,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -400,6 +406,7 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
                 emoji: None,
                 help_topic: None,
                 diff_source: None,
+                smart_bidi: None,
             });
             migrated = true;
         }
@@ -554,6 +561,7 @@ pub(crate) fn update_browser_pane(
             emoji,
             help_topic,
             diff_source,
+            smart_bidi,
         } => {
             if pane_id == target && pane_kind == PaneKind::Browser {
                 if let Some(b) = browser.as_mut() {
@@ -571,6 +579,7 @@ pub(crate) fn update_browser_pane(
                 emoji,
                 help_topic,
                 diff_source,
+                smart_bidi,
             }
         }
         LayoutNode::Split {
@@ -628,6 +637,7 @@ pub(crate) fn split_pane_in(
             emoji,
             help_topic,
             diff_source,
+            smart_bidi,
         } => {
             if pane_id == target {
                 // Phase 50: extended to 5-tuple — Diff panes carry a
@@ -698,6 +708,7 @@ pub(crate) fn split_pane_in(
                     emoji: None,
                     help_topic: new_help_t,
                     diff_source: new_diff_s,
+                    smart_bidi: None,
                 };
                 let original = LayoutNode::Pane {
                     pane_id,
@@ -713,6 +724,7 @@ pub(crate) fn split_pane_in(
                     emoji,
                     help_topic,
                     diff_source,
+                    smart_bidi,
                 };
                 (
                     LayoutNode::Split {
@@ -737,6 +749,7 @@ pub(crate) fn split_pane_in(
                         emoji,
                         help_topic,
                         diff_source,
+                        smart_bidi,
                     },
                     false,
                 )
@@ -809,6 +822,7 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
             emoji,
             help_topic,
             diff_source,
+            smart_bidi,
         } => {
             // Last pane — can't remove; return unchanged whether or not target matches.
             let _ = pane_id == target;
@@ -824,6 +838,7 @@ fn close_pane_in(node: LayoutNode, target: &str) -> (Option<LayoutNode>, Option<
                     emoji,
                     help_topic,
                     diff_source,
+                    smart_bidi,
                 }),
                 None,
             )
@@ -900,6 +915,7 @@ pub(crate) fn update_pane_in(
             emoji,
             help_topic,
             diff_source,
+            smart_bidi,
         } => {
             if pane_id == target {
                 LayoutNode::Pane {
@@ -913,6 +929,7 @@ pub(crate) fn update_pane_in(
                     emoji,
                     help_topic,
                     diff_source,
+                    smart_bidi,
                 }
             } else {
                 LayoutNode::Pane {
@@ -926,6 +943,7 @@ pub(crate) fn update_pane_in(
                     emoji,
                     help_topic,
                     diff_source,
+                    smart_bidi,
                 }
             }
         }
@@ -1179,6 +1197,12 @@ fn emit_data(
     // forwarded to xterm.js is untouched.
     pane_id: &str,
     osc: &mut osc_notify::OscNotifyParser,
+    // Phase 52 (BiDi 33B): per-pane bidi filter map. When the pane's
+    // smart_bidi toggle is on, the chunk passes through `apply_to_pane`
+    // before being decoded as UTF-8 and emitted. When off, this is a
+    // memcpy (filter.enabled = false fast-path) and the bytes flow
+    // through unchanged.
+    bidi_filters: &bidi_filter::BidiFilterMap,
 ) {
     for n in osc.feed(bytes) {
         let _ = app.emit(
@@ -1192,7 +1216,13 @@ fn emit_data(
         );
     }
 
-    leftover.extend_from_slice(bytes);
+    // Phase 52: optional bidi rewrite. Operates on raw bytes BEFORE
+    // UTF-8 reassembly so the filter's escape-sequence state machine
+    // sees ANSI/CSI/OSC/DCS verbatim. The filter is itself a no-op
+    // when smart_bidi is off for this pane.
+    let filtered = bidi_filter::apply_to_pane(bidi_filters, pane_id, bytes);
+
+    leftover.extend_from_slice(&filtered);
     let valid_up_to = match std::str::from_utf8(leftover) {
         Ok(_) => leftover.len(),
         Err(e) => e.valid_up_to(),
@@ -1303,6 +1333,7 @@ fn spawn_local_pty(
     let app_for_thread = app.clone();
     let sessions_for_thread = state.core.sessions.clone();
     let pane_sessions_for_thread = state.core.pane_sessions.clone();
+    let bidi_for_thread = state.bidi_filters.clone();
     thread::spawn(move || {
         let mut leftover: Vec<u8> = Vec::new();
         let mut osc = osc_notify::OscNotifyParser::new();
@@ -1317,6 +1348,7 @@ fn spawn_local_pty(
                     &mut leftover,
                     &pane_for_thread,
                     &mut osc,
+                    &bidi_for_thread,
                 ),
                 Err(_) => break,
             }
@@ -1893,6 +1925,7 @@ async fn spawn_ssh(
     // the internal-ports set when the session ends.
     let internal_ports_for_task = state.core.internal_reverse_tunnel_remote_ports.clone();
     let reverse_port_for_task = remote_port as u16;
+    let bidi_for_task = state.bidi_filters.clone();
     tokio::spawn(async move {
         let mut leftover: Vec<u8> = Vec::new();
         let mut osc = osc_notify::OscNotifyParser::new();
@@ -1909,11 +1942,11 @@ async fn spawn_ssh(
                     match msg {
                         Some(ChannelMsg::Data { data }) => {
                             last_data_at = std::time::Instant::now();
-                            emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover, &pane_for_task, &mut osc);
+                            emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover, &pane_for_task, &mut osc, &bidi_for_task);
                         }
                         Some(ChannelMsg::ExtendedData { data, ext: _ }) => {
                             last_data_at = std::time::Instant::now();
-                            emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover, &pane_for_task, &mut osc);
+                            emit_data(&app_for_task, &id_for_task, &data[..], &mut leftover, &pane_for_task, &mut osc, &bidi_for_task);
                         }
                         Some(ChannelMsg::ExitStatus { exit_status }) => {
                             exit_reason = Some(format!("exit {exit_status}"));
@@ -2776,6 +2809,7 @@ fn workspace_create(
             emoji: None,
             help_topic: None,
             diff_source: None,
+            smart_bidi: None,
         }),
         setup_command: input.setup_command,
         teardown_command: input.teardown_command,
@@ -2913,6 +2947,7 @@ fn workspace_reset_layout(
             emoji: None,
             help_topic: None,
             diff_source: None,
+            smart_bidi: None,
         });
     }
     persist(&state)?;
@@ -3940,6 +3975,63 @@ fn workspace_set_split_ratio(
 }
 
 // ─── Pane metadata (title / annotation) ─────────────────────────────────────
+
+// Phase 52 (BiDi 33B): toggle the opt-in PTY-stream bidi filter on the
+// given pane. Persists the bool onto the pane node (so the toggle
+// survives reloads) AND updates the runtime filter map so the very
+// next chunk is filtered (or not).
+fn set_pane_smart_bidi_in_layout(node: &mut LayoutNode, target: &str, enabled: bool) -> bool {
+    match node {
+        LayoutNode::Pane {
+            pane_id,
+            smart_bidi,
+            ..
+        } if pane_id == target => {
+            *smart_bidi = Some(enabled);
+            true
+        }
+        LayoutNode::Pane { .. } => false,
+        LayoutNode::Split { first, second, .. } => {
+            set_pane_smart_bidi_in_layout(first, target, enabled)
+                || set_pane_smart_bidi_in_layout(second, target, enabled)
+        }
+    }
+}
+
+#[tauri::command]
+fn pane_set_smart_bidi(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_id: String,
+    enabled: bool,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        let layout = ws
+            .layout
+            .as_mut()
+            .ok_or_else(|| format!("workspace {workspace_id} has no layout"))?;
+        if !set_pane_smart_bidi_in_layout(layout, &pane_id, enabled) {
+            return Err(format!("no pane {pane_id} in workspace {workspace_id}"));
+        }
+    }
+    persist(&state)?;
+    // Flip the runtime filter for this pane right now so the next PTY
+    // chunk takes the new state.
+    bidi_filter::set_pane_enabled(&state.bidi_filters, &pane_id, enabled);
+    let _ = app.emit("workspaces:changed", ());
+    dlog(&format!(
+        "[bidi] pane_set_smart_bidi: ws={} pane={} enabled={}",
+        workspace_id, pane_id, enabled
+    ));
+    Ok(state.workspaces.lock().unwrap().clone())
+}
 
 #[tauri::command]
 fn pane_set_title(
@@ -5515,6 +5607,7 @@ pub fn run() {
             log_dir_path,
             read_log_tail,
             pane_set_identity,
+            pane_set_smart_bidi,
             ssh_key_offer_dismiss,
             ssh_key_generate_and_install,
             workspace_delete,

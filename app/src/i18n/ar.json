@@ -472,5 +472,9 @@
   "cmd.pane.openDiff": "فتح لوحة Diff",
   "ws_header.add_diff": "+ diff",
   "ws_header.split_diff_title": "افتح لوحة git-diff حية لبيئة العمل",
-  "settings.tab.general": "عام"
+  "settings.tab.general": "عام",
+  "pane.smartBidi.label": "ثنائي الاتجاه ذكي",
+  "pane.smartBidi.hint": "تغليف نصوص اللاتينية بعزل ثنائي الاتجاه عندما يخلط اللوحة RTL + لاتيني. تجريبي؛ موصى به للوحات Claude Code TUI.",
+  "pane.smartBidi.on": "ذكي ثنائي الاتجاه: مفعل",
+  "pane.smartBidi.off": "ذكي ثنائي الاتجاه: معطل"
 }

@@ -271,6 +271,7 @@ async fn dispatch(
                     emoji: None,
                     help_topic: None,
                     diff_source: None,
+                    smart_bidi: None,
                 }),
                 setup_command: input.setup_command,
                 teardown_command: input.teardown_command,
@@ -1559,6 +1560,7 @@ async fn dispatch(
                     emoji: None,
                     help_topic: None,
                     diff_source: None,
+                    smart_bidi: None,
                 });
             }
             persist(state)?;

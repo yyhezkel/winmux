@@ -219,6 +219,11 @@ pub enum LayoutNode {
         // treated as DiffSource::Working by the backend watcher.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         diff_source: Option<DiffSource>,
+        // Phase 52 (BiDi 33B): opt-in PTY-stream bidi filter. None or
+        // Some(false) = passthrough; Some(true) = inject FSI/PDI around
+        // Latin runs near RTL context. Persists across reloads.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        smart_bidi: Option<bool>,
     },
     Split {
         split_id: String,

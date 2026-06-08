@@ -51,26 +51,6 @@ type WorkspacesState = Arc<Mutex<WorkspacesFile>>;
 // Phase 51.B4: PaneSessionMap + CoreState live in winmux-core too.
 pub(crate) use winmux_core::{CoreState, ForwardEntry, ForwardMap, PaneSessionMap};
 
-// Phase 8.C: pending request → response map for browser-pane operations that
-// need to round-trip through the frontend (eval, screenshot). Keyed by request_id.
-pub(crate) type BrowserPending = Arc<
-    Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<serde_json::Value, String>>>>,
->;
-pub(crate) static BROWSER_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-// Phase 8.C: pending `browser-wait` waiters keyed by pane_id. The frontend calls
-// `pane_browser_loaded(pane_id, url)` on every iframe onload; that drains and
-// resolves all pending waiters for that pane.
-pub(crate) type BrowserLoadWaiters =
-    Arc<Mutex<HashMap<String, Vec<tokio::sync::oneshot::Sender<String>>>>>;
-
-// Phase 8.F.1: pending iframe-bridge requests, keyed by request_id. The parent
-// webview's bridge forwards iframe responses back via `pane_browser_iframe_response`,
-// which resolves the matching oneshot here.
-pub(crate) type IframePending = Arc<
-    Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<serde_json::Value, String>>>>,
->;
-pub(crate) static IFRAME_REQ_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Tri-state for whether persistence is safe:
 /// - `Loaded`: load_from_disk succeeded (file present or absent doesn't matter — state reflects truth).
@@ -151,14 +131,8 @@ pub(crate) struct AppState {
     pub(crate) settings: Arc<Mutex<settings::Settings>>,
     // Phase 12.C: small history of recently-used cwds for local PTY workspaces.
     pub(crate) recent_paths: Arc<Mutex<local_wizard::RecentPathsFile>>,
-    // Phase 8.C: pending browser requests (eval/screenshot) awaiting frontend reply.
-    pub(crate) browser_pending: BrowserPending,
-    // Phase 8.C: pending browser-wait waiters, drained on iframe onload.
-    pub(crate) browser_load_waiters: BrowserLoadWaiters,
     // Phase 8.E: ring buffer of frontend console.error/warn captures.
     pub(crate) console_buffer: dev::ConsoleBuffer,
-    // Phase 8.F.1: iframe-bridge pending requests.
-    pub(crate) iframe_pending: IframePending,
     /// Phase 22.B-fix: cached absolute path to the `claude` binary,
     /// keyed by `<workspace_id>:<scope>` where scope is "ssh" or
     /// "local". Detection runs on first chat-send and the result
@@ -207,7 +181,6 @@ struct PtyExitEvent {
 // since the export_to path resolves to the same on-disk location.
 pub(crate) use winmux_types::{
     BrowserState, Connection, DiffSource, EnvVar, LayoutNode, PaneKind, SplitDirection, Workspace,
-    BROWSER_HISTORY_MAX,
 };
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -588,66 +561,6 @@ pub(crate) fn pane_id_exists_in(node: &LayoutNode, target: &str) -> bool {
         LayoutNode::Split { first, second, .. } => {
             pane_id_exists_in(first, target) || pane_id_exists_in(second, target)
         }
-    }
-}
-
-// Phase 8.A: mutate a browser pane's state (or no-op if pane is terminal / not found).
-// Phase 53 (rebased): kept for back-compat — Browser panes loaded from
-// legacy workspaces.json reach this walker before the load-time
-// migration rewrites them to Terminal. Allow the deprecated variant
-// match here.
-#[allow(deprecated)]
-pub(crate) fn update_browser_pane(
-    node: LayoutNode,
-    target: &str,
-    f: &mut dyn FnMut(&mut BrowserState),
-) -> LayoutNode {
-    match node {
-        LayoutNode::Pane {
-            pane_id,
-            pane_kind,
-            connection,
-            mut browser,
-            title,
-            annotation,
-            color,
-            emoji,
-            help_topic,
-            diff_source,
-            smart_bidi,
-        } => {
-            if pane_id == target && pane_kind == PaneKind::Browser {
-                if let Some(b) = browser.as_mut() {
-                    f(b);
-                }
-            }
-            LayoutNode::Pane {
-                pane_id,
-                pane_kind,
-                connection,
-                browser,
-                title,
-                annotation,
-                color,
-                emoji,
-                help_topic,
-                diff_source,
-                smart_bidi,
-            }
-        }
-        LayoutNode::Split {
-            split_id,
-            direction,
-            first,
-            second,
-            ratio,
-        } => LayoutNode::Split {
-            split_id,
-            direction,
-            first: Box::new(update_browser_pane(*first, target, f)),
-            second: Box::new(update_browser_pane(*second, target, f)),
-            ratio,
-        },
     }
 }
 
@@ -2392,116 +2305,6 @@ fn find_ssh_handle_for_workspace(
     None
 }
 
-/// Open (or reuse) a TCP listener on `127.0.0.1:<free_port>` that bridges every
-/// inbound connection to the workspace's SSH session via a `direct-tcpip` channel
-/// targeted at `localhost:<remote_port>`. Returns the local port the iframe should
-/// connect to. Idempotent: if a forward already exists for this (workspace, remote)
-/// pair, returns the existing local port.
-pub(crate) async fn open_forward(
-    state: &AppState,
-    workspace_id: &str,
-    remote_port: u16,
-) -> Result<u16, String> {
-    dlog(&format!(
-        "open_forward: ws={} remote_port={}",
-        workspace_id, remote_port
-    ));
-    {
-        let m = state.core.forwards.lock().unwrap();
-        if let Some(e) = m.get(&(workspace_id.to_string(), remote_port)) {
-            dlog(&format!(
-                "open_forward: cache hit ws={} remote={} -> local={}",
-                workspace_id, remote_port, e.local_port
-            ));
-            return Ok(e.local_port);
-        }
-    }
-    let handle = find_ssh_handle_for_workspace(state, workspace_id).ok_or_else(|| {
-        dlog(&format!(
-            "open_forward: NO SSH handle for ws={} — connect a terminal pane first",
-            workspace_id
-        ));
-        "no active SSH session for this workspace — connect a terminal pane first".to_string()
-    })?;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .map_err(|e| format!("bind 127.0.0.1:0: {e}"))?;
-    let local_port = listener
-        .local_addr()
-        .map_err(|e| format!("local_addr: {e}"))?
-        .port();
-    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
-
-    let ws_for_task = workspace_id.to_string();
-    let forwards_for_task = state.core.forwards.clone();
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = &mut cancel_rx => {
-                    dlog(&format!("forward[{}:{}]: cancelled", ws_for_task, remote_port));
-                    break;
-                }
-                accept = listener.accept() => {
-                    let (mut sock, peer) = match accept {
-                        Ok(p) => p,
-                        Err(e) => {
-                            dlog(&format!("forward[{}:{}]: accept err: {e}", ws_for_task, remote_port));
-                            continue;
-                        }
-                    };
-                    let h = Arc::clone(&handle);
-                    let ws = ws_for_task.clone();
-                    tokio::spawn(async move {
-                        let chan = h
-                            .channel_open_direct_tcpip(
-                                "localhost",
-                                remote_port as u32,
-                                peer.ip().to_string(),
-                                peer.port() as u32,
-                            )
-                            .await;
-                        let chan = match chan {
-                            Ok(c) => c,
-                            Err(e) => {
-                                dlog(&format!(
-                                    "forward[{}:{}]: open direct_tcpip: {e}",
-                                    ws, remote_port
-                                ));
-                                return;
-                            }
-                        };
-                        let mut chan_stream = chan.into_stream();
-                        if let Err(e) =
-                            tokio::io::copy_bidirectional(&mut sock, &mut chan_stream).await
-                        {
-                            // Connection-reset on close is normal; debug-log only.
-                            dlog(&format!("forward[{}:{}]: bridge closed: {e}", ws, remote_port));
-                        }
-                    });
-                }
-            }
-        }
-        // Listener drops here, removing the entry too.
-        forwards_for_task
-            .lock()
-            .unwrap()
-            .remove(&(ws_for_task.clone(), remote_port));
-    });
-
-    state.core.forwards.lock().unwrap().insert(
-        (workspace_id.to_string(), remote_port),
-        ForwardEntry {
-            local_port,
-            cancel: Some(cancel_tx),
-        },
-    );
-    dlog(&format!(
-        "forward[{}:{}]: opened on 127.0.0.1:{}",
-        workspace_id, remote_port, local_port
-    ));
-    Ok(local_port)
-}
-
 /// Phase 36 (#2.2) → 36.A: open an auto-forward for a remote listening
 /// port. We bind `127.0.0.1:0` and let the kernel hand us a free
 /// ephemeral port — the user reaches the server at whatever local port
@@ -2664,148 +2467,6 @@ pub(crate) fn close_workspace_forwards(forwards: &ForwardMap, workspace_id: &str
             if let Some(c) = e.cancel.take() {
                 let _ = c.send(());
             }
-        }
-    }
-}
-
-/// Pure URL helper. Returns Some((remote_port, scheme, path_and_query)) if the
-/// URL is a localhost / 127.0.0.1 http(s) URL we can forward; None otherwise.
-pub(crate) fn parse_localhost_url(url: &str) -> Option<(u16, &'static str, String)> {
-    let (scheme, rest) = if let Some(r) = url.strip_prefix("http://") {
-        ("http", r)
-    } else if let Some(r) = url.strip_prefix("https://") {
-        ("https", r)
-    } else {
-        return None;
-    };
-    let (host_port, path) = match rest.split_once('/') {
-        Some((hp, p)) => (hp, format!("/{}", p)),
-        None => (rest, String::new()),
-    };
-    let host_port = host_port.rsplit_once('@').map(|(_, h)| h).unwrap_or(host_port);
-    let (host, port) = match host_port.rsplit_once(':') {
-        Some((h, p)) => (h, p.parse::<u16>().ok()?),
-        None => (host_port, if scheme == "https" { 443 } else { 80 }),
-    };
-    if host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" {
-        Some((port, scheme, path))
-    } else {
-        None
-    }
-}
-
-/// Pane-aware URL resolver: if the pane is a browser pane in an SSH workspace
-/// and `forward_localhost` is on, replace localhost host+port with the forwarded
-/// 127.0.0.1:<local> address. Pure pass-through otherwise.
-pub(crate) async fn resolve_browser_url(
-    state: &AppState,
-    workspace_id: &str,
-    pane_id: &str,
-    url: &str,
-) -> Result<String, String> {
-    dlog(&format!(
-        "resolve_browser_url: input ws={} pane={} url={}",
-        workspace_id, pane_id, url
-    ));
-    // Pull out workspace + pane state under a short lock.
-    let (forward_on, is_ssh_ws) = {
-        let file = state.workspaces.lock().unwrap();
-        let ws = file
-            .workspaces
-            .iter()
-            .find(|w| w.id == workspace_id)
-            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
-        let mut forward_on = false;
-        if let Some(layout) = &ws.layout {
-            if let Some(pane) = find_pane_in(layout, pane_id) {
-                if let LayoutNode::Pane { browser, .. } = pane {
-                    if let Some(b) = browser {
-                        forward_on = b.forward_localhost;
-                    }
-                }
-            }
-        }
-        // Workspace counts as SSH if any of its terminal panes uses an SSH connection.
-        let mut is_ssh = false;
-        if let Some(layout) = &ws.layout {
-            collect_pane_connection_kinds(layout, &mut is_ssh);
-        }
-        (forward_on, is_ssh)
-    };
-    dlog(&format!(
-        "resolve_browser_url: forward_on={} is_ssh_ws={}",
-        forward_on, is_ssh_ws
-    ));
-    if !forward_on || !is_ssh_ws {
-        dlog("resolve_browser_url: pass-through (no forward)");
-        return Ok(url.to_string());
-    }
-    let (remote_port, scheme, path) = match parse_localhost_url(url) {
-        Some(p) => {
-            dlog(&format!(
-                "resolve_browser_url: parsed localhost — port={} scheme={} path={:?}",
-                p.0, p.1, p.2
-            ));
-            p
-        }
-        None => {
-            dlog("resolve_browser_url: not a localhost URL — pass-through");
-            return Ok(url.to_string());
-        }
-    };
-    let local_port = open_forward(state, workspace_id, remote_port).await?;
-    let resolved = format!("{}://127.0.0.1:{}{}", scheme, local_port, path);
-    dlog(&format!("resolve_browser_url: -> {}", resolved));
-    Ok(resolved)
-}
-
-// Phase 8.C: read a pane's persisted BrowserState clone, or None if the pane
-// doesn't exist or isn't a browser pane.
-pub(crate) fn find_browser_state(state: &AppState, pane_id: &str) -> Option<BrowserState> {
-    let file = state.workspaces.lock().unwrap();
-    for ws in &file.workspaces {
-        if let Some(layout) = &ws.layout {
-            if let Some(node) = find_pane_in(layout, pane_id) {
-                if let LayoutNode::Pane { browser, .. } = node {
-                    return browser.clone();
-                }
-            }
-        }
-    }
-    None
-}
-
-pub(crate) fn next_browser_request_id() -> String {
-    let n = BROWSER_REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("br_{:x}_{:x}", t, n)
-}
-
-fn find_pane_in<'a>(node: &'a LayoutNode, target: &str) -> Option<&'a LayoutNode> {
-    match node {
-        LayoutNode::Pane { pane_id, .. } if pane_id == target => Some(node),
-        LayoutNode::Pane { .. } => None,
-        LayoutNode::Split { first, second, .. } => {
-            find_pane_in(first, target).or_else(|| find_pane_in(second, target))
-        }
-    }
-}
-
-// Set `is_ssh = true` if the layout contains any terminal pane whose connection
-// is SSH. (Browser panes do not factor in.)
-fn collect_pane_connection_kinds(node: &LayoutNode, is_ssh: &mut bool) {
-    match node {
-        LayoutNode::Pane { connection, .. } => {
-            if matches!(connection, Some(Connection::Ssh { .. })) {
-                *is_ssh = true;
-            }
-        }
-        LayoutNode::Split { first, second, .. } => {
-            collect_pane_connection_kinds(first, is_ssh);
-            collect_pane_connection_kinds(second, is_ssh);
         }
     }
 }
@@ -3627,265 +3288,6 @@ fn workspace_split(
 
 // ─── Phase 8.A: browser-pane commands ───────────────────────────────────────
 
-#[tauri::command]
-fn pane_browser_navigate(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    workspace_id: String,
-    pane_id: String,
-    url: String,
-) -> Result<WorkspacesFile, String> {
-    if url.is_empty() {
-        return Err("empty url".into());
-    }
-    {
-        let mut file = state.workspaces.lock().unwrap();
-        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
-            if let Some(layout) = ws.layout.take() {
-                ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
-                    if !b.url.is_empty() && b.url != url {
-                        b.history.push(b.url.clone());
-                        if b.history.len() > BROWSER_HISTORY_MAX {
-                            let drop = b.history.len() - BROWSER_HISTORY_MAX;
-                            b.history.drain(0..drop);
-                        }
-                    }
-                    b.url = url.clone();
-                }));
-            }
-        }
-    }
-    persist(&state)?;
-    let _ = app.emit("workspaces:changed", ());
-    Ok(state.workspaces.lock().unwrap().clone())
-}
-
-#[tauri::command]
-fn pane_browser_go_back(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    workspace_id: String,
-    pane_id: String,
-) -> Result<WorkspacesFile, String> {
-    {
-        let mut file = state.workspaces.lock().unwrap();
-        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
-            if let Some(layout) = ws.layout.take() {
-                ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
-                    if let Some(prev) = b.history.pop() {
-                        b.url = prev;
-                    }
-                }));
-            }
-        }
-    }
-    persist(&state)?;
-    let _ = app.emit("workspaces:changed", ());
-    Ok(state.workspaces.lock().unwrap().clone())
-}
-
-/// Phase 8.B: pure URL resolve. Frontend calls this before setting iframe.src.
-/// If the pane has `forward_localhost = true`, the workspace has an active SSH
-/// session, and the URL targets `localhost:N` / `127.0.0.1:N`, the response is
-/// the rewritten `http://127.0.0.1:<local_port>...` URL. Otherwise pass-through.
-#[tauri::command]
-async fn pane_browser_resolve_url(
-    state: State<'_, AppState>,
-    workspace_id: String,
-    pane_id: String,
-    url: String,
-) -> Result<String, String> {
-    resolve_browser_url(&state, &workspace_id, &pane_id, &url).await
-}
-
-/// Phase 8.C: frontend reports an iframe `load` event. Records the URL on the
-/// pane's `last_loaded_url` (so `browser-wait` can short-circuit when the page
-/// is already loaded) and drains every pending wait waiter for this pane.
-#[tauri::command]
-fn pane_browser_loaded(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    pane_id: String,
-    url: String,
-) -> Result<(), String> {
-    dlog(&format!(
-        "pane_browser_loaded: pane={} url={}",
-        pane_id, url
-    ));
-    // Stamp last_loaded_url on the pane's BrowserState. Dedupe: only persist
-    // if the value actually changed — iframe onload can fire repeatedly
-    // (focus changes, redirects) and persisting on every fire would burn
-    // disk + spam debug.log without benefit.
-    let mut changed = false;
-    {
-        let mut file = state.workspaces.lock().unwrap();
-        for ws in &mut file.workspaces {
-            if let Some(layout) = ws.layout.take() {
-                ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
-                    if b.last_loaded_url.as_deref() != Some(url.as_str()) {
-                        b.last_loaded_url = Some(url.clone());
-                        changed = true;
-                    }
-                }));
-            }
-        }
-    }
-    if changed {
-        let _ = persist(&state);
-    }
-    let _ = app;
-    let waiters = state
-        .browser_load_waiters
-        .lock()
-        .unwrap()
-        .remove(&pane_id)
-        .unwrap_or_default();
-    for tx in waiters {
-        let _ = tx.send(url.clone());
-    }
-    Ok(())
-}
-
-/// Phase 8.C: frontend delivers a response to a pending browser request
-/// (screenshot, eval). Called by BrowserPane.tsx after handling a `browser:request`
-/// event. The backend resolves the matching oneshot.
-#[tauri::command]
-fn pane_browser_response(
-    state: State<'_, AppState>,
-    request_id: String,
-    ok: Option<serde_json::Value>,
-    err: Option<String>,
-) -> Result<(), String> {
-    if let Some(tx) = state.browser_pending.lock().unwrap().remove(&request_id) {
-        let payload: Result<serde_json::Value, String> = match err {
-            Some(e) => Err(e),
-            None => Ok(ok.unwrap_or(serde_json::Value::Null)),
-        };
-        let _ = tx.send(payload);
-    }
-    Ok(())
-}
-
-// ─── Phase 8.F.1: iframe-bridge round-trip ─────────────────────────────────
-
-fn next_iframe_request_id() -> String {
-    let n = IFRAME_REQ_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("ifr_{:x}_{:x}", t, n)
-}
-
-/// Send a command into the iframe of `pane_id`, wait for the iframe's
-/// postMessage response to come back through the parent bridge, return it.
-///
-/// Wire path: this fn → eval'd JS in main webview → `iframe.contentWindow.postMessage`
-/// → bridge JS in iframe → `runCommand(cmd, args)` → `window.parent.postMessage`
-/// → bridge JS in parent → `pane_browser_iframe_response` Tauri cmd → resolves
-/// the oneshot in `iframe_pending` keyed by `request_id`.
-pub(crate) async fn iframe_cmd_inner(
-    state: &AppState,
-    app: &AppHandle,
-    pane_id: &str,
-    cmd: &str,
-    args: serde_json::Value,
-    timeout_ms: u64,
-) -> Result<serde_json::Value, String> {
-    let request_id = next_iframe_request_id();
-    dlog(&format!(
-        "iframe_cmd: pane={} cmd={} request_id={} timeout_ms={}",
-        pane_id, cmd, request_id, timeout_ms
-    ));
-
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    state
-        .iframe_pending
-        .lock()
-        .unwrap()
-        .insert(request_id.clone(), tx);
-
-    let message = serde_json::to_string(&serde_json::json!({
-        "winmux": true,
-        "role": "command",
-        "request_id": request_id,
-        "cmd": cmd,
-        "args": args,
-    }))
-    .map_err(|e| format!("serialize message: {e}"))?;
-
-    // Escape pane_id for inclusion in a JS string literal.
-    let pane_id_js = pane_id.replace('\\', "\\\\").replace('\'', "\\'");
-    let script = format!(
-        "(function(){{\
-           const ifr = document.querySelector('iframe[data-pane-id=\"{pane}\"]');\
-           if (!ifr || !ifr.contentWindow) {{ console.error('winmux: no iframe pane', '{pane}'); return; }}\
-           ifr.contentWindow.postMessage({msg}, '*');\
-         }})();",
-        pane = pane_id_js,
-        msg = message
-    );
-
-    let win = app
-        .get_webview_window("main")
-        .ok_or("no main window")?;
-    win.eval(&script).map_err(|e| format!("eval: {e}"))?;
-
-    let result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await;
-    match result {
-        Ok(Ok(Ok(v))) => Ok(v),
-        Ok(Ok(Err(e))) => Err(e),
-        Ok(Err(_)) => Err("response channel closed".into()),
-        Err(_) => {
-            state.iframe_pending.lock().unwrap().remove(&request_id);
-            Err(format!("iframe cmd timeout after {timeout_ms}ms"))
-        }
-    }
-}
-
-#[tauri::command]
-async fn pane_browser_iframe_cmd(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    pane_id: String,
-    cmd: String,
-    args: serde_json::Value,
-    timeout_ms: Option<u64>,
-) -> Result<serde_json::Value, String> {
-    iframe_cmd_inner(
-        &state,
-        &app,
-        &pane_id,
-        &cmd,
-        args,
-        timeout_ms.unwrap_or(5_000),
-    )
-    .await
-}
-
-/// Frontend bridge calls this with the iframe's postMessage response. Resolves
-/// the oneshot waiting in `iframe_pending`.
-#[tauri::command]
-fn pane_browser_iframe_response(
-    state: State<'_, AppState>,
-    request_id: String,
-    ok: bool,
-    result: Option<serde_json::Value>,
-    error: Option<String>,
-) -> Result<(), String> {
-    let tx = state.iframe_pending.lock().unwrap().remove(&request_id);
-    if let Some(tx) = tx {
-        let payload = if ok {
-            Ok(result.unwrap_or(serde_json::Value::Null))
-        } else {
-            Err(error.unwrap_or_else(|| "iframe error".to_string()))
-        };
-        let _ = tx.send(payload);
-    }
-    Ok(())
-}
-
-/// Phase 8.E: frontend console.error/warn capture. Pushes one entry into the
 /// ring buffer; the CLI surfaces them via `winmux dev console-tail`.
 #[tauri::command]
 fn dev_console_log(
@@ -3903,61 +3305,6 @@ fn dev_console_log(
         },
     );
     Ok(())
-}
-
-/// Phase 8.B: per-pane toggle for the localhost-forwarding behavior. Sticky.
-#[tauri::command]
-fn pane_browser_set_forward(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    workspace_id: String,
-    pane_id: String,
-    forward: bool,
-) -> Result<WorkspacesFile, String> {
-    {
-        let mut file = state.workspaces.lock().unwrap();
-        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
-            if let Some(layout) = ws.layout.take() {
-                ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
-                    b.forward_localhost = forward;
-                }));
-            }
-        }
-    }
-    persist(&state)?;
-    let _ = app.emit("workspaces:changed", ());
-    Ok(state.workspaces.lock().unwrap().clone())
-}
-
-#[tauri::command]
-fn pane_browser_go_home(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    workspace_id: String,
-    pane_id: String,
-) -> Result<WorkspacesFile, String> {
-    {
-        let mut file = state.workspaces.lock().unwrap();
-        if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
-            if let Some(layout) = ws.layout.take() {
-                ws.layout = Some(update_browser_pane(layout, &pane_id, &mut |b| {
-                    if let Some(home) = b.home_url.clone() {
-                        if !b.url.is_empty() && b.url != home {
-                            b.history.push(b.url.clone());
-                            if b.history.len() > BROWSER_HISTORY_MAX {
-                                let drop = b.history.len() - BROWSER_HISTORY_MAX;
-                                b.history.drain(0..drop);
-                            }
-                        }
-                        b.url = home;
-                    }
-                }));
-            }
-        }
-    }
-    persist(&state)?;
-    let _ = app.emit("workspaces:changed", ());
-    Ok(state.workspaces.lock().unwrap().clone())
 }
 
 #[tauri::command]
@@ -5479,14 +4826,14 @@ pub fn run() {
             ));
             tracing::info!("winmux config_dir: {:?}", cfg_dir);
 
-            // Phase 8.F.1: create the main window programmatically so we can
-            // inject the iframe-bridge initialization script into every frame
-            // (including cross-origin iframes — that's the only path Tauri 2
-            // exposes for setting WebView2's AddScriptToExecuteOnDocumentCreated).
-            // tauri.conf.json's `windows: []` skips the default window so this
-            // is the only one created. Settings here mirror the previous conf:
-            // title "winmux", inner size 1100x700.
-            const BRIDGE_JS: &str = include_str!("winmux_bridge.js");
+            // Phase 53.G: was Phase 8.F.1 — the iframe-bridge
+            // initialization script was the parent-side companion to
+            // the per-pane iframe Browser. With the per-pane Browser
+            // surface gone (53.D moved Browser to a workspace-level
+            // child Webview via Window::add_child) the bridge is
+            // dead. The main window is still created programmatically
+            // because tauri.conf.json's `windows: []` skips the
+            // default — same title + inner size as before.
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -5494,10 +4841,9 @@ pub fn run() {
             )
             .title("winmux")
             .inner_size(1100.0, 700.0)
-            .initialization_script_for_all_frames(BRIDGE_JS)
             .build()
             .map_err(|e| Box::<dyn std::error::Error>::from(format!("main window: {e}")))?;
-            dlog("setup: main webview created with iframe bridge");
+            dlog("setup: main webview created");
             match load_from_disk() {
                 Ok(file) => {
                     *state.workspaces.lock().unwrap() = file;
@@ -5752,15 +5098,6 @@ pub fn run() {
             tmux_label_set,
             pane_set_title,
             pane_set_annotation,
-            pane_browser_navigate,
-            pane_browser_go_back,
-            pane_browser_go_home,
-            pane_browser_resolve_url,
-            pane_browser_set_forward,
-            pane_browser_response,
-            pane_browser_loaded,
-            pane_browser_iframe_cmd,
-            pane_browser_iframe_response,
             workspace_reset_layout,
             dev_console_log,
             pty_write,

@@ -120,19 +120,17 @@ async fn handle_tool_call(params: Value) -> Result<Value, String> {
         // Discovery
         "list_workspaces" => ("list-workspaces", json!({})),
         "tree" => ("tree", args),
-        // Browser navigation
-        "browser_navigate" => ("pane.browser.navigate", args),
-        "browser_url" => ("pane.browser.url", args),
-        "browser_history" => ("pane.browser.history", args),
-        "browser_go_back" => ("pane.browser.go-back", args),
-        "browser_go_home" => ("pane.browser.go-home", args),
-        // Browser automation (8.F.* iframe bridge)
-        "browser_eval" => ("pane.browser.iframe.eval", args),
-        "browser_click" => ("pane.browser.iframe.click", args),
-        "browser_type" => ("pane.browser.iframe.type", args),
-        "browser_find" => ("pane.browser.iframe.find", args),
-        "browser_snapshot" => ("pane.browser.iframe.snapshot", args),
-        "browser_wait_for" => ("pane.browser.iframe.wait-for", args),
+        // Phase 53.G: the 11 browser_* tools (browser_navigate,
+        // browser_url, browser_history, browser_go_back, browser_go_home,
+        // browser_eval, browser_click, browser_type, browser_find,
+        // browser_snapshot, browser_wait_for) were removed. Their
+        // backing `pane.browser.*` RPC methods went away when the
+        // per-pane Browser surface was folded into a workspace-level
+        // floating Webview (Phase 53.D/E) and the iframe-bus that
+        // backed the automation tools no longer exists. For agent-
+        // driven browser automation, use `lean-chronoscope-mcp`
+        // (yyhezkel/lean-chronoscope-mcp) — headless Chrome in Docker,
+        // 56 tools across full/slim/gateway mount modes.
         // Agent affordances
         "notify" => ("notify", args),
         "note_add" => ("note-add", args),
@@ -230,12 +228,12 @@ fn obj(props: &[(&str, Value)], required: &[&str]) -> Value {
 fn s(desc: &str) -> Value {
     json!({ "type": "string", "description": desc })
 }
-fn i(desc: &str) -> Value {
-    json!({ "type": "integer", "description": desc })
-}
-fn b(desc: &str) -> Value {
-    json!({ "type": "boolean", "description": desc })
-}
+// Phase 53.G: `i` (integer) and `b` (boolean) helpers were only used
+// by the deleted browser_* tool schemas. The remaining tools
+// (list_workspaces, tree, notify, note_add) only need string fields.
+// Keep the helpers around as plain doc-only sketches if you need them
+// for a new tool, or delete the comment and resurrect them when
+// adding back.
 
 fn tool_definitions() -> Vec<Value> {
     vec![
@@ -254,133 +252,15 @@ fn tool_definitions() -> Vec<Value> {
             )
         }),
 
-        // ── Browser navigation (Phase 8.A/B/C) ───────────────────────────
-        json!({
-            "name": "browser_navigate",
-            "description": "Navigate a browser pane to a URL. URLs targeting localhost on an SSH workspace are auto-forwarded via 8.B port forwarding.",
-            "inputSchema": obj(
-                &[
-                    ("pane_id", s("browser pane id")),
-                    ("url", s("absolute URL")),
-                    ("raw", b("if true, skip any auto-resolution"))
-                ],
-                &["pane_id", "url"]
-            )
-        }),
-        json!({
-            "name": "browser_url",
-            "description": "Read the persisted current URL of a browser pane.",
-            "inputSchema": obj(&[("pane_id", s("browser pane id"))], &["pane_id"])
-        }),
-        json!({
-            "name": "browser_history",
-            "description": "Read the navigation history of a browser pane.",
-            "inputSchema": obj(&[("pane_id", s("browser pane id"))], &["pane_id"])
-        }),
-        json!({
-            "name": "browser_go_back",
-            "description": "Pop the browser pane's history once.",
-            "inputSchema": obj(&[("pane_id", s("browser pane id"))], &["pane_id"])
-        }),
-        json!({
-            "name": "browser_go_home",
-            "description": "Reset the browser pane to its home_url.",
-            "inputSchema": obj(&[("pane_id", s("browser pane id"))], &["pane_id"])
-        }),
-
-        // ── Browser automation (Phase 8.F.* iframe bridge) ───────────────
-        json!({
-            "name": "browser_eval",
-            "description": "Evaluate JavaScript inside the iframe via the winmux postMessage bridge. Works on cross-origin pages — the bridge runs in every frame at document creation time. Returns the JSON-serialized result of the expression.",
-            "inputSchema": obj(
-                &[
-                    ("pane_id", s("browser pane id")),
-                    ("expression", s("JS expression to evaluate")),
-                    ("timeout_ms", i("timeout in ms (default 5000)"))
-                ],
-                &["pane_id", "expression"]
-            )
-        }),
-        json!({
-            "name": "browser_click",
-            "description": "Click an element matched by a CSS selector inside the iframe. Pass button=\"right\" to issue a contextmenu event instead of a left click.",
-            "inputSchema": obj(
-                &[
-                    ("pane_id", s("browser pane id")),
-                    ("selector", s("CSS selector of the element to click")),
-                    ("button", s("\"left\" (default) or \"right\"")),
-                    ("timeout_ms", i("timeout in ms (default 5000)"))
-                ],
-                &["pane_id", "selector"]
-            )
-        }),
-        json!({
-            "name": "browser_type",
-            "description": "Type text into an input/textarea matched by CSS selector. Sets focus, optionally clears, then appends and fires input + change events.",
-            "inputSchema": obj(
-                &[
-                    ("pane_id", s("browser pane id")),
-                    ("selector", s("CSS selector of the input/textarea")),
-                    ("text", s("text to type")),
-                    ("clear_first", b("clear the field before typing (default false)")),
-                    ("timeout_ms", i("timeout in ms (default 5000)"))
-                ],
-                &["pane_id", "selector", "text"]
-            )
-        }),
-        json!({
-            "name": "browser_find",
-            "description": "Semantic element search inside the iframe. AND-filters by role / text / label / placeholder / alt / title / testid / selector / visible_only. Returns matches with synthesized stable selectors usable for browser_click / browser_type. Text matching uses deepest-match (Playwright-style) so ancestor elements bubbled up by textContent don't pollute results.",
-            "inputSchema": obj(
-                &[
-                    ("pane_id", s("browser pane id")),
-                    ("role", s("ARIA role: button, link, textbox, checkbox, heading, listitem, ...")),
-                    ("text", s("visible text content (case-insensitive contains)")),
-                    ("label", s("aria-label or <label for>")),
-                    ("placeholder", s("placeholder attribute")),
-                    ("alt", s("img alt text")),
-                    ("title", s("title attribute")),
-                    ("testid", s("data-testid attribute (exact)")),
-                    ("selector", s("optional CSS selector to narrow the search pool")),
-                    ("visible_only", b("skip elements with display:none / visibility:hidden / zero area")),
-                    ("first", b("return only the first match")),
-                    ("limit", i("cap on number of matches")),
-                    ("timeout_ms", i("timeout in ms (default 5000)"))
-                ],
-                &["pane_id"]
-            )
-        }),
-        json!({
-            "name": "browser_snapshot",
-            "description": "Simplified accessibility-flavored DOM tree of the iframe. Implicit ARIA roles via tag table; collapses single-child wrappers without their own role+text into the child to keep the tree readable. Pass max_depth to cap depth.",
-            "inputSchema": obj(
-                &[
-                    ("pane_id", s("browser pane id")),
-                    ("max_depth", i("recursion cap (default 50)")),
-                    ("text_only", b("strip non-essential attributes (level/url/src/alt/name)")),
-                    ("timeout_ms", i("timeout in ms (default 10000)"))
-                ],
-                &["pane_id"]
-            )
-        }),
-        json!({
-            "name": "browser_wait_for",
-            "description": "Poll the iframe until criteria are met or timeout. State semantics: visible (default — match exists AND visible), attached (match exists in DOM), hidden (match exists but not visible), detached (NO match — succeeds when element disappears). url_contains AND-s with element criteria.",
-            "inputSchema": obj(
-                &[
-                    ("pane_id", s("browser pane id")),
-                    ("selector", s("CSS selector to find")),
-                    ("text", s("visible text (deepest-match)")),
-                    ("role", s("ARIA role")),
-                    ("label", s("accessible label")),
-                    ("testid", s("data-testid")),
-                    ("url_contains", s("substring of window.location.href")),
-                    ("state", s("\"visible\" (default) | \"attached\" | \"hidden\" | \"detached\"")),
-                    ("timeout_ms", i("timeout in ms (default 5000)"))
-                ],
-                &["pane_id"]
-            )
-        }),
+        // ── Browser tools removed (Phase 53.G) ───────────────────
+        // The 11 browser_* tools were thin wrappers over
+        // pane.browser.* RPC methods that no longer exist. The
+        // per-pane Browser surface moved to a workspace-level
+        // floating Webview in Phase 53.D/E, and the iframe-bus
+        // that backed the automation tools is gone. For agent-
+        // driven browser automation, use lean-chronoscope-mcp
+        // (yyhezkel/lean-chronoscope-mcp): headless Chrome in
+        // Docker, 56 tools across full/slim/gateway mount modes.
 
         // ── Agent affordances ────────────────────────────────────────────
         json!({

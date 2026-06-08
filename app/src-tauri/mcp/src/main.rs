@@ -120,6 +120,15 @@ async fn handle_tool_call(params: Value) -> Result<Value, String> {
         // Discovery
         "list_workspaces" => ("list-workspaces", json!({})),
         "tree" => ("tree", args),
+        // B1: full LLM control. Thin wrappers over the matching RPC
+        // methods in rpc_server.rs:dispatch. Same JSON-RPC params
+        // pass through unchanged.
+        "list_panes" => ("ui.tree", args),
+        "read_pane" => ("pane.scrollback", args),
+        "take_screenshot" => ("pane.screenshot", args),
+        "split_pane" => ("action.split", args),
+        "connect_workspace" => ("action.connect", args),
+        "send_keys" => ("action.send_keys", args),
         // Phase 53.G: the 11 browser_* tools (browser_navigate,
         // browser_url, browser_history, browser_go_back, browser_go_home,
         // browser_eval, browser_click, browser_type, browser_find,
@@ -249,6 +258,63 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": obj(
                 &[("workspace_id", s("workspace id (omit for the active workspace)"))],
                 &[]
+            )
+        }),
+
+        // ── B1: full LLM control ─────────────────────────────────────────
+        json!({
+            "name": "list_panes",
+            "description": "Structured view of every workspace + its panes with kind/title/active markers. Higher-level than list_workspaces — designed for an agent that's about to act on a specific pane.",
+            "inputSchema": { "type": "object", "properties": {} }
+        }),
+        json!({
+            "name": "read_pane",
+            "description": "Read recent scrollback text from a pane. Note: the backend currently returns an error because PTY content is buffered on the frontend (xterm.js), not in Rust state. The error message includes a tmux workaround (capture-pane).",
+            "inputSchema": obj(
+                &[
+                    ("pane_id", s("pane id (see list_panes)")),
+                    ("lines", s("number of trailing lines requested (currently ignored)"))
+                ],
+                &["pane_id"]
+            )
+        }),
+        json!({
+            "name": "take_screenshot",
+            "description": "Capture the pane as a PNG. Note: terminal panes render on the frontend canvas, so the current backend returns an error pointing at read_pane as the text-only alternative.",
+            "inputSchema": obj(
+                &[("pane_id", s("pane id (see list_panes)"))],
+                &["pane_id"]
+            )
+        }),
+        json!({
+            "name": "split_pane",
+            "description": "Split a pane in the workspace tree. The new pane is a Terminal that inherits the workspace's connection.",
+            "inputSchema": obj(
+                &[
+                    ("workspace_id", s("workspace id")),
+                    ("pane_id", s("the parent pane (the one being split)")),
+                    ("direction", s("\"horizontal\" (default) | \"vertical\""))
+                ],
+                &["workspace_id", "pane_id"]
+            )
+        }),
+        json!({
+            "name": "connect_workspace",
+            "description": "Activate a workspace's UI tab. For SSH workspaces the frontend's active-workspace effect runs ensure_connected.",
+            "inputSchema": obj(
+                &[("workspace_id", s("workspace id"))],
+                &["workspace_id"]
+            )
+        }),
+        json!({
+            "name": "send_keys",
+            "description": "Send keystrokes to a pane. Same key translation as send-key (e.g. \"Enter\", \"Ctrl+C\", or literal text).",
+            "inputSchema": obj(
+                &[
+                    ("pane_id", s("pane id")),
+                    ("key", s("key name or literal text to send"))
+                ],
+                &["pane_id", "key"]
             )
         }),
 

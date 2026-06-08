@@ -510,6 +510,207 @@ async fn dispatch(
             }
         }
 
+        // ─── B1: full LLM control over winmux ──────────────────────────
+        // Six methods covering discovery + action + (best-effort) read
+        // surface. Companion winmux-mcp tools wrap each one. Together
+        // they let an agent running inside or outside winmux drive
+        // workspace creation / connection, pane splitting, and key
+        // injection, plus get a structured view of the current UI.
+
+        // Mirror of list-workspaces with an "active" boolean per pane +
+        // workspace, so agents can decide "which pane am I currently in"
+        // without re-deriving from active_workspace_id.
+        "ui.tree" => {
+            let file = state.workspaces.lock().unwrap().clone();
+            let active_id = file.active_workspace_id.clone();
+            let workspaces: Vec<Value> = file
+                .workspaces
+                .iter()
+                .map(|w| {
+                    let mut panes: Vec<Value> = Vec::new();
+                    if let Some(layout) = &w.layout {
+                        fn walk(node: &LayoutNode, out: &mut Vec<Value>) {
+                            match node {
+                                LayoutNode::Pane {
+                                    pane_id,
+                                    pane_kind,
+                                    title,
+                                    annotation,
+                                    connection,
+                                    ..
+                                } => {
+                                    out.push(json!({
+                                        "pane_id": pane_id,
+                                        "kind": format!("{:?}", pane_kind).to_lowercase(),
+                                        "title": title,
+                                        "annotation": annotation,
+                                        "connection": connection,
+                                    }));
+                                }
+                                LayoutNode::Split { first, second, .. } => {
+                                    walk(first, out);
+                                    walk(second, out);
+                                }
+                            }
+                        }
+                        walk(layout, &mut panes);
+                    }
+                    json!({
+                        "workspace_id": w.id,
+                        "name": w.name,
+                        "is_active": Some(&w.id) == active_id.as_ref(),
+                        "connection": w.connection,
+                        "panes": panes,
+                    })
+                })
+                .collect();
+            Ok(json!({
+                "active_workspace_id": active_id,
+                "workspaces": workspaces,
+            }))
+        }
+
+        // Activate a workspace's UI tab + (if SSH) emit a request
+        // for the FE to ensure_connected. We don't drive the SSH
+        // handshake from this RPC because the headless path is
+        // wired through a Tauri command surface — duplicating it
+        // here would risk drift. The FE listens on workspaces:changed
+        // and the active-workspace effect re-triggers connect.
+        "action.connect" => {
+            let workspace_id = params
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("missing workspace_id")?
+                .to_string();
+            {
+                let mut file = state.workspaces.lock().unwrap();
+                if !file.workspaces.iter().any(|w| w.id == workspace_id) {
+                    return Err(format!("no workspace {workspace_id}"));
+                }
+                file.active_workspace_id = Some(workspace_id.clone());
+            }
+            persist(state)?;
+            let _ = app.emit("workspaces:changed", ());
+            Ok(json!({ "ok": true, "active": workspace_id }))
+        }
+
+        // Split a pane in the workspace tree. Direction is
+        // "horizontal" or "vertical"; kind defaults to terminal.
+        // Mirrors workspace_split's split_pane_in usage but without
+        // the four-tier fallback chain (RPC callers are agents, not
+        // the wizard — they pass workspace_id explicitly).
+        "action.split" => {
+            let workspace_id = params
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("missing workspace_id")?
+                .to_string();
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("parent_pane_id"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id (or parent_pane_id)")?
+                .to_string();
+            let direction = match params
+                .get("direction")
+                .and_then(|v| v.as_str())
+                .unwrap_or("horizontal")
+            {
+                "horizontal" | "right" | "h" => SplitDirection::Horizontal,
+                "vertical" | "down" | "v" => SplitDirection::Vertical,
+                other => return Err(format!("bad direction: {other}")),
+            };
+            let fallback_conn: Option<Connection> = {
+                let file = state.workspaces.lock().unwrap();
+                file.workspaces
+                    .iter()
+                    .find(|w| w.id == workspace_id)
+                    .and_then(|w| w.connection.clone())
+            };
+            let mut changed = false;
+            {
+                let mut file = state.workspaces.lock().unwrap();
+                if let Some(ws) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) {
+                    if let Some(layout) = ws.layout.take() {
+                        let (new_layout, did_split) = split_pane_in(
+                            layout,
+                            &pane_id,
+                            direction,
+                            PaneKind::Terminal,
+                            None,
+                            fallback_conn,
+                            None,
+                        );
+                        ws.layout = Some(new_layout);
+                        changed = did_split;
+                    }
+                }
+            }
+            if !changed {
+                return Err(format!("split: pane {pane_id} not found"));
+            }
+            persist(state)?;
+            let _ = app.emit("workspaces:changed", ());
+            Ok(json!({ "ok": true, "workspace_id": workspace_id, "split_from": pane_id }))
+        }
+
+        // Alias of `send-key` exposed under the canonical `action.*`
+        // namespace so agents can use a consistent prefix. Same key
+        // translation table; reuses translate_key.
+        "action.send_keys" => {
+            let pane_id = params
+                .get("pane_id")
+                .or_else(|| params.get("pane"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing pane_id")?;
+            let key = params
+                .get("key")
+                .or_else(|| params.get("keys"))
+                .and_then(|v| v.as_str())
+                .ok_or("missing key")?;
+            let bytes = translate_key(key);
+            let sid = state
+                .core
+                .pane_sessions
+                .lock()
+                .unwrap()
+                .get(pane_id)
+                .cloned()
+                .ok_or_else(|| format!("pane {pane_id} not connected"))?;
+            write_to_session(state, &sid, &bytes)?;
+            Ok(json!({ "ok": true, "bytes": bytes.len() }))
+        }
+
+        // B1: scrollback. The backend does NOT buffer PTY output —
+        // Absolute Rule #1 ("Never log PTY input or output content")
+        // pushes the scrollback ring into the FRONTEND xterm.js, not
+        // into Rust state. Returning the buffer to an RPC caller
+        // would require a frontend round-trip we haven't built yet.
+        // For tmux sessions there's a clean workaround: send
+        // `tmux capture-pane -p -S -<lines>` to the pane via `send`
+        // and read its output from the next pty:data event. Document
+        // that in the error so agents have a path forward.
+        "pane.scrollback" => {
+            Err(
+                "pane.scrollback: backend does not buffer PTY content (Absolute Rule #1). \
+                 Workaround for tmux: rpc `send` with data \
+                 `\\u001btmux capture-pane -p -S -<N>\\n` then read the next pty:data event."
+                    .to_string(),
+            )
+        }
+
+        // Same story for screenshots: xterm.js's canvas lives on the
+        // frontend; rendering it requires the round-trip surface
+        // Phase 53.G deleted. Returning a clean error is the honest
+        // path until a frontend integration lands.
+        "pane.screenshot" => {
+            Err(
+                "pane.screenshot: terminal canvas lives on the frontend (xterm.js) \
+                 and requires a window→backend round-trip not built yet. Use pane.scrollback for text content."
+                    .to_string(),
+            )
+        }
+
         "set-pane-title" => {
             let pane_id = params
                 .get("pane_id")

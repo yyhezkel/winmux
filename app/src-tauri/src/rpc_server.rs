@@ -220,6 +220,14 @@ fn show_toast(title: &str, body: &str) {
     });
 }
 
+// Phase 53 (rebased): the `kind: "browser"` arm of `pane.split`
+// remains so an older CLI / agent script that still passes that
+// string still works — the spawned pane gets the deprecated
+// Browser kind and is rewritten to Terminal on the next restart by
+// the load-time migration. Frontend split menu no longer exposes
+// "browser". `#[allow(deprecated)]` covers that arm and the
+// fold_pane_kinds helper below.
+#[allow(deprecated)]
 async fn dispatch(
     method: &str,
     params: Value,

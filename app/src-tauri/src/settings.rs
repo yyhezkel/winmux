@@ -415,6 +415,15 @@ pub(crate) struct MigrationFlags {
     /// workspace; the flag keeps that choice from being undone.
     #[serde(default)]
     pub phase_39_auto_port_forward_default_flipped: bool,
+    /// Phase 53 (rebased): the per-pane Browser / FileManager pane
+    /// kinds were folded into workspace-level singleton windows. Any
+    /// PaneKind::Browser or ::FileManager pane in a loaded
+    /// workspaces.json is rewritten to PaneKind::Terminal on first
+    /// load after upgrade. The flag stops the rewrite from running on
+    /// every subsequent load (a Terminal pane that the user explicitly
+    /// chose post-migration should NOT be touched).
+    #[serde(default)]
+    pub phase_53_remove_browser_filemanager_panes: bool,
 }
 
 impl Default for Theme {

@@ -78,13 +78,30 @@ pub enum PaneKind {
         alias = "ClaudeLog"
     )]
     Terminal,
+    /// Phase 53 (rebased): the per-pane Browser surface was folded
+    /// into a workspace-level singleton floating window. Kept here
+    /// only so older `workspaces.json` files still deserialize; a
+    /// load-time migration (`rewrite_browser_filemanager_panes_to_terminal`,
+    /// gated by `phase_53_remove_browser_filemanager_panes`) rewrites
+    /// any leftover Browser pane to Terminal on first load post-upgrade.
+    /// Do not create new panes with this kind.
+    #[deprecated(
+        note = "Phase 53 (rebased): browser is now a workspace-level singleton window, not a pane type. Existing panes auto-migrate to Terminal on load."
+    )]
     Browser,
     /// Phase 15.B: dual-column file manager (local + remote SFTP).
     /// The pane itself carries no remote state — it picks up the
     /// workspace's SSH session at runtime, so a file-manager pane in
     /// an SSH workspace lights up the right column only after a
     /// terminal pane in that workspace has authenticated.
+    ///
+    /// Phase 53 (rebased): folded into a workspace-level singleton
+    /// floating window. See `Browser` above for the same migration
+    /// notes.
     #[serde(rename = "filemanager", alias = "file_manager", alias = "FileManager")]
+    #[deprecated(
+        note = "Phase 53 (rebased): file manager is now a workspace-level singleton window, not a pane type. Existing panes auto-migrate to Terminal on load."
+    )]
     FileManager,
     /// Phase 33: in-app help pane. Renders a markdown document
     /// keyed by `help_topic` on the pane node (e.g. "ssh-key-setup").

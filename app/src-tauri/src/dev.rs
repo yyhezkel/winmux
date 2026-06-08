@@ -51,6 +51,7 @@ pub(crate) fn debug_log_tail(path: &Path, n: usize) -> Vec<String> {
 /// shards plus the log/console paths. Caller is responsible for taking the
 /// AppState locks and passing the cloned data in.
 #[allow(clippy::too_many_arguments)]
+#[allow(deprecated)]
 pub(crate) fn build_state_value(
     version: &str,
     git_hash: &str,

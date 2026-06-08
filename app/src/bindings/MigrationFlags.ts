@@ -11,4 +11,14 @@ export type MigrationFlags = {
  * the post-connect auto-forward storm. Users re-enable per
  * workspace; the flag keeps that choice from being undone.
  */
-phase_39_auto_port_forward_default_flipped: boolean, };
+phase_39_auto_port_forward_default_flipped: boolean, 
+/**
+ * Phase 53 (rebased): the per-pane Browser / FileManager pane
+ * kinds were folded into workspace-level singleton windows. Any
+ * PaneKind::Browser or ::FileManager pane in a loaded
+ * workspaces.json is rewritten to PaneKind::Terminal on first
+ * load after upgrade. The flag stops the rewrite from running on
+ * every subsequent load (a Terminal pane that the user explicitly
+ * chose post-migration should NOT be touched).
+ */
+phase_53_remove_browser_filemanager_panes: boolean, };

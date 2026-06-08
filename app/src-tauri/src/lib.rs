@@ -482,6 +482,44 @@ pub(crate) fn disable_all_auto_port_forward(file: &mut WorkspacesFile) -> usize 
     n
 }
 
+/// Phase 53 (rebased): rewrite every PaneKind::Browser /
+/// PaneKind::FileManager pane in the file to PaneKind::Terminal. The
+/// per-pane Browser / FileManager surface was replaced by workspace-
+/// level singleton floating windows; the leftover panes would render
+/// as broken under the new layout, so we collapse them to Terminal
+/// on first load post-upgrade and reset their `connection` (the
+/// inheritance chain in `workspace_split` rehydrates a sensible
+/// fallback the next time the pane is touched).
+///
+/// Returns the count of panes rewritten. Idempotent — a second call
+/// finds none to flip.
+#[allow(deprecated)]
+pub(crate) fn rewrite_browser_filemanager_panes_to_terminal(
+    file: &mut WorkspacesFile,
+) -> usize {
+    fn walk(node: &mut LayoutNode, count: &mut usize) {
+        match node {
+            LayoutNode::Pane { pane_kind, .. } => {
+                if matches!(pane_kind, PaneKind::Browser | PaneKind::FileManager) {
+                    *pane_kind = PaneKind::Terminal;
+                    *count += 1;
+                }
+            }
+            LayoutNode::Split { first, second, .. } => {
+                walk(first, count);
+                walk(second, count);
+            }
+        }
+    }
+    let mut n = 0;
+    for ws in file.workspaces.iter_mut() {
+        if let Some(layout) = ws.layout.as_mut() {
+            walk(layout, &mut n);
+        }
+    }
+    n
+}
+
 pub(crate) fn persist(state: &AppState) -> Result<(), String> {
     let caller = std::panic::Location::caller();
     dlog(&format!(
@@ -551,6 +589,11 @@ pub(crate) fn pane_id_exists_in(node: &LayoutNode, target: &str) -> bool {
 }
 
 // Phase 8.A: mutate a browser pane's state (or no-op if pane is terminal / not found).
+// Phase 53 (rebased): kept for back-compat — Browser panes loaded from
+// legacy workspaces.json reach this walker before the load-time
+// migration rewrites them to Terminal. Allow the deprecated variant
+// match here.
+#[allow(deprecated)]
 pub(crate) fn update_browser_pane(
     node: LayoutNode,
     target: &str,
@@ -615,6 +658,13 @@ pub(crate) fn update_browser_pane(
 // Phase 8.A: `new_kind` decides whether the spawned sibling is a terminal (default,
 // inherits the existing pane's connection) or a browser (with `new_browser_url` as
 // the starting page).
+// Phase 53 (rebased): `new_kind` should never be Browser or
+// FileManager — the frontend's split menu no longer offers them.
+// Both arms remain in the match below for back-compat (older
+// frontends or RPC calls still typing those strings still work but
+// produce deprecated panes; the load-time migration sweeps them
+// away on the next restart).
+#[allow(deprecated)]
 pub(crate) fn split_pane_in(
     node: LayoutNode,
     target: &str,
@@ -2763,6 +2813,7 @@ fn collect_pane_connection_kinds(node: &LayoutNode, is_ssh: &mut bool) {
 // `pick_ssh_handle_for_workspace`; if we tear down the last terminal pane's
 // SSH session, those panes go dark with no in-UI way to reconnect.
 // ClaudeChat is local, doesn't count.
+#[allow(deprecated)]
 fn layout_has_ssh_consumer_pane(node: &LayoutNode) -> bool {
     match node {
         LayoutNode::Pane { pane_kind, .. } => {
@@ -5532,6 +5583,48 @@ pub fn run() {
                     }
                 }
             }
+            // Phase 53 (rebased): one-time rewrite of any leftover
+            // PaneKind::Browser / PaneKind::FileManager panes to
+            // Terminal. These pane kinds were removed from the
+            // create-pane menu when the Browser + Files surfaces moved
+            // to workspace-level floating windows; the leftover panes
+            // would render as broken under the new layout. Same
+            // safety gate as the phase_39 migration: skip if
+            // load_state != Loaded.
+            {
+                let load_ok =
+                    *state.load_state.lock().unwrap() == Some(LoadState::Loaded);
+                let already_done = state
+                    .settings
+                    .lock()
+                    .unwrap()
+                    .migrations
+                    .phase_53_remove_browser_filemanager_panes;
+                if load_ok && !already_done {
+                    let changed = {
+                        let mut f = state.workspaces.lock().unwrap();
+                        rewrite_browser_filemanager_panes_to_terminal(&mut f)
+                    };
+                    if changed > 0 {
+                        match persist(&state) {
+                            Ok(()) => dlog(&format!(
+                                "migration phase_53: rewrote {changed} Browser/FileManager pane(s) to Terminal"
+                            )),
+                            Err(e) => dlog(&format!("migration phase_53: save failed: {e}")),
+                        }
+                    } else {
+                        dlog("migration phase_53: no legacy Browser/FileManager panes found");
+                    }
+                    let snapshot = {
+                        let mut s = state.settings.lock().unwrap();
+                        s.migrations.phase_53_remove_browser_filemanager_panes = true;
+                        s.clone()
+                    };
+                    if let Err(e) = settings::save_to_disk_pub(&snapshot) {
+                        dlog(&format!("migration phase_53: settings save failed: {e}"));
+                    }
+                }
+            }
             // Phase 49-C: auto-destroy sweep. Opt-in via
             // settings.auto_destroy_empty_workspaces_days. A workspace is
             // a candidate when it has no panes (empty layout) AND its
@@ -5880,5 +5973,137 @@ mod migration_tests {
             ..Default::default()
         };
         assert_eq!(disable_all_auto_port_forward(&mut all_off), 0);
+    }
+
+    // Phase 53 (rebased): Browser/FileManager → Terminal rewrite.
+    use super::{
+        rewrite_browser_filemanager_panes_to_terminal, LayoutNode, PaneKind,
+        SplitDirection,
+    };
+
+    fn pane(id: &str, kind: PaneKind) -> LayoutNode {
+        LayoutNode::Pane {
+            pane_id: id.to_string(),
+            pane_kind: kind,
+            connection: None,
+            browser: None,
+            title: None,
+            annotation: None,
+            color: None,
+            emoji: None,
+            help_topic: None,
+            diff_source: None,
+            smart_bidi: None,
+        }
+    }
+
+    fn ws_with_layout(id: &str, layout: LayoutNode) -> Workspace {
+        Workspace {
+            id: id.to_string(),
+            name: id.to_string(),
+            color: None,
+            emoji: None,
+            cwd: None,
+            connection: None,
+            layout: Some(layout),
+            setup_command: None,
+            teardown_command: None,
+            env: Vec::new(),
+            auto_port_forward: false,
+            last_active_at: 0,
+            git_worktree: None,
+        }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn phase_53_rewrites_browser_and_filemanager_panes_and_is_idempotent() {
+        // Nested layout: Split(Browser, Split(FileManager, Terminal))
+        let inner = LayoutNode::Split {
+            split_id: "s2".into(),
+            direction: SplitDirection::Vertical,
+            first: Box::new(pane("p2", PaneKind::FileManager)),
+            second: Box::new(pane("p3", PaneKind::Terminal)),
+            ratio: 0.5,
+        };
+        let layout = LayoutNode::Split {
+            split_id: "s1".into(),
+            direction: SplitDirection::Horizontal,
+            first: Box::new(pane("p1", PaneKind::Browser)),
+            second: Box::new(inner),
+            ratio: 0.5,
+        };
+        let mut file = WorkspacesFile {
+            workspaces: vec![ws_with_layout("w1", layout)],
+            ..Default::default()
+        };
+        assert_eq!(
+            rewrite_browser_filemanager_panes_to_terminal(&mut file),
+            2,
+            "expected p1 (Browser) + p2 (FileManager) to be rewritten"
+        );
+        // Walk the migrated layout and confirm everything is Terminal.
+        fn assert_all_terminal(n: &LayoutNode) {
+            match n {
+                LayoutNode::Pane { pane_kind, .. } => {
+                    assert_eq!(*pane_kind, PaneKind::Terminal);
+                }
+                LayoutNode::Split { first, second, .. } => {
+                    assert_all_terminal(first);
+                    assert_all_terminal(second);
+                }
+            }
+        }
+        assert_all_terminal(file.workspaces[0].layout.as_ref().unwrap());
+        // Second run is a no-op.
+        assert_eq!(
+            rewrite_browser_filemanager_panes_to_terminal(&mut file),
+            0
+        );
+    }
+
+    #[test]
+    fn phase_53_leaves_help_and_diff_alone() {
+        let layout = LayoutNode::Split {
+            split_id: "s1".into(),
+            direction: SplitDirection::Horizontal,
+            first: Box::new(pane("p1", PaneKind::Help)),
+            second: Box::new(pane("p2", PaneKind::Diff)),
+            ratio: 0.5,
+        };
+        let mut file = WorkspacesFile {
+            workspaces: vec![ws_with_layout("w1", layout)],
+            ..Default::default()
+        };
+        assert_eq!(
+            rewrite_browser_filemanager_panes_to_terminal(&mut file),
+            0
+        );
+    }
+
+    #[test]
+    fn phase_53_handles_workspace_with_no_layout() {
+        let mut file = WorkspacesFile {
+            workspaces: vec![Workspace {
+                id: "w1".into(),
+                name: "w1".into(),
+                color: None,
+                emoji: None,
+                cwd: None,
+                connection: None,
+                layout: None,
+                setup_command: None,
+                teardown_command: None,
+                env: Vec::new(),
+                auto_port_forward: false,
+                last_active_at: 0,
+                git_worktree: None,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            rewrite_browser_filemanager_panes_to_terminal(&mut file),
+            0
+        );
     }
 }

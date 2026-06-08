@@ -3659,3 +3659,97 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   color: var(--w-text-primary, #e6edf3);
   border-color: var(--w-accent, #7aa2f7);
 }
+
+/* Phase 53 (rebased): floating workspace-level Browser window.
+   The native child Webview (managed by workspace_browser on the
+   backend) paints OVER `.browser-window-slot` at the same logical
+   rect; the slot is intentionally empty so the user sees the page.
+   Header acts as the drag handle, bottom-right grip is the resize
+   handle. Geometry persists per-workspace in localStorage. */
+.browser-window {
+  position: fixed;
+  z-index: 90; /* below modal-backdrop (which is higher) so modals can hide it */
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 480px;
+  min-height: 320px;
+}
+.browser-window-header {
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0 8px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--w-surface-raised, #1c232c);
+  border-bottom: 1px solid var(--w-border, #21262d);
+  user-select: none;
+  cursor: grab;
+}
+.browser-window-header:active { cursor: grabbing; }
+.browser-window-title {
+  flex: 1;
+  font-size: 12px;
+  color: var(--w-text-primary, #e6edf3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.browser-window-x {
+  background: transparent;
+  border: none;
+  color: var(--w-text-secondary, #7d8590);
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.browser-window-x:hover {
+  color: var(--w-text-primary, #e6edf3);
+  background: var(--w-surface-hover, #1f2630);
+}
+.browser-window-slot {
+  flex: 1;
+  background: var(--w-bg, #0e1116);
+  /* Empty — native Webview paints over it. */
+}
+.browser-window-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(
+      135deg,
+      transparent 0%,
+      transparent 50%,
+      var(--w-text-secondary, #7d8590) 50%,
+      var(--w-text-secondary, #7d8590) 60%,
+      transparent 60%,
+      transparent 70%,
+      var(--w-text-secondary, #7d8590) 70%,
+      var(--w-text-secondary, #7d8590) 80%,
+      transparent 80%
+    );
+  opacity: 0.5;
+}
+.browser-window-resize:hover { opacity: 1; }
+
+/* Phase 53 (rebased): fallback rendering when a hand-edited
+   workspaces.json still has a legacy Browser / FileManager pane.
+   Plain text explainer pointing the user at the sidebar window. */
+.legacy-pane-placeholder {
+  padding: 24px;
+  color: var(--w-text-secondary, #7d8590);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.legacy-pane-placeholder p { margin: 0; max-width: 60ch; }

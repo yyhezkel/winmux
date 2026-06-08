@@ -1,6 +1,10 @@
 import { Match, Show, Switch } from "solid-js";
 import { Divider } from "./Divider";
-import { BrowserPane } from "./BrowserPane";
+// Phase 53 (rebased): BrowserPane no longer imported — the Browser
+// surface moved to the workspace-level floating BrowserWindow
+// (sidebar 🌐). The file stays in the repo as historical reference
+// in case any of its in-pane Webview wiring proves useful for a
+// future iteration.
 import { DiffPane } from "./DiffPane";
 import { FileManagerPane } from "./FileManagerPane";
 import { HelpPane } from "./HelpPane";
@@ -134,21 +138,33 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
       }
     >
       <Match when={kind() === "browser"}>
-        <BrowserPane
-          workspaceId={props.all.workspaceId}
-          pane={props.pane}
-          isActive={isActive()}
-          isWaiting={props.all.waitingPaneIds.has(props.pane.pane_id)}
-          onFocus={props.all.onFocus}
-          onSplit={props.all.onSplit}
-          onClose={props.all.onClose}
-          onNavigate={props.all.onBrowserNavigate}
-          onGoBack={props.all.onBrowserGoBack}
-          onGoHome={props.all.onBrowserGoHome}
-          onSetForward={props.all.onBrowserSetForward}
-          onSetTitle={props.all.onSetTitle}
-          onSetAnnotation={props.all.onSetAnnotation}
-        />
+        {/* Phase 53 (rebased): Browser is no longer a pane kind — it's
+            a workspace-level floating window opened from the sidebar's
+            Browser button. The 53.C load-time migration rewrites any
+            existing Browser pane to Terminal on first boot, so this
+            arm only ever renders if a user hand-edits workspaces.json
+            after migration. Defensive placeholder + escape hatch. */}
+        <div
+          class={`pane ${isActive() ? "active" : ""}`}
+          onClick={() => props.all.onFocus(props.pane.pane_id)}
+        >
+          <div class="pane-header">
+            <span class="pane-conn">🌐 {t("browser.legacyPane.title")}</span>
+            <button
+              class="pane-btn pane-close"
+              title={t("common.close")}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.all.onClose(props.pane.pane_id);
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div class="pane-body legacy-pane-placeholder">
+            <p>{t("browser.legacyPane.body")}</p>
+          </div>
+        </div>
       </Match>
       <Match when={kind() === "filemanager"}>
         <div

@@ -43,6 +43,10 @@ interface Props {
   // Phase 39.A: global Ports button (opens the window on the "All
   // workspaces" tab, no workspace context).
   onOpenPortsGlobal: () => void;
+  // Phase 53 (rebased): open the workspace-level Browser floating
+  // window for the currently active workspace. Each workspace has its
+  // own browser session + persisted geometry.
+  onOpenBrowser: () => void;
 }
 
 export function Sidebar(p: Props) {
@@ -191,6 +195,14 @@ export function Sidebar(p: Props) {
         </button>
         <button class="ws-action-half" onClick={p.onOpenPortsGlobal} title={t("sidebar.ports.tooltip")}>
           🌐 {t("sidebar.ports.label")}
+        </button>
+      </div>
+      {/* Phase 53 (rebased): workspace-level Browser as a floating
+          window (was a pane kind). One Webview per workspace; session
+          + geometry persist across opens. */}
+      <div class="sidebar-actions-row">
+        <button class="ws-action-half" onClick={p.onOpenBrowser} title={t("sidebar.browser.tooltip")}>
+          🌐 {t("sidebar.browser.label")}
         </button>
       </div>
       <button class="ws-add" onClick={p.onCreate}>

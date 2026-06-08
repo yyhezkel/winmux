@@ -13,6 +13,7 @@ import { SettingsModal } from "./SettingsModal";
 import { SshKeyOfferModal } from "./SshKeyOfferModal";
 import { CommandPalette, type Command } from "./CommandPalette";
 import { PortsWindow } from "./PortsWindow";
+import { BrowserWindow } from "./BrowserWindow";
 import {
   TerminalInstance,
   copyTerminalSelection,
@@ -119,6 +120,12 @@ function App() {
   >([]);
   // Phase 40: floating Ports window — scoped to the active workspace.
   const [showPortsWindow, setShowPortsWindow] = createSignal(false);
+  // Phase 53 (rebased): floating workspace-level Browser window. Each
+  // workspace owns its own browser session + remembered geometry; the
+  // signal tracks the open/closed visibility of the host shell only
+  // (the native Webview is hidden on close, not destroyed — page state
+  // survives across open/close cycles).
+  const [showBrowserWindow, setShowBrowserWindow] = createSignal(false);
   const stopForward = (workspaceId: string, remotePort: number) => {
     void invoke("port_forward_stop", { workspaceId, remotePort });
   };
@@ -1486,6 +1493,7 @@ function App() {
             setShowPortsWindow(true);
           }}
           onOpenPortsGlobal={() => setShowPortsWindow(true)}
+          onOpenBrowser={() => setShowBrowserWindow(true)}
         />
       </ErrorBoundary>
       <div class="main">
@@ -1538,18 +1546,11 @@ function App() {
                 {collectPanes(activeWs()!.layout!).length} panes
               </span>
             </Show>
-            {/* Phase 8.A: split active pane into a browser pane on the right. */}
+            {/* Phase 53 (rebased): the "+ browser" split-pane button is
+                gone — the Browser surface is now the workspace-level
+                floating BrowserWindow (sidebar 🌐). FileManager split
+                button stays for now and lands in 53.F. */}
             <Show when={activeWs()!.layout && activePaneId()}>
-              <button
-                class="ws-header-btn"
-                title={t("ws_header.split_browser_title")}
-                onClick={() => {
-                  const pid = activePaneId();
-                  if (pid) splitPane(pid, "horizontal", "browser");
-                }}
-              >
-                {t("ws_header.add_browser")}
-              </button>
               <button
                 class="ws-header-btn"
                 title={t("ws_header.split_filemanager_title")}
@@ -1799,6 +1800,18 @@ function App() {
         onStop={stopForward}
         onStart={startForward}
         onToggleAutoForward={handleToggleAutoForward}
+      />
+
+      {/* Phase 53 (rebased): floating workspace-level Browser window.
+          The native child Webview lives on the Rust side keyed by
+          workspace_id; this shell owns the chrome (header, drag, resize,
+          persisted geometry). Hide-on-close preserves page state until
+          the workspace is deleted. */}
+      <BrowserWindow
+        open={showBrowserWindow()}
+        workspace={activeWs()}
+        anyModalOpen={anyModalOpen}
+        onClose={() => setShowBrowserWindow(false)}
       />
 
       <Show when={updateBanner()}>

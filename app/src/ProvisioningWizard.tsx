@@ -76,6 +76,17 @@ export function ProvisioningWizard(p: Props) {
   type WizardStep = "connect" | "configure" | "execute" | "done";
   const [wizStep, setWizStep] = createSignal<WizardStep>("connect");
 
+  // Phase 56-B: mode picker at step 1.
+  //   "new"      → full provisioning flow (existing 4-step wizard).
+  //   "existing" → minimal flow for an already-set-up server: install
+  //                an SSH key + create a workspace, no user creation,
+  //                no sudo, no agent install. One backend command
+  //                (provision_existing_install_key) does steps 2-5.
+  type WizardMode = "new" | "existing";
+  const [mode, setMode] = createSignal<WizardMode>("new");
+  const [existingBusy, setExistingBusy] = createSignal(false);
+  const [existingError, setExistingError] = createSignal<string | null>(null);
+
   // Connect-step inputs.
   const [host, setHost] = createSignal("");
   const [port, setPort] = createSignal(22);
@@ -204,6 +215,39 @@ export function ProvisioningWizard(p: Props) {
     }
   };
 
+  // Phase 56-B: existing-server mode. One backend call does cred-test
+  // + keygen + remote install + verify-with-key + persist-workspace.
+  // On success, we synthesize a `result()` payload that drives the
+  // existing Done step UI (with the "Open it now" button).
+  const runExistingInstallKey = async () => {
+    setExistingBusy(true);
+    setExistingError(null);
+    try {
+      const newWorkspaceId = await invoke<string>(
+        "provision_existing_install_key",
+        {
+          host: host().trim(),
+          port: port(),
+          sshUser: user().trim(),
+          password: password(),
+          workspaceName: workspaceName().trim(),
+        }
+      );
+      setResult({
+        run_id: "existing-install",
+        workspace_id: newWorkspaceId,
+        workspace_name: workspaceName().trim() || host().trim(),
+        claude_installed: false,
+        host: host().trim(),
+      });
+      setWizStep("done");
+    } catch (e) {
+      setExistingError(String(e));
+    } finally {
+      setExistingBusy(false);
+    }
+  };
+
   const startRun = async () => {
     setWizStep("execute");
     setLogLines([]);
@@ -281,8 +325,43 @@ export function ProvisioningWizard(p: Props) {
           </div>
 
           <div class="provisioning-body">
-            {/* Step 1: connect + inspect */}
+            {/* Step 1: connect + inspect (new mode) OR install key
+                + create workspace (existing mode). The fields up to
+                "password" are shared; key_path + configure/execute
+                steps are new-mode only. */}
             <Show when={wizStep() === "connect"}>
+              {/* Phase 56-B: mode selector. Default is "new" so the
+                  legacy provisioning flow keeps the same first-click
+                  behaviour. */}
+              <div class="provisioning-mode">
+                <p class="settings-hint">{t("provisioning.mode.label")}</p>
+                <label class="provisioning-mode-row">
+                  <input
+                    type="radio"
+                    name="provisioning-mode"
+                    value="new"
+                    checked={mode() === "new"}
+                    onChange={() => setMode("new")}
+                  />
+                  <span>
+                    <strong>{t("provisioning.mode.new")}</strong>
+                    <span class="provisioning-mode-hint">{t("provisioning.mode.new.hint")}</span>
+                  </span>
+                </label>
+                <label class="provisioning-mode-row">
+                  <input
+                    type="radio"
+                    name="provisioning-mode"
+                    value="existing"
+                    checked={mode() === "existing"}
+                    onChange={() => setMode("existing")}
+                  />
+                  <span>
+                    <strong>{t("provisioning.mode.existing")}</strong>
+                    <span class="provisioning-mode-hint">{t("provisioning.mode.existing.hint")}</span>
+                  </span>
+                </label>
+              </div>
               <p class="settings-hint">{t("provisioning.hint.connect")}</p>
               <label>
                 <span>{t("provisioning.field.host")}</span>
@@ -316,21 +395,46 @@ export function ProvisioningWizard(p: Props) {
                   placeholder={t("provisioning.field.password.placeholder")}
                 />
               </label>
-              <label>
-                <span>{t("provisioning.field.key_path")}</span>
-                <input
-                  value={keyPath()}
-                  onInput={(e) => setKeyPath(e.currentTarget.value)}
-                  placeholder={t("provisioning.field.key_path.placeholder")}
-                />
-              </label>
-              <Show when={keyPath()}>
+              {/* Phase 56-B: key_path / key_passphrase inputs are
+                  new-mode only. Existing mode generates a fresh
+                  ed25519 keypair itself — accepting a user-provided
+                  one in that flow would conflict with the install
+                  step's "write a brand-new pubkey to authorized_keys"
+                  guarantee. */}
+              <Show when={mode() === "new"}>
                 <label>
-                  <span>{t("provisioning.field.key_passphrase")}</span>
+                  <span>{t("provisioning.field.key_path")}</span>
                   <input
-                    type="password"
-                    value={keyPass()}
-                    onInput={(e) => setKeyPass(e.currentTarget.value)}
+                    value={keyPath()}
+                    onInput={(e) => setKeyPath(e.currentTarget.value)}
+                    placeholder={t("provisioning.field.key_path.placeholder")}
+                  />
+                </label>
+                <Show when={keyPath()}>
+                  <label>
+                    <span>{t("provisioning.field.key_passphrase")}</span>
+                    <input
+                      type="password"
+                      value={keyPass()}
+                      onInput={(e) => setKeyPass(e.currentTarget.value)}
+                    />
+                  </label>
+                </Show>
+              </Show>
+
+              {/* Phase 56-B: workspace name lives on step 1 in existing
+                  mode (no configure step to host it). Auto-derived
+                  from host() via the same memo as new-mode. */}
+              <Show when={mode() === "existing"}>
+                <label>
+                  <span>{t("provisioning.field.workspace_name")}</span>
+                  <input
+                    value={workspaceName()}
+                    placeholder={t("provisioning.field.workspace_name.placeholder")}
+                    onInput={(e) => {
+                      setWorkspaceName(e.currentTarget.value);
+                      setWorkspaceNameTouched(true);
+                    }}
                   />
                 </label>
               </Show>
@@ -361,15 +465,46 @@ export function ProvisioningWizard(p: Props) {
                 </div>
               </Show>
 
+              {/* Phase 56-B: existing-mode error banner. Surfaces
+                  ssh-keygen / connect / install / verify failures
+                  inline; the next click retries with the same form. */}
+              <Show when={mode() === "existing" && existingError()}>
+                <div class="wizard-test-result err">
+                  <div class="wizard-test-line">✗ {existingError()}</div>
+                </div>
+              </Show>
+
               <div class="modal-buttons">
                 <button onClick={p.onClose}>{t("common.cancel")}</button>
-                <button
-                  class="primary"
-                  disabled={inspecting() || !host() || !user()}
-                  onClick={() => void runInspect()}
+                <Show
+                  when={mode() === "new"}
+                  fallback={
+                    <button
+                      class="primary"
+                      disabled={
+                        existingBusy() ||
+                        !host() ||
+                        !user() ||
+                        !password()
+                      }
+                      onClick={() => void runExistingInstallKey()}
+                    >
+                      {existingBusy()
+                        ? t("provisioning.existing.step.install")
+                        : t("provisioning.btn.existing_install_key")}
+                    </button>
+                  }
                 >
-                  {inspecting() ? t("provisioning.inspecting") : t("provisioning.btn.connect_inspect")}
-                </button>
+                  <button
+                    class="primary"
+                    disabled={inspecting() || !host() || !user()}
+                    onClick={() => void runInspect()}
+                  >
+                    {inspecting()
+                      ? t("provisioning.inspecting")
+                      : t("provisioning.btn.connect_inspect")}
+                  </button>
+                </Show>
               </div>
             </Show>
 

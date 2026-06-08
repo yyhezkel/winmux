@@ -1579,6 +1579,223 @@ async fn ssh_key_generate_and_install(
     Ok(priv_str)
 }
 
+/// Phase 56-B: "Connect to existing server" provisioning shortcut.
+///
+/// The user already has an account on a remote server; they just want
+/// winmux to:
+///   1. Open a one-shot SSH session with their password,
+///   2. Generate an ed25519 keypair (stored at
+///      `%APPDATA%\winmux\keys\<workspace_id>.key`),
+///   3. Append the pubkey to `~/.ssh/authorized_keys` on the remote,
+///   4. Verify the key handshake works,
+///   5. Persist a fresh workspace with the key path baked in.
+///
+/// The password is consumed in-memory only — never written to disk.
+/// On any failure between steps 2 and 5 the partial keypair on disk
+/// is left in place (the next attempt overwrites it); the workspace
+/// is only persisted on a fully clean run.
+///
+/// Returns the new workspace_id so the frontend can switch to it.
+#[tauri::command]
+async fn provision_existing_install_key(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    host: String,
+    port: u16,
+    ssh_user: String,
+    password: String,
+    workspace_name: String,
+) -> Result<String, String> {
+    if host.is_empty() {
+        return Err("host is required".into());
+    }
+    if ssh_user.is_empty() {
+        return Err("user is required".into());
+    }
+    if password.is_empty() {
+        return Err("password is required".into());
+    }
+    let workspace_id = new_workspace_id();
+
+    // Compute key paths up front + clear any stale leftovers from a
+    // previous attempt with the same (yet-to-be-persisted) id.
+    let priv_path = winmux_key_path(&workspace_id)?;
+    let pub_path: PathBuf = {
+        let mut p = priv_path.clone();
+        let mut s = p
+            .file_name()
+            .ok_or_else(|| "winmux_key_path: no file name".to_string())?
+            .to_os_string();
+        s.push(".pub");
+        p.set_file_name(s);
+        p
+    };
+    if priv_path.exists() {
+        std::fs::remove_file(&priv_path).map_err(|e| format!("remove old key: {e}"))?;
+    }
+    if pub_path.exists() {
+        std::fs::remove_file(&pub_path).map_err(|e| format!("remove old pubkey: {e}"))?;
+    }
+    let priv_str = priv_path.to_string_lossy().to_string();
+
+    // 1) Generate the ed25519 keypair via the system ssh-keygen (ships
+    //    with Windows 10+ OpenSSH; same call shape as the wizard's
+    //    GenerateKeypair step + ssh_key_generate_and_install).
+    let out = tokio::process::Command::new("ssh-keygen")
+        .args([
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            &format!("winmux-{workspace_id}"),
+            "-f",
+            &priv_str,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("spawn ssh-keygen: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "ssh-keygen failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    let pub_line =
+        std::fs::read_to_string(&pub_path).map_err(|e| format!("read pubkey: {e}"))?;
+    let pub_line_trim = pub_line.trim().to_string();
+
+    // 2) Connect with the password to validate creds + install the key.
+    let config = Arc::new(client::Config {
+        keepalive_interval: Some(std::time::Duration::from_secs(30)),
+        ..Default::default()
+    });
+    let target = format!("{host}:{port}");
+    let mut handle = client::connect(
+        config.clone(),
+        (host.as_str(), port),
+        SshClient::new_anonymous(target.clone()),
+    )
+    .await
+    .map_err(|e| format!("ssh connect {target}: {e}"))?;
+    let ok = handle
+        .authenticate_password(&ssh_user, &password)
+        .await
+        .map_err(|e| format!("authenticate: {e}"))?;
+    if !ok {
+        return Err("authentication failed (password rejected)".into());
+    }
+
+    // 3) Append pubkey to ~/.ssh/authorized_keys. Idempotent (grep -qxF).
+    let install_cmd = format!(
+        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+         touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && \
+         (grep -qxF '{key}' ~/.ssh/authorized_keys || echo '{key}' >> ~/.ssh/authorized_keys)",
+        key = pub_line_trim.replace('\'', "'\\''"),
+    );
+    let mut chan = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| e.to_string())?;
+    chan.exec(true, install_cmd.as_str())
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut out_buf = Vec::new();
+    let mut exit_code: i32 = 0;
+    loop {
+        match chan.wait().await {
+            Some(russh::ChannelMsg::Data { data }) => out_buf.extend_from_slice(&data[..]),
+            Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
+                out_buf.extend_from_slice(&data[..])
+            }
+            Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                exit_code = exit_status as i32
+            }
+            Some(russh::ChannelMsg::Close)
+            | Some(russh::ChannelMsg::Eof)
+            | None => break,
+            _ => {}
+        }
+    }
+    if exit_code != 0 {
+        let stderr = String::from_utf8_lossy(&out_buf).to_string();
+        return Err(format!(
+            "install pubkey failed (exit {exit_code}): {stderr}"
+        ));
+    }
+    // Drop the password-authenticated handle.
+    drop(handle);
+
+    // 4) Verify reconnect with the new key. Surfaces a clear error if
+    //    sshd's PubkeyAuthentication is off or AuthorizedKeysFile is
+    //    pointed somewhere unusual — before we persist a workspace
+    //    that wouldn't work.
+    let verify = connect_and_authenticate(
+        &host,
+        &ssh_user,
+        port,
+        Some(&priv_str),
+        None,
+        None,
+        false,
+    )
+    .await
+    .map_err(|e| format!("verify key: {e}"))?;
+    drop(verify);
+
+    // 5) Persist a fresh workspace. Connection mirrors workspace_create.
+    let conn = Connection::Ssh {
+        host: host.clone(),
+        user: ssh_user.clone(),
+        port,
+        key_path: Some(priv_str.clone()),
+    };
+    let final_name = if workspace_name.trim().is_empty() {
+        host.clone()
+    } else {
+        workspace_name.trim().to_string()
+    };
+    let ws = Workspace {
+        id: workspace_id.clone(),
+        name: final_name,
+        color: None,
+        emoji: None,
+        cwd: None,
+        connection: Some(conn.clone()),
+        layout: Some(LayoutNode::Pane {
+            pane_id: new_pane_id(),
+            pane_kind: PaneKind::Terminal,
+            connection: Some(conn),
+            browser: None,
+            title: None,
+            annotation: None,
+            color: None,
+            emoji: None,
+            help_topic: None,
+            diff_source: None,
+            smart_bidi: None,
+        }),
+        setup_command: None,
+        teardown_command: None,
+        env: Vec::new(),
+        auto_port_forward: false,
+        last_active_at: 0,
+        git_worktree: None,
+    };
+    {
+        let mut file = state.workspaces.lock().map_err(|e| e.to_string())?;
+        file.active_workspace_id = Some(workspace_id.clone());
+        file.workspaces.push(ws);
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+
+    dlog(&format!(
+        "provision_existing_install_key: created ws={workspace_id} host={host} user={ssh_user}"
+    ));
+    Ok(workspace_id)
+}
+
 /// Run `echo $HOME` over a fresh exec channel. Returns (stdout, exit_code).
 async fn remote_get_home(
     handle: &mut client::Handle<SshClient>,
@@ -5079,6 +5296,7 @@ pub fn run() {
             workspace_browser::workspace_browser_resize,
             ssh_key_offer_dismiss,
             ssh_key_generate_and_install,
+            provision_existing_install_key,
             workspace_delete,
             workspace_set_active,
             workspace_create_worktree,

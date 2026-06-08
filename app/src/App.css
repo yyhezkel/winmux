@@ -2309,6 +2309,32 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   padding: 0;
   overflow: hidden;
 }
+/* Phase 56-B: mode picker at the top of step 1. */
+.provisioning-mode {
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 5px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: var(--w-surface-raised, #1c232c);
+}
+.provisioning-mode > p { margin: 0 0 8px 0; }
+.provisioning-mode-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.provisioning-mode-row input[type="radio"] { margin-top: 3px; }
+.provisioning-mode-row > span { display: flex; flex-direction: column; gap: 2px; }
+.provisioning-mode-row strong {
+  font-size: 13px;
+  color: var(--w-text-primary, #e6edf3);
+}
+.provisioning-mode-hint {
+  font-size: 11px;
+  color: var(--w-text-secondary, #7d8590);
+}
 .provisioning-head {
   display: flex;
   align-items: center;

@@ -66,6 +66,12 @@ function App() {
   const [showCreate, setShowCreate] = createSignal(false);
   const [editingWorkspace, setEditingWorkspace] = createSignal<Workspace | null>(null);
   const [activePaneId, setActivePaneId] = createSignal<string | null>(null);
+  // Phase 55-A: pane maximize toggle. When set, LayoutView gets just
+  // that leaf as its node (the rest of the split tree still lives in
+  // ws.layout; restore swaps it back). pty_resize fires for every
+  // pane in the workspace after enter/exit so xterm geometry catches
+  // up to the new available area.
+  const [maximizedPaneId, setMaximizedPaneId] = createSignal<string | null>(null);
   const [pendingPwFor, setPendingPwFor] = createSignal<string | null>(null);
   const [pendingPassphraseFor, setPendingPassphraseFor] = createSignal<{
     paneId: string;
@@ -427,6 +433,8 @@ function App() {
       { id: "pane.close", label: t("cmd.pane.close"), enabled: () => hasPane, handler: () => { if (pid) void closePane(pid); } },
       { id: "pane.focus.next", label: t("cmd.pane.focus.next"), enabled: () => hasPane, handler: () => focusAdjacentPane(1) },
       { id: "pane.focus.prev", label: t("cmd.pane.focus.prev"), enabled: () => hasPane, handler: () => focusAdjacentPane(-1) },
+      // Phase 55-A: maximize toggle (Ctrl+Enter / double-click pane content).
+      { id: "pane.maximize", label: t("cmd.pane.maximize"), enabled: () => hasPane, handler: () => toggleMaximize() },
       { id: "pane.rename", label: t("cmd.pane.rename"), enabled: () => hasPane, handler: () => { if (pid) window.dispatchEvent(new CustomEvent("winmux:pane-rename", { detail: pid })); } },
       { id: "ssh.connect", label: t("cmd.ssh.connect"), enabled: () => hasPane, handler: () => { if (pid) void connectPane(pid); } },
       { id: "ssh.disconnect", label: t("cmd.ssh.disconnect"), enabled: () => hasPane, handler: () => { if (pid) void disconnectPane(pid); } },
@@ -1019,9 +1027,46 @@ function App() {
     return search(ws.layout);
   };
 
+  // Phase 55-A: maximize toggle. Setting/clearing the signal swaps
+  // LayoutView's `node` between the full split tree and the lone
+  // leaf; fit+resize fires for every pane in the workspace after the
+  // signal flips so xterm catches up to the new available area.
+  const toggleMaximize = (paneId?: string) => {
+    const cur = maximizedPaneId();
+    if (cur) {
+      setMaximizedPaneId(null);
+    } else {
+      const target = paneId ?? activePaneId();
+      if (!target) return;
+      setMaximizedPaneId(target);
+    }
+    queueMicrotask(() => {
+      const ws = activeWs();
+      if (!ws?.layout) return;
+      for (const pid of collectPanes(ws.layout)) {
+        terms.get(pid)?.fitAndResize();
+      }
+    });
+  };
+
   // ─── keyboard shortcuts ─────────────────────────────────────────────────
 
   const handleKey = (e: KeyboardEvent) => {
+    // Phase 55-A: Ctrl+Enter toggles maximize for the active pane.
+    // Esc restores ONLY when something is maximized (otherwise we
+    // step on terminal escape sequences). Hardcoded (not in the
+    // shortcut table) — tmux uses Ctrl+b z for the same gesture, but
+    // raw Ctrl+Enter is a winmux-specific convenience.
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === "Enter") {
+      e.preventDefault();
+      toggleMaximize();
+      return;
+    }
+    if (e.key === "Escape" && maximizedPaneId()) {
+      e.preventDefault();
+      toggleMaximize();
+      return;
+    }
     // Phase 16: configurable shortcuts. The static Ctrl+Shift+D / E /
     // W bindings (split right / split down / close pane) remain
     // hardcoded for now — they're pane-relative and bound to the
@@ -1442,10 +1487,20 @@ function App() {
     );
 
     window.addEventListener("keydown", handleKey);
+    // Phase 55-A: PaneView dispatches a custom event on content
+    // double-click (skipping xterm + the header). We listen at the
+    // App level so the toggle stays co-located with the maximized
+    // signal + the post-toggle fit/resize fanout.
+    const handlePaneMaximize = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { paneId?: string };
+      if (detail?.paneId) toggleMaximize(detail.paneId);
+    };
+    window.addEventListener("winmux:pane-maximize", handlePaneMaximize);
 
     onCleanup(() => {
       for (const u of unlistens) u();
       window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("winmux:pane-maximize", handlePaneMaximize);
       for (const [pid] of paneToSession) {
         invoke("pane_disconnect", { paneId: pid }).catch(() => {});
       }
@@ -1620,7 +1675,20 @@ function App() {
                 {(_id) => (
                   <LayoutView
                     workspaceId={activeWs()!.id}
-                    node={activeWs()!.layout!}
+                    node={(() => {
+                      const ws = activeWs()!;
+                      const max = maximizedPaneId();
+                      if (!max) return ws.layout!;
+                      // Phase 55-A: when a pane is maximized, swap
+                      // the tree for that one leaf so it fills the
+                      // workspace area. Splits + the other panes are
+                      // still in `ws.layout` so restore brings them
+                      // straight back without re-creating any
+                      // TerminalInstance (those are keyed by pane_id
+                      // in the `terms` map, surviving the DOM detach).
+                      const node = findPane(ws.layout!, max);
+                      return node ?? ws.layout!;
+                    })()}
                     activePaneId={activePaneId()}
                     connectedPaneIds={connectedPanes()}
                     waitingPaneIds={waitingPaneIds()}

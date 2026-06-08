@@ -357,6 +357,8 @@
   "cmd.pane.split.down": "Панель: Разделить вниз",
   "cmd.pane.close": "Панель: Закрыть",
   "cmd.pane.focus.next": "Панель: Следующая",
+  "cmd.pane.maximize": "Панель: Развернуть/восстановить (Ctrl+Enter)",
+  "pane.maximize.tooltip": "Развернуть/восстановить — Ctrl+Enter, двойной клик или Esc",
   "cmd.pane.focus.prev": "Панель: Предыдущая",
   "cmd.pane.rename": "Панель: Переименовать / заметка",
   "cmd.ssh.connect": "SSH: Подключить активную панель",

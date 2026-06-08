@@ -507,6 +507,22 @@ export function PaneView(p: Props) {
       onMouseDown={() => p.onFocus(p.pane.pane_id)}
       onDrop={onHtml5Drop}
       onDragOver={onHtml5DragOver}
+      onDblClick={(e) => {
+        // Phase 55-A: maximize toggle on content double-click. Skip
+        // when the click landed inside the xterm canvas — xterm's own
+        // double-click handler uses that for word-selection. Skip the
+        // header too (which has its own rename / connect actions
+        // bound to clicks).
+        const target = e.target as HTMLElement;
+        if (target.closest(".xterm")) return;
+        if (target.closest(".pane-header")) return;
+        if (target.closest(".pane-drop-toast")) return;
+        window.dispatchEvent(
+          new CustomEvent("winmux:pane-maximize", {
+            detail: { paneId: p.pane.pane_id },
+          })
+        );
+      }}
     >
       <Show when={dropMsg()}>
         <div class="pane-drop-toast">{dropMsg()}</div>

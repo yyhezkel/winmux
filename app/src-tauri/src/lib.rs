@@ -1,5 +1,6 @@
 // Phase 24.D: claude_chat module deleted with the ClaudeChat pane.
 mod bidi_filter;
+mod browser_pane;
 mod claude_log;
 mod claude_summary;
 mod connect_wizard;
@@ -169,6 +170,12 @@ pub(crate) struct AppState {
     /// feature concern, not core russh/sessions. Lazy-created on
     /// first chunk per pane; toggled via `pane_set_smart_bidi`.
     pub(crate) bidi_filters: bidi_filter::BidiFilterMap,
+    /// Phase 53 (#4.8 / 48-F): per-pane child Webview for browser
+    /// panes. Lives only at runtime — never persisted to
+    /// workspaces.json. Workspace_delete also calls
+    /// `browser_pane::cleanup_workspace_sessions` to remove the
+    /// matching `browser-sessions/<workspace_id>/` directory.
+    pub(crate) browser_webviews: browser_pane::BrowserWebviewMap,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -3339,6 +3346,18 @@ fn workspace_delete(
             })
             .unwrap_or_default()
     };
+    // Phase 53: tear down any browser child-webviews owned by panes
+    // in this workspace + delete the per-workspace browser-sessions
+    // directory (cookies / localStorage / cache). Sessions DO survive
+    // workspace deletion otherwise (they outlive transient pane
+    // close); this is the only cleanup path that should wipe them.
+    for pane_id in &panes_to_kill {
+        let webview = state.browser_webviews.lock().unwrap().remove(pane_id);
+        if let Some(w) = webview {
+            let _ = w.close();
+        }
+    }
+    browser_pane::cleanup_workspace_sessions(&workspace_id);
     for pane_id in &panes_to_kill {
         if let Some(sid) = state.core.pane_sessions.lock().unwrap().remove(pane_id) {
             if let Some(mut s) = state.core.sessions.lock().unwrap().remove(&sid) {
@@ -5608,6 +5627,13 @@ pub fn run() {
             read_log_tail,
             pane_set_identity,
             pane_set_smart_bidi,
+            browser_pane::browser_pane_spawn,
+            browser_pane::browser_pane_navigate,
+            browser_pane::browser_pane_close,
+            browser_pane::browser_pane_resize,
+            browser_pane::browser_pane_eval,
+            browser_pane::browser_pane_hide,
+            browser_pane::browser_pane_show,
             ssh_key_offer_dismiss,
             ssh_key_generate_and_install,
             workspace_delete,

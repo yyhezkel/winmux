@@ -1736,32 +1736,42 @@ function App() {
           row [📝 Notes][⚙ Settings][🌐 Ports] added in Phase 39 (re-added
           in Phase 40). The Ctrl+Shift+N keyboard shortcut for Notes
           stays wired separately. */}
-      <ProvisioningWizard
-        open={showProvision()}
-        onClose={() => setShowProvision(false)}
-        onOpenWorkspace={async (wsId, mode) => {
-          // Phase 14.A.2: the wizard's backend already emitted
-          // `workspaces:changed` when it created/updated the
-          // workspace, so by the time we land here our local state
-          // already shows the new entry. Switch to it + auto-connect
-          // the first pane.
-          try {
-            await handleSetActive(wsId);
-            const ws = file().workspaces.find((w) => w.id === wsId);
-            const firstPane =
-              ws?.layout ? collectPanes(ws.layout)[0] : null;
-            if (firstPane) {
-              setActivePaneId(firstPane);
-              connectPane(firstPane, {
-                persistent: true,
-                ...(mode === "claude" ? { mode: "claude" } : {}),
-              });
+      {/* Phase 56-A: keyed Show forces ProvisioningWizard to fully
+          unmount on close + freshly remount on re-open. Without this,
+          the component instance lives across opens and its internal
+          signals (wizStep, host, port, runId, …) stick — so clicking
+          "Provision server" after a completion screen reopens to that
+          completion. The keyed flag is the explicit hint that we're
+          using the component as a transient session, not as a
+          persistent always-mounted modal. */}
+      <Show keyed when={showProvision()}>
+        <ProvisioningWizard
+          open={true}
+          onClose={() => setShowProvision(false)}
+          onOpenWorkspace={async (wsId, mode) => {
+            // Phase 14.A.2: the wizard's backend already emitted
+            // `workspaces:changed` when it created/updated the
+            // workspace, so by the time we land here our local state
+            // already shows the new entry. Switch to it + auto-connect
+            // the first pane.
+            try {
+              await handleSetActive(wsId);
+              const ws = file().workspaces.find((w) => w.id === wsId);
+              const firstPane =
+                ws?.layout ? collectPanes(ws.layout)[0] : null;
+              if (firstPane) {
+                setActivePaneId(firstPane);
+                connectPane(firstPane, {
+                  persistent: true,
+                  ...(mode === "claude" ? { mode: "claude" } : {}),
+                });
+              }
+            } catch (e) {
+              console.error("open created workspace failed", e);
             }
-          } catch (e) {
-            console.error("open created workspace failed", e);
-          }
-        }}
-      />
+          }}
+        />
+      </Show>
 
       <Show when={settings()}>
         <SettingsModal

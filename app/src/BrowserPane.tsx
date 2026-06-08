@@ -43,8 +43,19 @@ export function BrowserPane(p: Props) {
   // when localhost forwarding rewrites it to 127.0.0.1:<local_forward_port>.
   const [resolvedUrl, setResolvedUrl] = createSignal(browser().url);
   const [resolveErr, setResolveErr] = createSignal<string | null>(null);
-  let iframeRef: HTMLIFrameElement | undefined;
+  // Phase 53 (#4.8 / 48-F): the iframe is gone. We now spawn a native
+  // child Webview via the backend; this div is the placeholder slot
+  // the Webview is positioned over (set_position + set_size on every
+  // ResizeObserver tick).
+  let iframeRef: HTMLIFrameElement | undefined; // kept for the legacy
+  // eval/screenshot bridge (Phase 8.F.1) until 53.C rewires it; on the
+  // Webview path this stays undefined and the bridge degrades to error.
   let bodyRef: HTMLDivElement | undefined;
+  let slotRef: HTMLDivElement | undefined;
+  // True once the backend has confirmed the Webview spawned; gates
+  // navigate/resize commands so we don't fire them against a non-
+  // existent target.
+  const [webviewLive, setWebviewLive] = createSignal(false);
 
   // Whenever the persisted URL changes (user nav, back, home, CLI), refresh
   // both the address-bar draft and the iframe's resolved src. Track the LAST
@@ -115,13 +126,22 @@ export function BrowserPane(p: Props) {
       lastResolvedSource = u;
       lastResolvedForward = forwardOn();
       setResolvedUrl(rewritten);
-      if (iframeRef) {
-        // Re-assign even if the URL value is unchanged so the iframe reloads.
-        iframeRef.src = rewritten || "about:blank";
+      // Phase 53: route navigation through the native Webview command
+      // rather than mutating iframe.src.
+      if (webviewLive() && rewritten) {
+        await invoke("browser_pane_navigate", {
+          paneId: p.pane.pane_id,
+          url: rewritten,
+        }).catch((err) => console.error("browser_pane_navigate failed", err));
       }
     } catch (err) {
       setResolveErr(String(err));
-      if (iframeRef) iframeRef.src = u;
+      if (webviewLive() && u) {
+        await invoke("browser_pane_navigate", {
+          paneId: p.pane.pane_id,
+          url: u,
+        }).catch(() => {});
+      }
     }
   };
 
@@ -145,18 +165,92 @@ export function BrowserPane(p: Props) {
     return resolvedUrl() !== u;
   };
 
-  // Phase 8.C: tell the backend whenever the iframe finishes loading. This
-  // unblocks pending pane.browser.wait RPC calls.
-  // IMPORTANT: report the user-facing URL (browser().url, e.g. http://localhost:8000)
-  // and NOT the resolved/rewritten one (http://127.0.0.1:<forward>). The wait RPC
-  // compares last_loaded_url to bs.url (user-facing), so reporting the rewritten
-  // URL would always fail to match and the wait would never short-circuit.
+  // Phase 8.C: tell the backend whenever the iframe finishes loading.
+  // Phase 53: still wired but only the legacy iframe code path fires it
+  // (currently dead — see slot div below). Native Webview load-completion
+  // signaling lands in 53.C alongside the MCP bridge rewire.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleIframeLoad = () => {
     invoke("pane_browser_loaded", {
       paneId: p.pane.pane_id,
       url: browser().url || "",
     }).catch(() => {});
   };
+  // Silence unused warnings while iframe is dead code (53.C will
+  // either fully remove the bridge code or rewire it to the Webview).
+  void handleIframeLoad;
+  void iframeRef;
+
+  // Phase 53: Webview lifecycle. Spawn on mount, resize on every layout
+  // tick (debounced), close on unmount.
+  let resizeTimer: number | undefined;
+  let lastRect = { x: -1, y: -1, w: -1, h: -1 };
+  const debouncedResize = () => {
+    if (!slotRef || !webviewLive()) return;
+    const r = slotRef.getBoundingClientRect();
+    const x = Math.round(r.left);
+    const y = Math.round(r.top);
+    const w = Math.round(r.width);
+    const h = Math.round(r.height);
+    if (x === lastRect.x && y === lastRect.y && w === lastRect.w && h === lastRect.h) {
+      return;
+    }
+    lastRect = { x, y, w, h };
+    invoke("browser_pane_resize", {
+      paneId: p.pane.pane_id,
+      x,
+      y,
+      w,
+      h,
+    }).catch((err) => console.error("browser_pane_resize failed", err));
+  };
+  const queueResize = () => {
+    if (resizeTimer !== undefined) window.clearTimeout(resizeTimer);
+    // 32ms ≈ 30Hz — Yossi's eye won't notice; IPC round-trip survives.
+    resizeTimer = window.setTimeout(debouncedResize, 32);
+  };
+
+  onMount(() => {
+    if (!slotRef) return;
+    // First-paint: snapshot the rect, spawn the Webview.
+    const r = slotRef.getBoundingClientRect();
+    const spawnUrl = resolvedUrl() || browser().url || "about:blank";
+    invoke("browser_pane_spawn", {
+      workspaceId: p.workspaceId,
+      paneId: p.pane.pane_id,
+      url: spawnUrl,
+      x: Math.round(r.left),
+      y: Math.round(r.top),
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+    })
+      .then(() => {
+        setWebviewLive(true);
+        lastRect = {
+          x: Math.round(r.left),
+          y: Math.round(r.top),
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+        };
+      })
+      .catch((err) => console.error("browser_pane_spawn failed", err));
+
+    // Track every layout change that could move/resize the slot.
+    const ro = new ResizeObserver(queueResize);
+    ro.observe(slotRef);
+    // Window resize + scroll (sidebar collapse, etc.) also shift the slot.
+    window.addEventListener("resize", queueResize);
+    window.addEventListener("scroll", queueResize, true);
+    onCleanup(() => {
+      ro.disconnect();
+      window.removeEventListener("resize", queueResize);
+      window.removeEventListener("scroll", queueResize, true);
+      if (resizeTimer !== undefined) window.clearTimeout(resizeTimer);
+      invoke("browser_pane_close", {
+        paneId: p.pane.pane_id,
+      }).catch(() => {});
+    });
+  });
 
   // Phase 8.C: serve agent-side requests (eval, screenshot) for THIS pane.
   type BrowserRequest = {
@@ -415,30 +509,22 @@ export function BrowserPane(p: Props) {
             </p>
           </div>
         </Show>
-        <Show
-          when={resolvedUrl()}
-          fallback={
-            <Show when={!resolveErr()?.includes("no active SSH session")}>
-              <div class="browser-placeholder">
-                <p>{t("browser.empty_url")}</p>
-                <p class="browser-hint">
-                  Note: many sites (Google, banks, etc.) block iframe embedding via
-                  X-Frame-Options. WebView2 native panes will lift this in a later
-                  phase.
-                </p>
-              </div>
-            </Show>
-          }
-        >
-          <iframe
-            ref={(el) => (iframeRef = el)}
-            class="browser-iframe"
-            data-pane-id={p.pane.pane_id}
-            src={resolvedUrl()}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            referrerpolicy="no-referrer-when-downgrade"
-            onLoad={handleIframeLoad}
-          />
+        {/* Phase 53: this div is a sized placeholder, NOT the renderer.
+            The native child Webview is positioned over its rect by
+            browser_pane_resize. When no URL is set we still need the
+            slot present so onMount can spawn the Webview; we just
+            spawn it with "about:blank". The X-Frame-Options note that
+            used to live here is gone — Webview2 panes don't have that
+            limit. */}
+        <div
+          ref={(el) => (slotRef = el)}
+          class="browser-webview-slot"
+          data-pane-id={p.pane.pane_id}
+        />
+        <Show when={!resolvedUrl() && !resolveErr()?.includes("no active SSH session")}>
+          <div class="browser-placeholder">
+            <p>{t("browser.empty_url")}</p>
+          </div>
         </Show>
       </div>
     </div>

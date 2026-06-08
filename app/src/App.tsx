@@ -140,6 +140,41 @@ function App() {
   // (banner gone until next connect), or triggers an in-place update.
   const [hooksBanner, setHooksBanner] = createSignal<HooksOutdatedInfo | null>(null);
   const [hooksUpdating, setHooksUpdating] = createSignal(false);
+  // Phase 53 (#4.8 / 48-F): native child Webviews always paint above
+  // HTML, so opening a modal would visually hide it behind the
+  // browser pane. This derived signal collects every "is a modal
+  // open" state; the effect below broadcasts hide/show to every
+  // browser webview.
+  const anyModalOpen = () =>
+    showCreate() || showNotes() || showSettings() || showProvision() ||
+    showPalette() || showPortsWindow() || installingUpdate();
+  createEffect(() => {
+    const hide = anyModalOpen();
+    // Walk every workspace's layout for browser panes; send hide/show
+    // to the per-pane Webview command. Cheap — under 32 browser panes
+    // a workspace would mean something far stranger going on first.
+    const ws = file().workspaces;
+    const collectBrowserPaneIds = (
+      node: LayoutNode | null | undefined,
+      out: string[],
+    ): void => {
+      if (!node) return;
+      if (node.kind === "pane") {
+        if (node.pane_kind === "browser") out.push(node.pane_id);
+        return;
+      }
+      collectBrowserPaneIds(node.first, out);
+      collectBrowserPaneIds(node.second, out);
+    };
+    const ids: string[] = [];
+    for (const w of ws) collectBrowserPaneIds(w.layout, ids);
+    for (const id of ids) {
+      void invoke(hide ? "browser_pane_hide" : "browser_pane_show", {
+        paneId: id,
+      }).catch(() => {});
+    }
+  });
+
   // Phase 17: ephemeral toast for "Summary saved as note" + the
   // ad-hoc errors that can come back from `claude_summarize`. Auto-
   // dismisses after 4s.

@@ -5376,6 +5376,10 @@ pub fn run() {
             file_manager::file_write_local,
             file_manager::file_write_remote,
             file_manager::file_large_threshold,
+            file_manager::file_manager_zip_local,
+            file_manager::file_manager_unzip_local,
+            file_manager::file_manager_zip_remote,
+            file_manager::file_manager_unzip_remote,
             claude_summary::claude_summarize,
             // Phase 24.D: claude_log_* commands KEPT (registered but
             // no FE caller) for a future unified-view rebuild.

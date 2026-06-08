@@ -830,3 +830,298 @@ pub(crate) async fn file_open_remote(
     shell_open(&dest)?;
     Ok(dest.to_string_lossy().to_string())
 }
+
+// ─── Phase 57: zip / unzip ──────────────────────────────────────────
+
+use std::io::{Read, Write};
+
+/// Recursively walk a directory and add every regular file under it to
+/// the open zip writer. Paths inside the archive are stored relative
+/// to `arc_base` so that unpacking reproduces the same tree.
+fn zip_add_dir(
+    zw: &mut zip::ZipWriter<std::fs::File>,
+    fs_root: &std::path::Path,
+    arc_base: &str,
+    opts: zip::write::SimpleFileOptions,
+) -> Result<(), String> {
+    // Mark the directory itself (so empty directories round-trip).
+    zw.add_directory(arc_base, opts).map_err(|e| e.to_string())?;
+    let read = std::fs::read_dir(fs_root).map_err(|e| format!("read_dir {fs_root:?}: {e}"))?;
+    for ent in read.flatten() {
+        let path = ent.path();
+        let name = ent.file_name().to_string_lossy().to_string();
+        let arc_name = if arc_base.is_empty() {
+            name.clone()
+        } else {
+            format!("{arc_base}/{name}")
+        };
+        let md = match ent.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if md.is_dir() {
+            zip_add_dir(zw, &path, &arc_name, opts)?;
+        } else if md.is_file() {
+            zw.start_file(&arc_name, opts).map_err(|e| e.to_string())?;
+            let mut f = std::fs::File::open(&path)
+                .map_err(|e| format!("open {path:?}: {e}"))?;
+            let mut buf = [0u8; 64 * 1024];
+            loop {
+                let n = f.read(&mut buf).map_err(|e| format!("read {path:?}: {e}"))?;
+                if n == 0 {
+                    break;
+                }
+                zw.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+            }
+        }
+        // Symlinks + special files: skipped (zip can store them but the
+        // common-case .zip Yossi will produce/consume is plain files +
+        // dirs; the existing dual-column FM also handles those poorly).
+    }
+    Ok(())
+}
+
+/// Phase 57: compress one or more local items in `cwd` into a single
+/// `<cwd>/<output_name>` zip. `paths` are basenames relative to `cwd`
+/// (the FE pulls them from the selected rows on the local column).
+/// Returns the absolute path of the produced zip.
+#[tauri::command]
+pub(crate) async fn file_manager_zip_local(
+    cwd: String,
+    paths: Vec<String>,
+    output_name: String,
+) -> Result<String, String> {
+    if paths.is_empty() {
+        return Err("zip: no items selected".into());
+    }
+    if output_name.contains('/') || output_name.contains('\\') {
+        return Err("zip: output_name must be a basename, not a path".into());
+    }
+    let cwd_pb = std::path::PathBuf::from(expand_path(&cwd));
+    let out_pb = cwd_pb.join(&output_name);
+    // Run the actual zip walk on a blocking thread — large trees would
+    // otherwise stall the tokio worker.
+    let cwd_clone = cwd_pb.clone();
+    let out_clone = out_pb.clone();
+    let paths_clone = paths.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let file = std::fs::File::create(&out_clone)
+            .map_err(|e| format!("create {out_clone:?}: {e}"))?;
+        let mut zw = zip::ZipWriter::new(file);
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .unix_permissions(0o644);
+        for p in &paths_clone {
+            let src = cwd_clone.join(p);
+            let arc_name = p.clone();
+            let md = std::fs::symlink_metadata(&src)
+                .map_err(|e| format!("stat {src:?}: {e}"))?;
+            if md.is_dir() {
+                zip_add_dir(&mut zw, &src, &arc_name, opts)?;
+            } else if md.is_file() {
+                zw.start_file(&arc_name, opts).map_err(|e| e.to_string())?;
+                let mut f = std::fs::File::open(&src)
+                    .map_err(|e| format!("open {src:?}: {e}"))?;
+                let mut buf = [0u8; 64 * 1024];
+                loop {
+                    let n = f.read(&mut buf).map_err(|e| format!("read {src:?}: {e}"))?;
+                    if n == 0 {
+                        break;
+                    }
+                    zw.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        zw.finish().map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))??;
+    Ok(out_pb.to_string_lossy().to_string())
+}
+
+/// Phase 57: extract `zip_path` into `<dirname(zip_path)>/<basename(zip_path)
+/// without .zip>/`. Returns the destination directory's path.
+#[tauri::command]
+pub(crate) async fn file_manager_unzip_local(
+    zip_path: String,
+) -> Result<String, String> {
+    let zip_pb = std::path::PathBuf::from(expand_path(&zip_path));
+    let parent = zip_pb
+        .parent()
+        .ok_or_else(|| "unzip: zip_path has no parent".to_string())?
+        .to_path_buf();
+    let stem = zip_pb
+        .file_stem()
+        .ok_or_else(|| "unzip: zip_path has no file stem".to_string())?
+        .to_string_lossy()
+        .to_string();
+    let dest = parent.join(&stem);
+    std::fs::create_dir_all(&dest).map_err(|e| format!("mkdir {dest:?}: {e}"))?;
+    let dest_clone = dest.clone();
+    let zip_clone = zip_pb.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let file = std::fs::File::open(&zip_clone)
+            .map_err(|e| format!("open {zip_clone:?}: {e}"))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| format!("open zip archive: {e}"))?;
+        for i in 0..archive.len() {
+            let mut entry = archive
+                .by_index(i)
+                .map_err(|e| format!("zip entry {i}: {e}"))?;
+            // Defense-in-depth against zip-slip: refuse any entry whose
+            // normalized path tries to escape the destination dir.
+            let raw_name = entry.name().to_string();
+            let safe = match entry.enclosed_name() {
+                Some(p) => p.to_path_buf(),
+                None => {
+                    return Err(format!(
+                        "unzip: refusing unsafe path in archive: {raw_name:?}"
+                    ));
+                }
+            };
+            let out_path = dest_clone.join(&safe);
+            if entry.is_dir() {
+                std::fs::create_dir_all(&out_path)
+                    .map_err(|e| format!("mkdir {out_path:?}: {e}"))?;
+            } else {
+                if let Some(parent) = out_path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("mkdir {parent:?}: {e}"))?;
+                }
+                let mut out = std::fs::File::create(&out_path)
+                    .map_err(|e| format!("create {out_path:?}: {e}"))?;
+                let mut buf = [0u8; 64 * 1024];
+                loop {
+                    let n = entry.read(&mut buf).map_err(|e| e.to_string())?;
+                    if n == 0 {
+                        break;
+                    }
+                    out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))??;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+/// Shared helper for the two remote subcommand-style entrypoints —
+/// runs a `bash -lc <command>` on the workspace's existing SSH handle
+/// and waits for it to exit. Returns the joined stdout+stderr text
+/// and the exit code. Caller decides how to surface non-zero codes.
+async fn remote_exec(
+    handle: &SshHandle<SshClient>,
+    command: &str,
+) -> Result<(String, i32), String> {
+    let mut chan = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("open channel: {e}"))?;
+    chan.exec(true, command)
+        .await
+        .map_err(|e| format!("exec: {e}"))?;
+    let mut out_buf = Vec::new();
+    let mut exit_code: i32 = 0;
+    loop {
+        match chan.wait().await {
+            Some(russh::ChannelMsg::Data { data }) => out_buf.extend_from_slice(&data[..]),
+            Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
+                out_buf.extend_from_slice(&data[..])
+            }
+            Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                exit_code = exit_status as i32
+            }
+            Some(russh::ChannelMsg::Close)
+            | Some(russh::ChannelMsg::Eof)
+            | None => break,
+            _ => {}
+        }
+    }
+    Ok((String::from_utf8_lossy(&out_buf).to_string(), exit_code))
+}
+
+/// Phase 57: zip on the remote side. Requires the standard `zip`
+/// binary on the remote (Debian/Ubuntu/Fedora all ship it). The
+/// remote command does `cd <cwd> && zip -r <out> <items>...`. Every
+/// caller-supplied string is shell-quoted via winmux_core::shell_quote
+/// per Absolute Rule #3 — no string concatenation of user input.
+#[tauri::command]
+pub(crate) async fn file_manager_zip_remote(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    cwd: String,
+    paths: Vec<String>,
+    output_name: String,
+) -> Result<String, String> {
+    if paths.is_empty() {
+        return Err("zip: no items selected".into());
+    }
+    if output_name.contains('/') || output_name.contains('\\') {
+        return Err("zip: output_name must be a basename, not a path".into());
+    }
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| {
+            "no active SSH session for this workspace — connect a terminal pane first"
+                .to_string()
+        })?;
+    let mut parts: Vec<String> = Vec::with_capacity(paths.len() + 4);
+    parts.push("cd".into());
+    parts.push(winmux_core::shell_quote(&cwd));
+    parts.push("&& zip -r".into());
+    parts.push(winmux_core::shell_quote(&output_name));
+    for p in &paths {
+        parts.push(winmux_core::shell_quote(p));
+    }
+    let cmd = parts.join(" ");
+    let (out, code) = remote_exec(&handle, &cmd).await?;
+    if code != 0 {
+        return Err(format!("remote zip failed (exit {code}): {out}"));
+    }
+    // The produced archive lives at cwd/output_name on the remote.
+    Ok(format!("{}/{}", cwd.trim_end_matches('/'), output_name))
+}
+
+/// Phase 57: unzip on the remote side. Requires `unzip` on the remote.
+/// Extracts into `<parent_of_zip>/<stem>/` so the layout matches the
+/// local helper.
+#[tauri::command]
+pub(crate) async fn file_manager_unzip_remote(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    zip_path: String,
+) -> Result<String, String> {
+    let zp = std::path::Path::new(&zip_path);
+    let parent_dir = zp
+        .parent()
+        .and_then(|p| p.to_str())
+        .ok_or_else(|| "unzip: zip_path has no parent".to_string())?
+        .to_string();
+    let stem = zp
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "unzip: zip_path has no file stem".to_string())?
+        .to_string();
+    let dest = if parent_dir.is_empty() {
+        stem.clone()
+    } else {
+        format!("{parent_dir}/{stem}")
+    };
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| {
+            "no active SSH session for this workspace — connect a terminal pane first"
+                .to_string()
+        })?;
+    let cmd = format!(
+        "mkdir -p {dest} && unzip -o {zip} -d {dest}",
+        dest = winmux_core::shell_quote(&dest),
+        zip = winmux_core::shell_quote(&zip_path),
+    );
+    let (out, code) = remote_exec(&handle, &cmd).await?;
+    if code != 0 {
+        return Err(format!("remote unzip failed (exit {code}): {out}"));
+    }
+    Ok(dest)
+}

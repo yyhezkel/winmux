@@ -458,6 +458,76 @@ export function FileManagerPane(p: Props) {
       await refreshLocal();
     }
   };
+  // Phase 57: zip + unzip the currently selected item. Single-item v1
+  // (multi-selection support would need an array selection model);
+  // matches the right-click → "compress" affordance in OS file
+  // managers. The output zip name is derived from the basename so
+  // identical entries can sit side-by-side post-zip without colliding
+  // unless the user re-runs the action.
+  const zipSel = async () => {
+    const s = selectedEntry();
+    if (!s) return;
+    const name = s.entry.name;
+    const outputName = `${name}.zip`;
+    if (s.side === "local") {
+      const out = await wrap(`zip ${name}`, () =>
+        invoke<string>("file_manager_zip_local", {
+          cwd: localPath(),
+          paths: [name],
+          outputName,
+        })
+      );
+      if (out != null) {
+        setStatus(t("fm.zip.done", { out: outputName }));
+        await refreshLocal();
+      }
+    } else {
+      const out = await wrap(`zip ${name}`, () =>
+        invoke<string>("file_manager_zip_remote", {
+          workspaceId: p.workspaceId,
+          cwd: remotePath(),
+          paths: [name],
+          outputName,
+        })
+      );
+      if (out != null) {
+        setStatus(t("fm.zip.done", { out: outputName }));
+        await refreshRemote();
+      }
+    }
+  };
+  const unzipSel = async () => {
+    const s = selectedEntry();
+    if (!s) return;
+    const name = s.entry.name;
+    if (!name.toLowerCase().endsWith(".zip")) {
+      setErr(t("fm.unzip.error.notZip"));
+      return;
+    }
+    if (s.side === "local") {
+      const out = await wrap(`unzip ${name}`, () =>
+        invoke<string>("file_manager_unzip_local", {
+          zipPath: fullLocal(name),
+        })
+      );
+      if (out != null) {
+        setStatus(t("fm.unzip.done", { dest: out }));
+        await refreshLocal();
+      }
+    } else {
+      const out = await wrap(`unzip ${name}`, () =>
+        invoke<string>("file_manager_unzip_remote", {
+          workspaceId: p.workspaceId,
+          zipPath: fullRemote(name),
+        })
+      );
+      if (out != null) {
+        setStatus(t("fm.unzip.done", { dest: out }));
+        await refreshRemote();
+      }
+    }
+  };
+
   const deleteSel = async (side: Side) => {
     const name = side === "local" ? localSel() : remoteSel();
     if (!name) return;
@@ -900,6 +970,31 @@ export function FileManagerPane(p: Props) {
           }}
         >
           ⧉
+        </button>
+        {/* Phase 57: compress / extract. Zip always enabled when
+            something is selected; Unzip only enabled when the
+            selection name ends with .zip (case-insensitive). Output
+            lands beside the source: zip → <name>.zip in the same
+            dir, unzip → <name>/ in the same dir. */}
+        <button
+          class="fm-action"
+          title={t("fm.zip.button")}
+          disabled={busy() || !selectedEntry()}
+          onClick={() => void zipSel()}
+        >
+          {t("fm.zip.button")}
+        </button>
+        <button
+          class="fm-action"
+          title={t("fm.unzip.button")}
+          disabled={
+            busy() ||
+            !selectedEntry() ||
+            !selectedEntry()!.entry.name.toLowerCase().endsWith(".zip")
+          }
+          onClick={() => void unzipSel()}
+        >
+          {t("fm.unzip.button")}
         </button>
         <button
           class="fm-action fm-action-danger"

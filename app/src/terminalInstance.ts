@@ -212,6 +212,14 @@ export class TerminalInstance {
       scrollback: 10000,
       windowsPty: { backend: "conpty" },
       windowOptions: { setWinSizeChars: true },
+      // Phase 55-C: convertEol stays FALSE. Despite occasional
+      // complaints that "newlines look wrong after a resize," flipping
+      // this to true would double every CRLF that ConPTY (and every
+      // modern PTY) already emits, because convertEol rewrites LF →
+      // CRLF on the INPUT stream regardless of what's there. The
+      // reflow problem is structural to scrollback rasterisation —
+      // see docs/CONTRIBUTING.md "Scrollback reflow is fundamentally
+      // limited" for the full background.
       convertEol: false,
       // Phase 23.E: explicit reflow=true. xterm.js's default is true,
       // but if a previous setting drifted, scrollback wouldn't rewrap

@@ -138,6 +138,35 @@ fully `dlog`-instrumented; before that, we were guessing.
   switch a transport to length-prefixed framing without updating both ends and
   the docs.
 
+## Scrollback reflow is fundamentally limited
+
+A common UX complaint is "I resized the pane and old lines didn't rewrap." Phase
+55-C audited both sides and concluded: this is structural, not a config we can
+fix outright. Documenting so future contributors don't chase it.
+
+- **xterm.js side.** `Terminal#resize(cols, rows)` rewrites the live buffer
+  using the new column width, but **scrollback rows that were already pushed
+  out** aren't recomputed — they were rasterised at their original width when
+  pushed. xterm.js has no "rewrap scrollback" knob: keeping the rasterised text
+  is what makes scrollback cheap. `convertEol` controls LF→CRLF translation on
+  the **input** stream and has nothing to do with reflow — leave it `false` so
+  CRLF-emitting PTYs (every modern terminal, including ConPTY) don't get
+  double-newlined.
+- **tmux side.** Without `aggressive-resize on`, tmux uses the LARGEST attached
+  client's geometry when reflowing — which leaves narrow trailing columns black
+  on the new smaller winmux pane. Phase 55-C flipped that on in
+  `app/src-tauri/resources/winmux-tmux.conf`. Alt-screen apps (vim, htop) now
+  see their full terminal area shrink on every resize, which is what we want
+  for winmux's split-heavy workflow.
+- **What we DO trigger** on resize: `fitAndResize()` on every pane after a
+  layout edit, maximize toggle, or distribute-evenly. That re-fits + re-emits
+  pty_resize so future output uses the new column width — only the scrollback
+  that was already there stays at its old width.
+
+If a user reports "old lines look weird after resize," that's expected. The
+fix is to clear scrollback (Ctrl+L in most shells, `tmux clear-history` in
+tmux) and re-emit the content at the new width.
+
 ## Commit conventions
 
 One commit per logical change. Subject line follows

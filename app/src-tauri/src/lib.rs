@@ -3613,6 +3613,56 @@ fn workspace_set_split_ratio(
     Ok(())
 }
 
+/// Phase 55-B: walk the workspace's layout tree and reset every
+/// internal split's ratio to 0.5. Since the tree is binary, "1/N"
+/// per the spec reduces to 0.5 per split — and that's also the
+/// default new splits already get from split_pane_in, so a
+/// distribute-evenly call effectively undoes every drag the user
+/// has done on the dividers. Returns the updated WorkspacesFile so
+/// the frontend can replace its local snapshot atomically.
+fn reset_all_split_ratios(node: &mut LayoutNode) -> usize {
+    match node {
+        LayoutNode::Pane { .. } => 0,
+        LayoutNode::Split {
+            first,
+            second,
+            ratio,
+            ..
+        } => {
+            *ratio = 0.5;
+            1 + reset_all_split_ratios(first) + reset_all_split_ratios(second)
+        }
+    }
+}
+
+#[tauri::command]
+fn workspace_distribute_evenly(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+) -> Result<WorkspacesFile, String> {
+    let count;
+    {
+        let mut file = state.workspaces.lock().unwrap();
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        count = ws
+            .layout
+            .as_mut()
+            .map(reset_all_split_ratios)
+            .unwrap_or(0);
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    dlog(&format!(
+        "workspace_distribute_evenly: ws={workspace_id} reset {count} split(s)"
+    ));
+    Ok(state.workspaces.lock().unwrap().clone())
+}
+
 // ─── Pane metadata (title / annotation) ─────────────────────────────────────
 
 // Phase 52 (BiDi 33B): toggle the opt-in PTY-stream bidi filter on the
@@ -5303,6 +5353,7 @@ pub fn run() {
             workspace_split,
             workspace_close_pane,
             workspace_set_split_ratio,
+            workspace_distribute_evenly,
             workspace_ensure_connected,
             pane_connect,
             pane_disconnect,

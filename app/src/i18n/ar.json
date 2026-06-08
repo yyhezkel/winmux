@@ -358,6 +358,8 @@
   "cmd.pane.close": "اللوحة: إغلاق",
   "cmd.pane.focus.next": "اللوحة: التالية",
   "cmd.pane.maximize": "اللوحة: تكبير/استعادة (Ctrl+Enter)",
+  "cmd.pane.distributeEvenly": "اللوحة: توزيع بالتساوي (Ctrl+Alt+=)",
+  "notify.distributedEvenly": "تم توزيع التقسيمات بالتساوي",
   "pane.maximize.tooltip": "تكبير/استعادة — Ctrl+Enter أو نقر مزدوج أو Esc",
   "cmd.pane.focus.prev": "اللوحة: السابقة",
   "cmd.pane.rename": "اللوحة: إعادة تسمية / ملاحظة",

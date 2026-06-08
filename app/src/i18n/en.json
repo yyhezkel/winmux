@@ -350,6 +350,8 @@
   "cmd.pane.close": "Pane: Close",
   "cmd.pane.focus.next": "Pane: Focus next",
   "cmd.pane.maximize": "Pane: Toggle maximize (Ctrl+Enter)",
+  "cmd.pane.distributeEvenly": "Pane: Distribute evenly (Ctrl+Alt+=)",
+  "notify.distributedEvenly": "Distributed splits evenly",
   "pane.maximize.tooltip": "Toggle maximize — Ctrl+Enter, double-click, or Esc to restore",
   "cmd.pane.focus.prev": "Pane: Focus previous",
   "cmd.pane.rename": "Pane: Rename / annotate",

@@ -435,6 +435,8 @@ function App() {
       { id: "pane.focus.prev", label: t("cmd.pane.focus.prev"), enabled: () => hasPane, handler: () => focusAdjacentPane(-1) },
       // Phase 55-A: maximize toggle (Ctrl+Enter / double-click pane content).
       { id: "pane.maximize", label: t("cmd.pane.maximize"), enabled: () => hasPane, handler: () => toggleMaximize() },
+      // Phase 55-B: distribute splits evenly (Ctrl+Alt+=).
+      { id: "pane.distributeEvenly", label: t("cmd.pane.distributeEvenly"), enabled: () => hasPane, handler: () => void distributeEvenly() },
       { id: "pane.rename", label: t("cmd.pane.rename"), enabled: () => hasPane, handler: () => { if (pid) window.dispatchEvent(new CustomEvent("winmux:pane-rename", { detail: pid })); } },
       { id: "ssh.connect", label: t("cmd.ssh.connect"), enabled: () => hasPane, handler: () => { if (pid) void connectPane(pid); } },
       { id: "ssh.disconnect", label: t("cmd.ssh.disconnect"), enabled: () => hasPane, handler: () => { if (pid) void disconnectPane(pid); } },
@@ -1027,6 +1029,29 @@ function App() {
     return search(ws.layout);
   };
 
+  // Phase 55-B: distribute split ratios evenly. Walks the active
+  // workspace's tree and resets every Split.ratio to 0.5 via the
+  // backend tauri command, then fits + resizes every pane so xterm
+  // catches up to the new column widths.
+  const distributeEvenly = async () => {
+    const ws = activeWs();
+    if (!ws) return;
+    try {
+      const f = await invoke<WorkspacesFile>("workspace_distribute_evenly", {
+        workspaceId: ws.id,
+      });
+      updateFile(f);
+      queueMicrotask(() => {
+        if (!ws.layout) return;
+        for (const pid of collectPanes(ws.layout)) {
+          terms.get(pid)?.fitAndResize();
+        }
+      });
+    } catch (e) {
+      console.error("workspace_distribute_evenly failed", e);
+    }
+  };
+
   // Phase 55-A: maximize toggle. Setting/clearing the signal swaps
   // LayoutView's `node` between the full split tree and the lone
   // leaf; fit+resize fires for every pane in the workspace after the
@@ -1115,6 +1140,16 @@ function App() {
     if (matches(e, sc.summarize_claude)) {
       e.preventDefault();
       void summarizeActivePane();
+      return;
+    }
+    // Phase 55-B: Ctrl+Alt+= → distribute splits evenly. Resets every
+    // split's ratio to 0.5 across the active workspace. Doubles for
+    // the underlying physical key on most layouts; Shift+= types "+"
+    // so a matches() check on "=" still fires when Shift+Alt+Ctrl+=
+    // arrives at the keyboard layer.
+    if (e.ctrlKey && e.altKey && (e.key === "=" || e.key === "+")) {
+      e.preventDefault();
+      void distributeEvenly();
       return;
     }
     // Phase 48-E: Ctrl+Alt+Arrow — split-or-move. Focus the neighbor

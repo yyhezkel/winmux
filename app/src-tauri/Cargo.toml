@@ -29,7 +29,12 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# Pinned + unstable feature for tauri::Window::add_child (multi-webview
+# support for Phase 53 browser-per-workspace). The "unstable" feature
+# gate is Tauri's documented path for multi-webview in 2.x. Manual
+# review required before any version bump — `Window::add_child`'s
+# signature can change between minors.
+tauri = { version = "=2.10.3", features = ["unstable"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

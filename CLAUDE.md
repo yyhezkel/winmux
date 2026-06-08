@@ -21,6 +21,10 @@ When an idea or design question comes up:
 
 When starting a new session, scan the **Open** section. Don't let threads die silently — if something's been pending a while, surface it.
 
+## Pinned deps
+
+- `tauri = "=2.10.3"` with `features = ["unstable"]` (app/src-tauri/Cargo.toml). The unstable feature gates `Window::add_child`, which Phase 53 uses to mount per-workspace browser webviews inside the main window. Bumping tauri requires verifying `Window::add_child`'s signature hasn't changed and the multi-webview shape still compiles. Run `cargo check --workspace` after any bump and smoke-test browser panes.
+
 ## Off-limits paths
 
 - `backup-phase23-*` folders — never touch

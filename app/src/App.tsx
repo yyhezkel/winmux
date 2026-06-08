@@ -140,37 +140,27 @@ function App() {
   // (banner gone until next connect), or triggers an in-place update.
   const [hooksBanner, setHooksBanner] = createSignal<HooksOutdatedInfo | null>(null);
   const [hooksUpdating, setHooksUpdating] = createSignal(false);
-  // Phase 53 (#4.8 / 48-F): native child Webviews always paint above
+  // Phase 53 (rebased): native child Webviews always paint above
   // HTML, so opening a modal would visually hide it behind the
-  // browser pane. This derived signal collects every "is a modal
-  // open" state; the effect below broadcasts hide/show to every
-  // browser webview.
+  // workspace-level Browser window. This derived signal collects
+  // every "is a modal open" state; the effect below hides every
+  // workspace's Browser Webview when any modal opens. Re-show on
+  // close is owned by the BrowserWindow component (Phase 53.E) — its
+  // own visibility effect re-calls `workspace_browser_show` with the
+  // current rect once `anyModalOpen()` flips back to false.
   const anyModalOpen = () =>
     showCreate() || showNotes() || showSettings() || showProvision() ||
     showPalette() || showPortsWindow() || installingUpdate();
   createEffect(() => {
-    const hide = anyModalOpen();
-    // Walk every workspace's layout for browser panes; send hide/show
-    // to the per-pane Webview command. Cheap — under 32 browser panes
-    // a workspace would mean something far stranger going on first.
-    const ws = file().workspaces;
-    const collectBrowserPaneIds = (
-      node: LayoutNode | null | undefined,
-      out: string[],
-    ): void => {
-      if (!node) return;
-      if (node.kind === "pane") {
-        if (node.pane_kind === "browser") out.push(node.pane_id);
-        return;
-      }
-      collectBrowserPaneIds(node.first, out);
-      collectBrowserPaneIds(node.second, out);
-    };
-    const ids: string[] = [];
-    for (const w of ws) collectBrowserPaneIds(w.layout, ids);
-    for (const id of ids) {
-      void invoke(hide ? "browser_pane_hide" : "browser_pane_show", {
-        paneId: id,
+    if (!anyModalOpen()) return;
+    // Broadcast hide to every workspace's Browser Webview. At most
+    // one is actually visible at a time (the active workspace's), but
+    // hiding any others that may exist is a cheap no-op on the
+    // backend side (the command silently ignores workspaces with no
+    // Webview spawned).
+    for (const w of file().workspaces) {
+      void invoke("workspace_browser_hide", {
+        workspaceId: w.id,
       }).catch(() => {});
     }
   });

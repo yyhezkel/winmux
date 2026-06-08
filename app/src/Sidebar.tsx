@@ -47,6 +47,10 @@ interface Props {
   // window for the currently active workspace. Each workspace has its
   // own browser session + persisted geometry.
   onOpenBrowser: () => void;
+  // Phase 53 (rebased): open the workspace-level File Manager
+  // floating window for the currently active workspace. Wraps the
+  // existing dual-column FileManagerPane.
+  onOpenFiles: () => void;
 }
 
 export function Sidebar(p: Props) {
@@ -197,12 +201,16 @@ export function Sidebar(p: Props) {
           🌐 {t("sidebar.ports.label")}
         </button>
       </div>
-      {/* Phase 53 (rebased): workspace-level Browser as a floating
-          window (was a pane kind). One Webview per workspace; session
-          + geometry persist across opens. */}
+      {/* Phase 53 (rebased): workspace-level Browser + Files as
+          floating windows (was per-pane kinds). One Webview per
+          workspace for Browser; pure HTML for Files. Geometry
+          persists per-workspace in localStorage. */}
       <div class="sidebar-actions-row">
         <button class="ws-action-half" onClick={p.onOpenBrowser} title={t("sidebar.browser.tooltip")}>
           🌐 {t("sidebar.browser.label")}
+        </button>
+        <button class="ws-action-half" onClick={p.onOpenFiles} title={t("sidebar.files.tooltip")}>
+          🗂 {t("sidebar.files.label")}
         </button>
       </div>
       <button class="ws-add" onClick={p.onCreate}>

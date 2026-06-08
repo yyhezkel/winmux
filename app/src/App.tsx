@@ -14,6 +14,7 @@ import { SshKeyOfferModal } from "./SshKeyOfferModal";
 import { CommandPalette, type Command } from "./CommandPalette";
 import { PortsWindow } from "./PortsWindow";
 import { BrowserWindow } from "./BrowserWindow";
+import { FileManagerWindow } from "./FileManagerWindow";
 import {
   TerminalInstance,
   copyTerminalSelection,
@@ -126,6 +127,9 @@ function App() {
   // (the native Webview is hidden on close, not destroyed — page state
   // survives across open/close cycles).
   const [showBrowserWindow, setShowBrowserWindow] = createSignal(false);
+  // Phase 53 (rebased): workspace-level File Manager floating window.
+  // Pure HTML — wraps the existing FileManagerPane component.
+  const [showFilesWindow, setShowFilesWindow] = createSignal(false);
   const stopForward = (workspaceId: string, remotePort: number) => {
     void invoke("port_forward_stop", { workspaceId, remotePort });
   };
@@ -1494,6 +1498,7 @@ function App() {
           }}
           onOpenPortsGlobal={() => setShowPortsWindow(true)}
           onOpenBrowser={() => setShowBrowserWindow(true)}
+          onOpenFiles={() => setShowFilesWindow(true)}
         />
       </ErrorBoundary>
       <div class="main">
@@ -1546,21 +1551,11 @@ function App() {
                 {collectPanes(activeWs()!.layout!).length} panes
               </span>
             </Show>
-            {/* Phase 53 (rebased): the "+ browser" split-pane button is
-                gone — the Browser surface is now the workspace-level
-                floating BrowserWindow (sidebar 🌐). FileManager split
-                button stays for now and lands in 53.F. */}
+            {/* Phase 53 (rebased): the "+ browser" and "+ files"
+                split-pane buttons are gone — both surfaces are now
+                workspace-level floating windows opened from the
+                sidebar (🌐 Browser / 🗂 Files). */}
             <Show when={activeWs()!.layout && activePaneId()}>
-              <button
-                class="ws-header-btn"
-                title={t("ws_header.split_filemanager_title")}
-                onClick={() => {
-                  const pid = activePaneId();
-                  if (pid) splitPane(pid, "horizontal", "filemanager");
-                }}
-              >
-                {t("ws_header.add_filemanager")}
-              </button>
               {/* Phase 50: add a Diff pane (#2.4). Same split mechanic
                   as the other kinds. */}
               <button
@@ -1812,6 +1807,20 @@ function App() {
         workspace={activeWs()}
         anyModalOpen={anyModalOpen}
         onClose={() => setShowBrowserWindow(false)}
+      />
+
+      {/* Phase 53 (rebased): floating workspace-level File Manager
+          window. Pure HTML chrome around the existing dual-column
+          FileManagerPane (local + remote SFTP). hasActiveSession
+          drives whether the remote column lights up. */}
+      <FileManagerWindow
+        open={showFilesWindow()}
+        workspace={activeWs()}
+        hasActiveSession={(() => {
+          const id = file().active_workspace_id;
+          return id ? liveWorkspaceIds().has(id) : false;
+        })()}
+        onClose={() => setShowFilesWindow(false)}
       />
 
       <Show when={updateBanner()}>

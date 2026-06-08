@@ -6,7 +6,10 @@ import { Divider } from "./Divider";
 // in case any of its in-pane Webview wiring proves useful for a
 // future iteration.
 import { DiffPane } from "./DiffPane";
-import { FileManagerPane } from "./FileManagerPane";
+// Phase 53 (rebased): FileManagerPane no longer imported here — the
+// Files surface moved to the workspace-level floating FileManagerWindow
+// (sidebar 🗂). FileManagerPane itself stays in the repo; it's now
+// consumed by FileManagerWindow.tsx, not by the pane layout.
 import { HelpPane } from "./HelpPane";
 import { t } from "./i18n";
 // Phase 24.D: ClaudeChatPane (Phase 22) + ClaudeLogPane (Phase 24.B)
@@ -100,12 +103,11 @@ export function LayoutView(p: Props) {
 function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" }> }) {
   const isActive = () => props.all.activePaneId === props.pane.pane_id;
   const kind = () => paneKindOf(props.pane);
-  // Phase 16: SSH detection moved up to the workspace level. Reading
-  // it off the file-manager pane's own connection (the previous code
-  // path) always returned false because file-manager panes don't
-  // carry one — that left the file manager rendering only the local
-  // column even in clearly-SSH workspaces.
-  const workspaceIsSsh = () => props.all.workspaceIsSsh;
+  // Phase 53 (rebased): the workspaceIsSsh local that fed the
+  // FileManager Match arm is gone alongside the arm itself. The
+  // prop stays on the Props interface so existing call sites in
+  // App.tsx keep compiling; FileManagerWindow derives its own
+  // SSH-ness from the workspace.connection field.
   return (
     <Switch
       fallback={
@@ -167,17 +169,21 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
         </div>
       </Match>
       <Match when={kind() === "filemanager"}>
+        {/* Phase 53 (rebased): File Manager moved out of pane layout
+            into a workspace-level floating window (sidebar 🗂 Files).
+            53.C migration rewrites legacy FileManager panes to
+            Terminal on first boot; this arm only fires if a user
+            hand-edits workspaces.json after migration. Defensive
+            placeholder + escape hatch. */}
         <div
-          class={`pane ${isActive() ? "active" : ""} ${
-            props.all.waitingPaneIds.has(props.pane.pane_id) ? "waiting" : ""
-          }`}
+          class={`pane ${isActive() ? "active" : ""}`}
           onClick={() => props.all.onFocus(props.pane.pane_id)}
         >
           <div class="pane-header">
-            <span class="pane-conn">🗂 file manager</span>
+            <span class="pane-conn">🗂 {t("files.legacyPane.title")}</span>
             <button
               class="pane-btn pane-close"
-              title="Close"
+              title={t("common.close")}
               onClick={(e) => {
                 e.stopPropagation();
                 props.all.onClose(props.pane.pane_id);
@@ -186,12 +192,8 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
               ×
             </button>
           </div>
-          <div class="pane-body">
-            <FileManagerPane
-              workspaceId={props.all.workspaceId}
-              hasSsh={workspaceIsSsh()}
-              hasActiveSession={props.all.connectedPaneIds.size > 0}
-            />
+          <div class="pane-body legacy-pane-placeholder">
+            <p>{t("files.legacyPane.body")}</p>
           </div>
         </div>
       </Match>

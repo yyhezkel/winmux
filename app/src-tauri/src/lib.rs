@@ -16,6 +16,7 @@ mod provisioning;
 mod remote_bootstrap;
 mod rpc_server;
 mod settings;
+mod stt;
 mod updater;
 // Phase 51.C: `mod tunnel` moved to its own crate winmux-tunnel.
 // Existing crate::tunnel::* callsites still resolve via this alias.
@@ -5433,6 +5434,7 @@ pub fn run() {
             file_manager::file_manager_unzip_local,
             file_manager::file_manager_zip_remote,
             file_manager::file_manager_unzip_remote,
+            stt::stt_transcribe_local,
             claude_summary::claude_summarize,
             // Phase 24.D: claude_log_* commands KEPT (registered but
             // no FE caller) for a future unified-view rebuild.

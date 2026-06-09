@@ -533,3 +533,339 @@ pub struct CoreState {
     pub workspace_tunnel_tokens: Arc<Mutex<HashMap<String, Arc<String>>>>,
     pub diff_pane_watchers: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
+
+// ─── Phase 59: pure-function unit tests ──────────────────────────────
+//
+// Targets the layout walkers + shell_quote + pipe_name. These are
+// hot-path helpers — a regression here would break SSH command
+// injection of caller-supplied strings, mis-fill pane connections
+// on load, or send the remote tunnel to the wrong named-pipe path.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use winmux_types::{Connection, LayoutNode, PaneKind, SplitDirection};
+
+    // ── helpers ────────────────────────────────────────────────────
+
+    fn pane(id: &str, kind: PaneKind, conn: Option<Connection>) -> LayoutNode {
+        LayoutNode::Pane {
+            pane_id: id.into(),
+            pane_kind: kind,
+            connection: conn,
+            browser: None,
+            title: None,
+            annotation: None,
+            color: None,
+            emoji: None,
+            help_topic: None,
+            diff_source: None,
+            smart_bidi: None,
+        }
+    }
+
+    fn split(id: &str, dir: SplitDirection, first: LayoutNode, second: LayoutNode) -> LayoutNode {
+        LayoutNode::Split {
+            split_id: id.into(),
+            direction: dir,
+            first: Box::new(first),
+            second: Box::new(second),
+            ratio: 0.5,
+        }
+    }
+
+    // ── shell_quote (Absolute Rule #3 helper) ──────────────────────
+
+    #[test]
+    fn shell_quote_empty_string() {
+        assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn shell_quote_simple_alphanumeric() {
+        assert_eq!(shell_quote("hello"), "'hello'");
+        assert_eq!(shell_quote("foo123"), "'foo123'");
+    }
+
+    #[test]
+    fn shell_quote_path_with_slashes_unchanged() {
+        // Slashes don't need escaping inside single quotes.
+        assert_eq!(
+            shell_quote("/home/yossi/.ssh/id_ed25519"),
+            "'/home/yossi/.ssh/id_ed25519'"
+        );
+    }
+
+    #[test]
+    fn shell_quote_embedded_single_quote_uses_close_quote_escape() {
+        // The classic POSIX trick: close the quote, insert a backslash-
+        // quote, reopen. The end result is the literal four chars '\''.
+        assert_eq!(shell_quote("it's"), r#"'it'\''s'"#);
+    }
+
+    #[test]
+    fn shell_quote_multiple_single_quotes() {
+        assert_eq!(shell_quote("'a''b'"), r#"''\''a'\'''\''b'\'''"#);
+    }
+
+    #[test]
+    fn shell_quote_dangerous_metachars_safe() {
+        // Inside single quotes, $/`/!/;/&/|/space/newline/backslash are
+        // ALL literal. The threat model here is command injection on
+        // the remote shell; verifying the escape leaves them inert.
+        assert_eq!(
+            shell_quote("$(rm -rf /); echo pwn"),
+            "'$(rm -rf /); echo pwn'"
+        );
+        assert_eq!(shell_quote("a\nb"), "'a\nb'");
+        assert_eq!(shell_quote("a`b`c"), "'a`b`c'");
+    }
+
+    // ── collect_panes / collect_panes_with_kind ────────────────────
+
+    #[test]
+    fn collect_panes_single_leaf() {
+        let n = pane("p1", PaneKind::Terminal, None);
+        let mut out = Vec::new();
+        collect_panes(&n, &mut out);
+        assert_eq!(out, vec!["p1".to_string()]);
+    }
+
+    #[test]
+    fn collect_panes_dfs_order() {
+        // Tree:    s_outer
+        //         /        \
+        //    s_inner        p3
+        //    /     \
+        //   p1     p2
+        // DFS-first should produce [p1, p2, p3].
+        let tree = split(
+            "s_outer",
+            SplitDirection::Vertical,
+            split(
+                "s_inner",
+                SplitDirection::Horizontal,
+                pane("p1", PaneKind::Terminal, None),
+                pane("p2", PaneKind::Terminal, None),
+            ),
+            pane("p3", PaneKind::Terminal, None),
+        );
+        let mut out = Vec::new();
+        collect_panes(&tree, &mut out);
+        assert_eq!(out, vec!["p1", "p2", "p3"]);
+    }
+
+    #[test]
+    fn collect_panes_with_kind_visits_every_leaf() {
+        let tree = split(
+            "s",
+            SplitDirection::Horizontal,
+            pane("a", PaneKind::Terminal, None),
+            split(
+                "s2",
+                SplitDirection::Vertical,
+                pane("b", PaneKind::Diff, None),
+                pane("c", PaneKind::Help, None),
+            ),
+        );
+        let mut kinds: Vec<PaneKind> = Vec::new();
+        collect_panes_with_kind(&tree, &mut |k| kinds.push(k));
+        assert_eq!(kinds, vec![PaneKind::Terminal, PaneKind::Diff, PaneKind::Help]);
+    }
+
+    // ── first_terminal_connection ──────────────────────────────────
+
+    #[test]
+    fn first_terminal_connection_none_when_no_terminal_panes() {
+        let tree = pane("h", PaneKind::Help, None);
+        assert!(first_terminal_connection(&tree).is_none());
+    }
+
+    #[test]
+    fn first_terminal_connection_skips_non_terminal_panes() {
+        // Non-terminal pane in DFS-first slot must be skipped; the
+        // search continues into the second subtree to find a real
+        // Terminal pane's connection.
+        let ssh = Connection::Ssh {
+            host: "h".into(),
+            user: "u".into(),
+            port: 22,
+            key_path: None,
+        };
+        let tree = split(
+            "s",
+            SplitDirection::Horizontal,
+            pane("help", PaneKind::Help, None),
+            pane("term", PaneKind::Terminal, Some(ssh.clone())),
+        );
+        let found = first_terminal_connection(&tree).expect("should find SSH");
+        // Pattern-match — Connection has no Debug.
+        match found {
+            Connection::Ssh { host, .. } => assert_eq!(host, "h"),
+            _ => panic!("expected SSH"),
+        }
+    }
+
+    #[test]
+    fn first_terminal_connection_skips_orphan_and_finds_real_connection() {
+        // A Terminal pane with no connection returns None from the
+        // Pane arm; the Split arm's `or_else` falls through to the
+        // second subtree. So the walker effectively finds the first
+        // Terminal pane that ACTUALLY has a connection in DFS order.
+        // (Phase 23.D documented this as the "second tier" of the
+        // four-tier fallback chain for split_pane_in.)
+        let ssh = Connection::Ssh {
+            host: "h2".into(),
+            user: "u".into(),
+            port: 22,
+            key_path: None,
+        };
+        let tree = split(
+            "s",
+            SplitDirection::Horizontal,
+            pane("orphan", PaneKind::Terminal, None),
+            pane("realssh", PaneKind::Terminal, Some(ssh)),
+        );
+        let found = first_terminal_connection(&tree).expect("should find SSH on right");
+        match found {
+            Connection::Ssh { host, .. } => assert_eq!(host, "h2"),
+            _ => panic!("expected SSH from the second subtree"),
+        }
+    }
+
+    #[test]
+    fn first_terminal_connection_returns_none_when_all_terminals_orphaned() {
+        // No connection anywhere → walker returns None (and the
+        // caller falls back to Connection::Local{shell:None} via
+        // split_pane_in's tier-4 default).
+        let tree = split(
+            "s",
+            SplitDirection::Horizontal,
+            pane("orphan1", PaneKind::Terminal, None),
+            pane("orphan2", PaneKind::Terminal, None),
+        );
+        assert!(first_terminal_connection(&tree).is_none());
+    }
+
+    // ── backfill_terminal_connections ──────────────────────────────
+
+    #[test]
+    fn backfill_does_nothing_when_no_terminal_panes_lack_connection() {
+        let conn = Connection::Local { shell: None };
+        let tree = pane("p1", PaneKind::Terminal, Some(conn));
+        let (new_tree, changed) =
+            backfill_terminal_connections(tree, &Some(Connection::Local { shell: None }));
+        assert!(!changed, "no missing connection → no backfill");
+        // pane_id preserved.
+        match new_tree {
+            LayoutNode::Pane { pane_id, .. } => assert_eq!(pane_id, "p1"),
+            _ => panic!("should still be Pane"),
+        }
+    }
+
+    #[test]
+    fn backfill_fills_missing_terminal_pane_from_workspace_conn() {
+        // Phase 23.D scenario: a Terminal pane whose connection field
+        // is None must inherit the workspace-level fallback.
+        let ws_conn = Connection::Ssh {
+            host: "ws-host".into(),
+            user: "ws-user".into(),
+            port: 22,
+            key_path: None,
+        };
+        let tree = pane("p1", PaneKind::Terminal, None);
+        let (new_tree, changed) = backfill_terminal_connections(tree, &Some(ws_conn));
+        assert!(changed, "missing connection should be backfilled");
+        match new_tree {
+            LayoutNode::Pane {
+                connection: Some(Connection::Ssh { host, .. }),
+                ..
+            } => assert_eq!(host, "ws-host"),
+            _ => panic!("connection should be filled with workspace SSH"),
+        }
+    }
+
+    #[test]
+    fn backfill_falls_back_to_local_when_no_workspace_conn() {
+        // No workspace_conn → backfill uses Local{shell:None} so a
+        // Terminal pane never ends up unconnectable.
+        let tree = pane("p1", PaneKind::Terminal, None);
+        let (new_tree, changed) = backfill_terminal_connections(tree, &None);
+        assert!(changed);
+        match new_tree {
+            LayoutNode::Pane {
+                connection: Some(Connection::Local { shell }),
+                ..
+            } => assert!(shell.is_none()),
+            _ => panic!("should be Local fallback"),
+        }
+    }
+
+    #[test]
+    fn backfill_recurses_into_splits_changed_flag_or() {
+        // changed == c1 || c2 — if only the inner subtree needed a fix
+        // the bool should still propagate.
+        let ws_conn = Connection::Local { shell: None };
+        let tree = split(
+            "s",
+            SplitDirection::Horizontal,
+            pane(
+                "good",
+                PaneKind::Terminal,
+                Some(Connection::Local { shell: None }),
+            ),
+            pane("orphan", PaneKind::Terminal, None),
+        );
+        let (_new_tree, changed) = backfill_terminal_connections(tree, &Some(ws_conn));
+        assert!(changed, "orphan side needed backfill → changed=true");
+    }
+
+    #[test]
+    fn backfill_leaves_non_terminal_panes_alone() {
+        // A Help pane with no connection is correct — only Terminal
+        // panes get the fix-up.
+        let tree = pane("h", PaneKind::Help, None);
+        let (new_tree, changed) = backfill_terminal_connections(
+            tree,
+            &Some(Connection::Local { shell: None }),
+        );
+        assert!(!changed);
+        match new_tree {
+            LayoutNode::Pane {
+                connection,
+                pane_kind,
+                ..
+            } => {
+                assert!(matches!(pane_kind, PaneKind::Help));
+                assert!(connection.is_none());
+            }
+            _ => panic!("should still be Pane"),
+        }
+    }
+
+    // ── pipe_name ──────────────────────────────────────────────────
+
+    #[test]
+    fn pipe_name_prefixes_correctly() {
+        let name = pipe_name();
+        assert!(
+            name.starts_with(r"\\.\pipe\winmux-"),
+            "expected Windows pipe prefix, got {name}"
+        );
+        // Whatever USERNAME / whoami returns, it shouldn't be empty.
+        assert!(name.len() > r"\\.\pipe\winmux-".len());
+    }
+
+    // ── iso_now ────────────────────────────────────────────────────
+
+    #[test]
+    fn iso_now_has_z_suffix_and_seconds_precision() {
+        let s = iso_now();
+        // RFC 3339 with SecondsFormat::Secs + use_z=true: e.g.
+        // "2026-06-09T05:14:00Z".
+        assert!(s.ends_with('Z'), "expected Z suffix, got {s}");
+        // No fractional seconds (use Secs precision).
+        assert!(!s.contains('.'), "no fractional seconds expected, got {s}");
+        assert_eq!(s.len(), 20, "expected 20-char RFC 3339, got {s}");
+    }
+}

@@ -11,3 +11,9 @@ serde = { version = "1", features = ["derive"] }
 # paths in this crate use `../../../src/bindings/` so they resolve to
 # `app/src/bindings/` from this nested manifest location.
 ts-rs = "8"
+
+[dev-dependencies]
+# Phase 59: round-trip serde tests for Workspace/PaneKind/Connection/
+# LayoutNode. Any silent serde regression here would corrupt the
+# user's workspaces.json on save, so tests pin the on-wire shape.
+serde_json = "1"

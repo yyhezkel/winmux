@@ -323,3 +323,439 @@ pub struct Workspace {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_worktree: Option<PathBuf>,
 }
+
+// ─── Phase 59: serde back-compat tests ──────────────────────────────
+//
+// Workspaces.json is the user's persisted state — any serde regression
+// in these types would silently corrupt it on the next save. Each test
+// pins a specific shape; if a future refactor breaks the wire format
+// (renaming a field, dropping an alias, flipping a default), the test
+// fails BEFORE a release ships.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // ── Connection ──────────────────────────────────────────────────
+
+    #[test]
+    fn connection_local_round_trip_elides_none_shell() {
+        let c = Connection::Local { shell: None };
+        let v = serde_json::to_value(&c).unwrap();
+        // `type: "local"` + no `shell` field because skip_serializing_if.
+        assert_eq!(v, json!({ "type": "local" }));
+        // Inverse direction must also work.
+        let back: Connection = serde_json::from_value(v).unwrap();
+        assert!(matches!(back, Connection::Local { shell: None }));
+    }
+
+    #[test]
+    fn connection_ssh_round_trip_preserves_all_fields() {
+        let c = Connection::Ssh {
+            host: "h.example.com".into(),
+            user: "yossi".into(),
+            port: 22,
+            key_path: Some("/keys/id_ed25519".into()),
+        };
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(
+            v,
+            json!({
+                "type": "ssh",
+                "host": "h.example.com",
+                "user": "yossi",
+                "port": 22,
+                "key_path": "/keys/id_ed25519",
+            })
+        );
+        // Round-trip identity.
+        let back: Connection = serde_json::from_value(v).unwrap();
+        match back {
+            Connection::Ssh {
+                host,
+                user,
+                port,
+                key_path,
+            } => {
+                assert_eq!(host, "h.example.com");
+                assert_eq!(user, "yossi");
+                assert_eq!(port, 22);
+                assert_eq!(key_path.as_deref(), Some("/keys/id_ed25519"));
+            }
+            _ => panic!("expected Ssh, got something else"),
+        }
+    }
+
+    #[test]
+    fn connection_ssh_without_key_path_round_trip() {
+        // Pre-key SSH workspaces (password auth, no key on disk).
+        // key_path omitted on serialize via skip_serializing_if; on
+        // deserialize, serde(default) fills None.
+        let raw = json!({
+            "type": "ssh",
+            "host": "h",
+            "user": "u",
+            "port": 22,
+        });
+        let c: Connection = serde_json::from_value(raw).unwrap();
+        match c {
+            Connection::Ssh { key_path, .. } => assert_eq!(key_path, None),
+            _ => panic!("expected Ssh"),
+        }
+    }
+
+    // ── PaneKind ────────────────────────────────────────────────────
+
+    #[test]
+    fn pane_kind_lowercase_wire_format() {
+        // The TS bindings tooling consumes the same JSON; if any of
+        // these renames break, the frontend's discriminated union
+        // silently mismatches.
+        assert_eq!(
+            serde_json::to_value(PaneKind::Terminal).unwrap(),
+            json!("terminal")
+        );
+        #[allow(deprecated)]
+        {
+            assert_eq!(
+                serde_json::to_value(PaneKind::Browser).unwrap(),
+                json!("browser")
+            );
+            assert_eq!(
+                serde_json::to_value(PaneKind::FileManager).unwrap(),
+                // Phase 53 rename: serialized form is "filemanager",
+                // NOT "file_manager".
+                json!("filemanager")
+            );
+        }
+        assert_eq!(serde_json::to_value(PaneKind::Help).unwrap(), json!("help"));
+        assert_eq!(serde_json::to_value(PaneKind::Diff).unwrap(), json!("diff"));
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn pane_kind_legacy_claude_aliases_load_as_terminal() {
+        // Phase 24.D: the ClaudeChat / ClaudeLog pane kinds were
+        // removed but their JSON tags still appear in older
+        // workspaces.json files. They MUST deserialize to Terminal so
+        // the file loads without error.
+        for tag in [
+            "claudechat",
+            "claude_chat",
+            "ClaudeChat",
+            "claudelog",
+            "claude_log",
+            "ClaudeLog",
+        ] {
+            let k: PaneKind = serde_json::from_value(json!(tag)).unwrap();
+            assert!(
+                matches!(k, PaneKind::Terminal),
+                "{tag} should deserialize to Terminal, got {k:?}",
+            );
+        }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn pane_kind_filemanager_legacy_aliases() {
+        // Phase 53 (rebased): we renamed `file_manager` → `filemanager`
+        // in the serialized form but kept both forms (plus the
+        // PascalCase "FileManager") as aliases for back-compat.
+        for tag in ["filemanager", "file_manager", "FileManager"] {
+            let k: PaneKind = serde_json::from_value(json!(tag)).unwrap();
+            assert!(
+                matches!(k, PaneKind::FileManager),
+                "{tag} should deserialize to FileManager, got {k:?}",
+            );
+        }
+    }
+
+    // ── DiffSource (Phase 50) ───────────────────────────────────────
+
+    #[test]
+    fn diff_source_round_trips_all_variants() {
+        assert_eq!(
+            serde_json::to_value(DiffSource::Working).unwrap(),
+            json!({ "kind": "working" })
+        );
+        assert_eq!(
+            serde_json::to_value(DiffSource::Head).unwrap(),
+            json!({ "kind": "head" })
+        );
+        assert_eq!(
+            serde_json::to_value(DiffSource::Ref {
+                git_ref: "main".into()
+            })
+            .unwrap(),
+            json!({ "kind": "ref", "git_ref": "main" })
+        );
+        // Round-trip the trickier Ref variant.
+        let back: DiffSource =
+            serde_json::from_value(json!({ "kind": "ref", "git_ref": "main" })).unwrap();
+        assert_eq!(
+            back,
+            DiffSource::Ref {
+                git_ref: "main".into()
+            }
+        );
+    }
+
+    // ── LayoutNode ──────────────────────────────────────────────────
+
+    fn term_pane(id: &str, conn: Option<Connection>) -> LayoutNode {
+        LayoutNode::Pane {
+            pane_id: id.into(),
+            pane_kind: PaneKind::Terminal,
+            connection: conn,
+            browser: None,
+            title: None,
+            annotation: None,
+            color: None,
+            emoji: None,
+            help_topic: None,
+            diff_source: None,
+            smart_bidi: None,
+        }
+    }
+
+    #[test]
+    fn pane_round_trip_terminal_elides_pane_kind() {
+        // is_terminal_kind elides pane_kind when serializing a
+        // Terminal pane, so legacy workspaces.json files (pre-Phase
+        // 8.A) round-trip byte-identical.
+        let p = term_pane("p1", Some(Connection::Local { shell: None }));
+        let v = serde_json::to_value(&p).unwrap();
+        assert_eq!(v["kind"], "pane");
+        assert_eq!(v["pane_id"], "p1");
+        // pane_kind MUST be absent from the JSON.
+        assert!(v.get("pane_kind").is_none());
+        // browser / title / annotation / color / emoji / help_topic /
+        // diff_source / smart_bidi all elided too.
+        for f in [
+            "browser",
+            "title",
+            "annotation",
+            "color",
+            "emoji",
+            "help_topic",
+            "diff_source",
+            "smart_bidi",
+        ] {
+            assert!(v.get(f).is_none(), "field {f} should be elided");
+        }
+    }
+
+    #[test]
+    fn pane_round_trip_diff_pane_keeps_diff_source() {
+        let p = LayoutNode::Pane {
+            pane_id: "pd".into(),
+            pane_kind: PaneKind::Diff,
+            connection: None,
+            browser: None,
+            title: None,
+            annotation: None,
+            color: None,
+            emoji: None,
+            help_topic: None,
+            diff_source: Some(DiffSource::Head),
+            smart_bidi: None,
+        };
+        let v = serde_json::to_value(&p).unwrap();
+        assert_eq!(v["pane_kind"], "diff");
+        assert_eq!(v["diff_source"], json!({ "kind": "head" }));
+    }
+
+    #[test]
+    fn pane_legacy_no_pane_kind_field_defaults_to_terminal() {
+        // Pre-Phase 8.A workspaces.json: pane node has no `pane_kind`.
+        let raw = json!({
+            "kind": "pane",
+            "pane_id": "old1",
+            "connection": { "type": "local" },
+        });
+        let n: LayoutNode = serde_json::from_value(raw).unwrap();
+        match n {
+            LayoutNode::Pane {
+                pane_id, pane_kind, ..
+            } => {
+                assert_eq!(pane_id, "old1");
+                assert!(matches!(pane_kind, PaneKind::Terminal));
+            }
+            _ => panic!("expected Pane"),
+        }
+    }
+
+    #[test]
+    fn layout_deep_split_round_trips_and_preserves_ratio() {
+        // Build: Split-V[ Split-H[ pane(p1) | pane(p2) ] | pane(p3) ]
+        let inner = LayoutNode::Split {
+            split_id: "s_inner".into(),
+            direction: SplitDirection::Horizontal,
+            first: Box::new(term_pane("p1", None)),
+            second: Box::new(term_pane("p2", None)),
+            ratio: 0.3,
+        };
+        let outer = LayoutNode::Split {
+            split_id: "s_outer".into(),
+            direction: SplitDirection::Vertical,
+            first: Box::new(inner),
+            second: Box::new(term_pane("p3", None)),
+            ratio: 0.6,
+        };
+        let v = serde_json::to_value(&outer).unwrap();
+        let back: LayoutNode = serde_json::from_value(v).unwrap();
+        // Round-trip preserves the exact structure.
+        match back {
+            LayoutNode::Split {
+                split_id,
+                direction,
+                first,
+                second,
+                ratio,
+            } => {
+                assert_eq!(split_id, "s_outer");
+                assert!(matches!(direction, SplitDirection::Vertical));
+                assert!((ratio - 0.6).abs() < 1e-6);
+                match *first {
+                    LayoutNode::Split {
+                        ref split_id,
+                        ratio,
+                        ..
+                    } => {
+                        assert_eq!(split_id, "s_inner");
+                        assert!((ratio - 0.3).abs() < 1e-6);
+                    }
+                    _ => panic!("inner should be Split"),
+                }
+                match *second {
+                    LayoutNode::Pane { ref pane_id, .. } => assert_eq!(pane_id, "p3"),
+                    _ => panic!("second should be Pane"),
+                }
+            }
+            _ => panic!("outer should be Split"),
+        }
+    }
+
+    // ── Workspace ───────────────────────────────────────────────────
+
+    #[test]
+    fn workspace_minimal_legacy_load() {
+        // The smallest workspaces.json entry that should still load —
+        // simulates an early-phase install where most fields were
+        // absent. Each #[serde(default)] fills in.
+        let raw = json!({
+            "id": "w1",
+            "name": "legacy",
+        });
+        let w: Workspace = serde_json::from_value(raw).unwrap();
+        assert_eq!(w.id, "w1");
+        assert_eq!(w.name, "legacy");
+        assert!(w.color.is_none());
+        assert!(w.emoji.is_none());
+        assert!(w.cwd.is_none());
+        assert!(w.connection.is_none());
+        assert!(w.layout.is_none());
+        assert!(w.setup_command.is_none());
+        assert!(w.teardown_command.is_none());
+        assert!(w.env.is_empty());
+        assert!(!w.auto_port_forward);
+        assert_eq!(w.last_active_at, 0);
+        assert!(w.git_worktree.is_none());
+    }
+
+    #[test]
+    fn workspace_round_trip_with_full_layout() {
+        let conn = Connection::Ssh {
+            host: "h".into(),
+            user: "u".into(),
+            port: 2222,
+            key_path: None,
+        };
+        let layout = LayoutNode::Split {
+            split_id: "s1".into(),
+            direction: SplitDirection::Horizontal,
+            first: Box::new(term_pane("p1", Some(conn.clone()))),
+            second: Box::new(term_pane("p2", Some(conn.clone()))),
+            ratio: 0.5,
+        };
+        let w = Workspace {
+            id: "wfull".into(),
+            name: "Production".into(),
+            color: Some("#7aa2f7".into()),
+            emoji: Some("🚀".into()),
+            cwd: Some("/home/u".into()),
+            connection: Some(conn),
+            layout: Some(layout),
+            setup_command: Some("tmux source ~/.tmux.conf".into()),
+            teardown_command: None,
+            env: vec![EnvVar {
+                key: "FOO".into(),
+                value: "bar".into(),
+            }],
+            auto_port_forward: true,
+            last_active_at: 1_700_000_000,
+            git_worktree: None,
+        };
+        let v = serde_json::to_value(&w).unwrap();
+        // Spot-check the wire format.
+        assert_eq!(v["id"], "wfull");
+        assert_eq!(v["auto_port_forward"], true);
+        assert_eq!(v["last_active_at"], 1_700_000_000u64);
+        // teardown_command + git_worktree elided.
+        assert!(v.get("teardown_command").is_none());
+        assert!(v.get("git_worktree").is_none());
+        // env serialized as array of {key, value}.
+        assert_eq!(v["env"][0]["key"], "FOO");
+        // Round-trip identity.
+        let back: Workspace = serde_json::from_value(v).unwrap();
+        assert_eq!(back.id, "wfull");
+        assert_eq!(back.name, "Production");
+        assert_eq!(back.color.as_deref(), Some("#7aa2f7"));
+        assert!(back.auto_port_forward);
+        assert_eq!(back.env.len(), 1);
+    }
+
+    // ── SplitDirection ──────────────────────────────────────────────
+
+    #[test]
+    fn split_direction_lowercase_wire_format() {
+        assert_eq!(
+            serde_json::to_value(SplitDirection::Horizontal).unwrap(),
+            json!("horizontal")
+        );
+        assert_eq!(
+            serde_json::to_value(SplitDirection::Vertical).unwrap(),
+            json!("vertical")
+        );
+    }
+
+    // ── BrowserState ────────────────────────────────────────────────
+
+    #[test]
+    fn browser_state_defaults_round_trip() {
+        let bs = BrowserState::default();
+        let v = serde_json::to_value(&bs).unwrap();
+        // forward_localhost is the only field that should serialize
+        // (default = true; is_true predicate keeps the field out when
+        // already true — so the wire format is EMPTY beyond `url`).
+        assert_eq!(v["url"], "");
+        // home_url, history, last_loaded_url all elided.
+        assert!(v.get("home_url").is_none());
+        assert!(v.get("history").is_none());
+        assert!(v.get("last_loaded_url").is_none());
+        // forward_localhost: true → skip_serializing_if(is_true)
+        // means it should be elided.
+        assert!(v.get("forward_localhost").is_none());
+    }
+
+    #[test]
+    fn browser_state_forward_localhost_false_round_trips() {
+        let bs = BrowserState {
+            forward_localhost: false,
+            ..BrowserState::default()
+        };
+        let v = serde_json::to_value(&bs).unwrap();
+        assert_eq!(v["forward_localhost"], false);
+    }
+}

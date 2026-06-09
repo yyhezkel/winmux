@@ -32,7 +32,8 @@ import {
   type HooksOutdatedInfo,
 } from "./settings";
 import { applyI18nSettings, t } from "./i18n";
-import { buildShortcutTable, matches, type ParsedShortcut } from "./shortcuts";
+import { buildShortcutTable, matches, parseShortcut, type ParsedShortcut } from "./shortcuts";
+import { makeSttRecorder, type SttRecorder } from "./stt";
 import {
   collectPanes,
   describeConnection,
@@ -136,6 +137,13 @@ function App() {
   // Phase 53 (rebased): workspace-level File Manager floating window.
   // Pure HTML — wraps the existing FileManagerPane component.
   const [showFilesWindow, setShowFilesWindow] = createSignal(false);
+  // Phase 58: push-to-talk voice input. Active recorder instance +
+  // listening indicator. The recorder is created lazily on keydown
+  // and reused for the lifetime of the press; release fires stop()
+  // which resolves the start() promise with the transcribed text.
+  let sttRecorder: SttRecorder | null = null;
+  const [sttListening, setSttListening] = createSignal(false);
+  const [sttError, setSttError] = createSignal<string | null>(null);
   const stopForward = (workspaceId: string, remotePort: number) => {
     void invoke("port_forward_stop", { workspaceId, remotePort });
   };
@@ -1029,6 +1037,43 @@ function App() {
     return search(ws.layout);
   };
 
+  // Phase 58: push-to-talk start/stop. Lazily constructs the
+  // recorder, drives the indicator, and pastes the returned text
+  // into the focused terminal pane on success.
+  const startPushToTalk = () => {
+    const stt = settings()?.stt;
+    if (!stt?.enabled) return;
+    setSttError(null);
+    const rec = makeSttRecorder(stt.backend, stt.language || "auto");
+    sttRecorder = rec;
+    setSttListening(true);
+    rec
+      .start()
+      .then((text) => {
+        if (text && text.length > 0) {
+          pasteIntoActiveTerminal(text);
+        }
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setSttError(msg);
+        // Auto-clear after 5s so the toast doesn't linger forever.
+        setTimeout(() => setSttError(null), 5000);
+      })
+      .finally(() => {
+        sttRecorder = null;
+        setSttListening(false);
+      });
+  };
+  const stopPushToTalk = () => {
+    if (!sttRecorder) return;
+    try {
+      sttRecorder.stop();
+    } catch (e) {
+      console.warn("stt stop failed", e);
+    }
+  };
+
   // Phase 55-B: distribute split ratios evenly. Walks the active
   // workspace's tree and resets every Split.ratio to 0.5 via the
   // backend tauri command, then fits + resizes every pane so xterm
@@ -1141,6 +1186,21 @@ function App() {
       e.preventDefault();
       void summarizeActivePane();
       return;
+    }
+    // Phase 58: push-to-talk (down). Parses the hotkey out of the
+    // user's SttSettings on every press — cheap and lets the
+    // settings edit take effect without a relaunch. Repeats are
+    // suppressed by the sttRecorder guard.
+    {
+      const stt = settings()?.stt;
+      if (stt?.enabled) {
+        const accel = parseShortcut(stt.push_to_talk_hotkey);
+        if (accel && matches(e, accel) && !sttRecorder) {
+          e.preventDefault();
+          startPushToTalk();
+          return;
+        }
+      }
     }
     // Phase 55-B: Ctrl+Alt+= → distribute splits evenly. Resets every
     // split's ratio to 0.5 across the active workspace. Doubles for
@@ -1522,6 +1582,18 @@ function App() {
     );
 
     window.addEventListener("keydown", handleKey);
+    // Phase 58: keyup half of push-to-talk. We register a generic
+    // keyup that stops the active recorder regardless of which
+    // modifier was released — typical PTT UX is "any release ends
+    // the capture", and trying to match the exact hotkey on keyup
+    // misses the very-common case where the user releases Shift
+    // before M.
+    const handleKeyUp = (_e: KeyboardEvent) => {
+      if (sttRecorder) {
+        stopPushToTalk();
+      }
+    };
+    window.addEventListener("keyup", handleKeyUp);
     // Phase 55-A: PaneView dispatches a custom event on content
     // double-click (skipping xterm + the header). We listen at the
     // App level so the toggle stays co-located with the maximized
@@ -1535,6 +1607,7 @@ function App() {
     onCleanup(() => {
       for (const u of unlistens) u();
       window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("winmux:pane-maximize", handlePaneMaximize);
       for (const [pid] of paneToSession) {
         invoke("pane_disconnect", { paneId: pid }).catch(() => {});
@@ -1935,6 +2008,24 @@ function App() {
         })()}
         onClose={() => setShowFilesWindow(false)}
       />
+
+      {/* Phase 58: voice-input recording indicator + error toast.
+          Floating top-right, dismissible only by stopping the
+          recording (release the PTT key) or letting the 5s timeout
+          clear the error. Mutually exclusive in practice — the
+          recorder finally{} clears sttListening before sttError
+          gets set on the error path. */}
+      <Show when={sttListening()}>
+        <div class="stt-indicator" role="status">
+          <span class="stt-indicator-dot" />
+          <span>{t("stt.listening")}</span>
+        </div>
+      </Show>
+      <Show when={sttError()}>
+        <div class="stt-indicator stt-indicator-err" role="alert">
+          {t("stt.error", { message: sttError()! })}
+        </div>
+      </Show>
 
       <Show when={updateBanner()}>
         <div class="update-banner" role="status">

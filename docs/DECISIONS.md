@@ -42,15 +42,28 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 - **Sources:** `docs/COMPETITIVE-SCAN.md` §2.1 (full design borrowed from editnori/WinMux's `NativeAutomationServer.cs`), `docs/IDEAS-RANKING.md` row 2.1 (✅ MUST).
 - **Status:** Moved to bottom of Open 2026-05-28 — Yossi: "not ready yet, keep on roadmap." The big-ticket next focus once the Sprint 1 quick wins settle.
 
-### 2026-06-02 — Speech-to-text with local-model option
-- **Context:** Yossi wants voice input → text in winmux. Specifically with the option to point at a model running LOCALLY (no cloud dependency).
-- **Likely architecture:** native Web Speech API as the default fallback (Chrome/Edge engines provide it for free), plus a configurable endpoint for a local server (Whisper.cpp HTTP, Vosk, etc.). User toggles between them in Settings.
-- **Surface ideas:** push-to-talk shortcut in any focused text field (chat, file editor, terminal write-buffer pre-send), or a "Voice input" button.
-- **Status:** Open, not yet scoped further. Triage when ready.
-
 ---
 
 ## Decided
+
+### 2026-06-09 — Speech-to-text with optional local model (Phase 58, `4a13240` / `dfe254c` / `449e510` / 58.D)
+- **Context:** Closes the 2026-06-02 Open entry. Voice input → text in winmux with the choice between a built-in path (Web Speech API in WebView2) and a configurable local-model endpoint (Whisper.cpp's server, faster-whisper-server, OpenAI-compatible proxies).
+- **What landed:**
+  - `4a13240` 58.A: `Settings.stt` struct (enabled, backend, local_endpoint, language, push_to_talk_hotkey). `SttBackend` enum is a `serde(rename_all = "lowercase")` `webspeech | local` union; ts-rs exports a matching TS string union. Defaults: disabled, Webspeech, language "auto", hotkey "Ctrl+Shift+M". Older settings.json files load unchanged via `serde(default)`.
+  - `dfe254c` 58.B: `stt_transcribe_local` tauri command. POSTs multipart `file` (audio/webm) + `language` to `settings.stt.local_endpoint` — shape mirrors OpenAI's `/v1/audio/transcriptions` so the major OSS Whisper servers work without per-server adapters. Endpoint is read from settings INSIDE the command (not from the frontend invoke arg) so a compromised FE caller can't redirect mic-recorded audio to an attacker URL. 30s timeout, ureq + spawn_blocking, dlog metadata only (URL + byte count + char count — no transcribed text logged per Absolute Rule #1).
+  - `449e510` 58.C: `stt.ts` uniform recorder + Settings "voice input" tab. The Web Speech path uses `window.SpeechRecognition`; the Local path uses MediaRecorder (`audio/webm;codecs=opus`) and invokes the backend on stop. Both expose `{start, stop}` returning `Promise<string>` so the caller doesn't branch on backend. `no-speech` / `aborted` errors are normalised to empty strings (silent release of PTT is not an error). 12 settings-UI i18n keys × 4 locales + 2 toast keys pre-wired for 58.D.
+  - 58.D: push-to-talk handler in App.tsx + floating top-centre "🎙 Listening…" indicator + error toast. Keydown matches the parsed hotkey; keyup (any release) stops the active recorder and pastes the returned text into the focused terminal via `pasteIntoActiveTerminal`. Recording indicator uses a pulsing red dot; error toast auto-clears after 5s.
+- **Privacy / security stance:**
+  - Mic permission is requested only after the user flips the master toggle ON + presses the PTT key for the first time. Default state never opens the mic.
+  - Web Speech API streams to Google in Chromium — surfaced in the backend dropdown label "Web Speech API (online)" so the user knows the trade-off. Local backend is fully offline.
+  - Endpoint is the source of truth in settings, not in invoke args; no mic redirection via a swapped command param.
+  - Absolute Rule #1: no transcribed text in dlog/tracing. Backend logs metadata only.
+- **Validation:** cargo check + cargo test workspace clean (68 tests; 2 new in `stt::tests` for multipart shape + boundary uniqueness). tsc --noEmit clean. 4-locale i18n parity (14 keys × 4 = 56 entries).
+- **Inventory impact:** moves the 2026-06-02 Open entry into Decided. Open list now contains: 2026-05-27 master inventory umbrella (historical) + 2026-05-27 #2.1 Full LLM control umbrella (the implementation closed earlier in B1 / `1fc850b`).
+- **What's deferred to future phases:**
+  - Inline mic button next to chat textareas / per-pane write buffers — out-of-scope for v1; current PTT keypress covers the primary UX.
+  - Continuous (always-listening) recognition — Web Speech API supports `continuous: true` but the privacy trade-off is significant; staying with push-to-talk for v1.
+  - Wake-word ("Hey winmux…") — needs a model fingerprint + always-mic; not on the immediate roadmap.
 
 ### 2026-06-09 — Big-batch wrap: Phase 56 wizard fixes + Phase 57 zip + Phase 55 maximize/distribute + B1 full LLM control
 - **Context:** Yossi asked for everything Open closed in one batch: 56 (provisioning wizard fixes), 57 (zip/unzip in FileManager), 55 (maximize + even-split + reflow audit), B1 (#2.1 Full LLM control — the last item on the master inventory). 9 sub-commits, ONE final build at the end.

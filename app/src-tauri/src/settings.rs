@@ -402,6 +402,67 @@ pub(crate) struct Settings {
     /// Phase 39.B. One-time data migrations that have already run.
     #[serde(default)]
     pub migrations: MigrationFlags,
+    /// Phase 58. Voice input (speech-to-text). Default backend is the
+    /// browser-native Web Speech API; users with privacy / offline
+    /// needs can point at a local Whisper-compatible endpoint.
+    /// `#[serde(default)]` so older settings.json files load with
+    /// `enabled = false` + the default backend.
+    #[serde(default)]
+    pub stt: SttSettings,
+}
+
+/// Phase 58: speech-to-text settings.
+///
+/// - `Webspeech` uses `window.SpeechRecognition` directly in the
+///   frontend (Chromium / WebView2 ships with it; Firefox does not —
+///   not a concern for Tauri's WebView2-only Windows build, but worth
+///   flagging if we ever target Linux's WebKitGTK).
+/// - `Local` POSTs the recorded audio bytes to a user-configurable
+///   HTTP endpoint (whisper.cpp's server, faster-whisper-server,
+///   OpenAI-compatible local proxies). Field shape mirrors OpenAI's
+///   /v1/audio/transcriptions: multipart with `file` (audio bytes) +
+///   `language`.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct SttSettings {
+    /// Master on/off. Default off — opt-in feature, no mic access
+    /// requested until the user flips this.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Which backend to use when recording. Defaults to Webspeech.
+    #[serde(default)]
+    pub backend: SttBackend,
+    /// Required when `backend = Local`. Skipped when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_endpoint: Option<String>,
+    /// BCP-47 tag or "auto". Defaults to "auto" — the Web Speech API
+    /// accepts it and most Whisper servers default to language
+    /// detection when the param is missing or "auto".
+    #[serde(default = "default_stt_lang")]
+    pub language: String,
+    /// Push-to-talk keybinding. Parsed by the existing shortcut-table
+    /// helpers (Ctrl/Shift/Alt + key). Default Ctrl+Shift+M (M for
+    /// microphone).
+    #[serde(default = "default_stt_hotkey")]
+    pub push_to_talk_hotkey: String,
+}
+
+/// Phase 58: backend choice. ts-rs lowercases via the serde attr so
+/// the TS union is `"webspeech" | "local"`, matching the JSON.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SttBackend {
+    #[default]
+    Webspeech,
+    Local,
+}
+
+fn default_stt_lang() -> String {
+    "auto".to_string()
+}
+fn default_stt_hotkey() -> String {
+    "Ctrl+Shift+M".to_string()
 }
 
 /// Phase 39.B: tracks one-time data migrations so they run exactly
@@ -526,6 +587,7 @@ impl Default for Settings {
             auto_connect_on_workspace_select: true,
             auto_destroy_empty_workspaces_days: None,
             migrations: MigrationFlags::default(),
+            stt: SttSettings::default(),
         }
     }
 }

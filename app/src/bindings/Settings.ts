@@ -7,6 +7,7 @@ import type { I18n } from "./I18n";
 import type { MigrationFlags } from "./MigrationFlags";
 import type { Notifications } from "./Notifications";
 import type { Shortcuts } from "./Shortcuts";
+import type { SttSettings } from "./SttSettings";
 import type { TerminalSettings } from "./TerminalSettings";
 import type { Theme } from "./Theme";
 import type { Updates } from "./Updates";
@@ -53,4 +54,12 @@ auto_destroy_empty_workspaces_days: number | null,
 /**
  * Phase 39.B. One-time data migrations that have already run.
  */
-migrations: MigrationFlags, };
+migrations: MigrationFlags, 
+/**
+ * Phase 58. Voice input (speech-to-text). Default backend is the
+ * browser-native Web Speech API; users with privacy / offline
+ * needs can point at a local Whisper-compatible endpoint.
+ * `#[serde(default)]` so older settings.json files load with
+ * `enabled = false` + the default backend.
+ */
+stt: SttSettings, };

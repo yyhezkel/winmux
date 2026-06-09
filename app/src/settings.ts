@@ -147,6 +147,20 @@ export interface I18nSettings {
   direction: "auto" | "ltr" | "rtl" | string;
 }
 
+// Phase 58: speech-to-text settings (hand-mirrored from the Rust
+// SttSettings struct in app/src-tauri/src/settings.rs). When the Rust
+// side regenerates app/src/bindings/SttSettings.ts via ts-rs the
+// types should stay structurally identical; this file is what the
+// rest of the frontend imports historically, so we add the type
+// here too.
+export interface SttSettings {
+  enabled: boolean;
+  backend: "webspeech" | "local";
+  local_endpoint: string | null;
+  language: string;
+  push_to_talk_hotkey: string;
+}
+
 export interface Settings {
   version: number;
   theme: Theme;
@@ -165,6 +179,10 @@ export interface Settings {
   // Phase 49-C: optional auto-delete of empty workspaces older than N
   // days. null/undefined = disabled. Range 1-90 enforced by the UI.
   auto_destroy_empty_workspaces_days?: number | null;
+  // Phase 58: voice input (speech-to-text) — opt-in. Defaults via
+  // serde(default) on the Rust side, so older settings.json files
+  // load with stt: { enabled: false, backend: "webspeech", ... }.
+  stt?: SttSettings;
 }
 
 export interface SummaryResult {

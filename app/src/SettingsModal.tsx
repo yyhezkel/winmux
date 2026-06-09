@@ -27,7 +27,7 @@ interface Props {
   onChange: (next: Settings) => void;
 }
 
-type Tab = "general" | "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "updates" | "logs" | "language";
+type Tab = "general" | "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "updates" | "logs" | "language" | "stt";
 
 export function SettingsModal(p: Props) {
   const [tab, setTab] = createSignal<Tab>("theme");
@@ -203,7 +203,7 @@ export function SettingsModal(p: Props) {
 
           <div class="settings-body">
             <nav class="settings-tabs">
-              <For each={["general", "theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "updates", "logs", "language"] as Tab[]}>
+              <For each={["general", "theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "updates", "logs", "language", "stt"] as Tab[]}>
                 {(name) => (
                   <button
                     class={`settings-tab ${tab() === name ? "active" : ""}`}
@@ -769,6 +769,125 @@ export function SettingsModal(p: Props) {
                         )}
                       </For>
                     </div>
+                  </label>
+                </section>
+              </Show>
+
+              {/* Phase 58: voice input (speech-to-text). Opt-in;
+                  hidden behind its own tab so the existing Settings
+                  surface stays calm for users who don't care. */}
+              <Show when={tab() === "stt"}>
+                <section>
+                  <h4>{t("settings.stt.title")}</h4>
+                  <p class="settings-hint">{t("settings.stt.hint")}</p>
+                  <label class="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={p.settings.stt?.enabled ?? false}
+                      onChange={(e) =>
+                        update("stt", {
+                          ...(p.settings.stt ?? {
+                            enabled: false,
+                            backend: "webspeech",
+                            local_endpoint: null,
+                            language: "auto",
+                            push_to_talk_hotkey: "Ctrl+Shift+M",
+                          }),
+                          enabled: e.currentTarget.checked,
+                        })
+                      }
+                    />
+                    <span>{t("settings.stt.enable")}</span>
+                  </label>
+                  <label>
+                    <span>{t("settings.stt.backend.label")}</span>
+                    <select
+                      value={p.settings.stt?.backend ?? "webspeech"}
+                      onChange={(e) =>
+                        update("stt", {
+                          ...(p.settings.stt ?? {
+                            enabled: false,
+                            backend: "webspeech",
+                            local_endpoint: null,
+                            language: "auto",
+                            push_to_talk_hotkey: "Ctrl+Shift+M",
+                          }),
+                          backend: e.currentTarget.value as "webspeech" | "local",
+                        })
+                      }
+                    >
+                      <option value="webspeech">{t("settings.stt.backend.webspeech")}</option>
+                      <option value="local">{t("settings.stt.backend.local")}</option>
+                    </select>
+                  </label>
+                  <Show when={(p.settings.stt?.backend ?? "webspeech") === "local"}>
+                    <label>
+                      <span>{t("settings.stt.endpoint.label")}</span>
+                      <input
+                        type="text"
+                        value={p.settings.stt?.local_endpoint ?? ""}
+                        placeholder={t("settings.stt.endpoint.placeholder")}
+                        onInput={(e) =>
+                          update("stt", {
+                            ...(p.settings.stt ?? {
+                              enabled: false,
+                              backend: "local",
+                              local_endpoint: null,
+                              language: "auto",
+                              push_to_talk_hotkey: "Ctrl+Shift+M",
+                            }),
+                            local_endpoint:
+                              e.currentTarget.value.trim() === ""
+                                ? null
+                                : e.currentTarget.value,
+                          })
+                        }
+                      />
+                    </label>
+                  </Show>
+                  <label>
+                    <span>{t("settings.stt.language.label")}</span>
+                    <select
+                      value={p.settings.stt?.language ?? "auto"}
+                      onChange={(e) =>
+                        update("stt", {
+                          ...(p.settings.stt ?? {
+                            enabled: false,
+                            backend: "webspeech",
+                            local_endpoint: null,
+                            language: "auto",
+                            push_to_talk_hotkey: "Ctrl+Shift+M",
+                          }),
+                          language: e.currentTarget.value,
+                        })
+                      }
+                    >
+                      <option value="auto">{t("settings.stt.language.auto")}</option>
+                      <option value="he-IL">עברית</option>
+                      <option value="en-US">English (US)</option>
+                      <option value="ar-SA">العربية</option>
+                      <option value="ru-RU">Русский</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>{t("settings.stt.hotkey.label")}</span>
+                    <input
+                      type="text"
+                      value={p.settings.stt?.push_to_talk_hotkey ?? "Ctrl+Shift+M"}
+                      placeholder="Ctrl+Shift+M"
+                      onInput={(e) =>
+                        update("stt", {
+                          ...(p.settings.stt ?? {
+                            enabled: false,
+                            backend: "webspeech",
+                            local_endpoint: null,
+                            language: "auto",
+                            push_to_talk_hotkey: "Ctrl+Shift+M",
+                          }),
+                          push_to_talk_hotkey: e.currentTarget.value,
+                        })
+                      }
+                    />
                   </label>
                 </section>
               </Show>

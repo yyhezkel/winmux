@@ -143,6 +143,14 @@ function makeLocalRecorder(language: string): SttRecorder {
   const chunks: BlobPart[] = [];
   let resolveText: ((s: string) => void) | null = null;
   let rejectText: ((e: Error) => void) | null = null;
+  // Phase 59.B: stop() can be called before getUserMedia resolves
+  // (fast keydown → keyup race when the user taps the PTT key faster
+  // than the mic permission prompt + stream open takes). Without
+  // this flag, .stop() would no-op on the still-null recorder, then
+  // getUserMedia would resolve and start a recording NOBODY would
+  // ever stop — mic stays open indefinitely. The flag is checked at
+  // each async boundary inside start().
+  let stopRequested = false;
 
   const cleanup = () => {
     try {
@@ -166,10 +174,23 @@ function makeLocalRecorder(language: string): SttRecorder {
       return new Promise<string>((resolve, reject) => {
         resolveText = resolve;
         rejectText = reject;
+        stopRequested = false;
         navigator.mediaDevices
           .getUserMedia({ audio: true })
           .then((s) => {
             stream = s;
+            // Phase 59.B: if stop() fired before the mic opened, tear
+            // the just-acquired stream down immediately and resolve
+            // with an empty string. Empty string is the agreed
+            // "nothing to paste" signal — App.tsx already gates
+            // pasteIntoActiveTerminal on text.length > 0.
+            if (stopRequested) {
+              resolveText?.("");
+              cleanup();
+              resolveText = null;
+              rejectText = null;
+              return;
+            }
             // audio/webm with opus is the universally supported
             // MediaRecorder output on Chromium. Whisper accepts it
             // (via ffmpeg) and whisper.cpp's server transcodes
@@ -221,6 +242,7 @@ function makeLocalRecorder(language: string): SttRecorder {
       });
     },
     stop() {
+      stopRequested = true;
       try {
         recorder?.stop();
       } catch {

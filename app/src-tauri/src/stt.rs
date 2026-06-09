@@ -85,6 +85,20 @@ fn make_boundary() -> String {
     format!("----winmux-stt-{:016x}", n)
 }
 
+/// Phase 59.B: char-safe truncation for raw HTTP bodies that go into
+/// error messages. Byte-slicing at a fixed offset would panic if it
+/// landed inside a multi-byte UTF-8 sequence (Hebrew/Arabic responses
+/// from a localised STT server). Caps at 200 chars + "…" — enough to
+/// see the JSON `{"error":"..."}` field most STT servers emit on 4xx.
+const MAX_ERR_BODY_CHARS: usize = 200;
+fn truncate_chars(s: &str) -> String {
+    let mut out: String = s.chars().take(MAX_ERR_BODY_CHARS).collect();
+    if s.chars().nth(MAX_ERR_BODY_CHARS).is_some() {
+        out.push('…');
+    }
+    out
+}
+
 #[tauri::command]
 pub(crate) async fn stt_transcribe_local(
     state: State<'_, AppState>,
@@ -121,23 +135,41 @@ pub(crate) async fn stt_transcribe_local(
     let endpoint_log = endpoint.clone();
     let audio_len = audio_bytes.len();
     let text = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        let resp = ureq::post(&endpoint)
+        let send_result = ureq::post(&endpoint)
             .set("Content-Type", &content_type)
             .set(
                 "User-Agent",
                 &format!("winmux/{}", env!("CARGO_PKG_VERSION")),
             )
             .timeout(std::time::Duration::from_secs(TIMEOUT_SECS))
-            .send_bytes(&body)
-            .map_err(|e| format!("stt POST: {e}"))?;
-        if resp.status() < 200 || resp.status() >= 300 {
-            return Err(format!("stt HTTP {}", resp.status()));
-        }
+            .send_bytes(&body);
+        // Phase 59.B: surface the server's error body on 4xx/5xx. ureq
+        // 2.x returns Err(Status(code, response)) for any non-2xx —
+        // dropping that into a generic format!("stt POST: {e}") loses
+        // the JSON body most STT servers ship (e.g. whisper.cpp
+        // returns `{"error":"unsupported language"}`). Pull the body
+        // out, cap to TRUNC chars so a multi-KB HTML 502 page doesn't
+        // bloat the toast.
+        let resp = match send_result {
+            Ok(r) => r,
+            Err(ureq::Error::Status(code, resp)) => {
+                let body = resp
+                    .into_string()
+                    .unwrap_or_else(|e| format!("(body read failed: {e})"));
+                return Err(format!("stt HTTP {code}: {}", truncate_chars(&body)));
+            }
+            Err(e) => return Err(format!("stt POST: {e}")),
+        };
         let body = resp
             .into_string()
             .map_err(|e| format!("stt read body: {e}"))?;
         let parsed: TranscribeResponse = serde_json::from_str(body.trim_start_matches('\u{FEFF}'))
-            .map_err(|e| format!("stt parse response: {e} (raw: {body})"))?;
+            .map_err(|e| {
+                // Truncate raw body in the error message so a non-JSON
+                // 200 (proxy HTML, captcha page) doesn't surface a
+                // multi-KB toast.
+                format!("stt parse response: {e} (raw: {})", truncate_chars(&body))
+            })?;
         Ok(parsed.text)
     })
     .await
@@ -173,5 +205,39 @@ mod tests {
         let b = make_boundary();
         assert_ne!(a, b);
         assert!(a.starts_with("----winmux-stt-"));
+    }
+
+    #[test]
+    fn truncate_chars_under_cap_unchanged() {
+        assert_eq!(truncate_chars("hello"), "hello");
+        assert_eq!(truncate_chars(""), "");
+    }
+
+    #[test]
+    fn truncate_chars_at_cap_no_ellipsis() {
+        let s = "a".repeat(MAX_ERR_BODY_CHARS);
+        let out = truncate_chars(&s);
+        assert_eq!(out.chars().count(), MAX_ERR_BODY_CHARS);
+        assert!(!out.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_chars_over_cap_adds_ellipsis() {
+        let s = "a".repeat(MAX_ERR_BODY_CHARS + 50);
+        let out = truncate_chars(&s);
+        // MAX_ERR_BODY_CHARS chars + 1 char ellipsis
+        assert_eq!(out.chars().count(), MAX_ERR_BODY_CHARS + 1);
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_chars_safe_at_utf8_boundary() {
+        // Multi-byte char at the cap boundary. Pre-fix this would have
+        // panicked because byte 200 of "א" (Hebrew aleph, 2 bytes
+        // each) lands mid-codepoint.
+        let s = "א".repeat(MAX_ERR_BODY_CHARS + 5);
+        // Must not panic.
+        let out = truncate_chars(&s);
+        assert!(out.ends_with('…'));
     }
 }

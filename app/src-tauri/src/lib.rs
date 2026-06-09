@@ -4934,14 +4934,16 @@ pub(crate) fn build_doctor_snapshot(state: &AppState) -> serde_json::Value {
     drop(sessions);
 
     let bundled_cli_sha256: Option<String> = (|| {
-        let manifest = std::fs::read_to_string(
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("resources")
-                .join("remote-manifest.json"),
-        )
-        .ok()?;
-        // Trivial parse: just find the first sha256 string.
-        let m: serde_json::Value = serde_json::from_str(manifest.trim_start_matches('\u{FEFF}'))
+        // v0.2.7 scrub fix: embed the manifest content at COMPILE time
+        // via include_str! rather than read it at runtime from a path
+        // that only exists on the build machine. The previous
+        // env!("CARGO_MANIFEST_DIR") + fs::read_to_string approach
+        // leaked the developer's absolute build path into the release
+        // binary (RUSTFLAGS --remap-path-prefix only scrubs debug
+        // info, not env!() string expansions) AND silently failed at
+        // runtime on every user machine where that path didn't exist.
+        const MANIFEST: &str = include_str!("../resources/remote-manifest.json");
+        let m: serde_json::Value = serde_json::from_str(MANIFEST.trim_start_matches('\u{FEFF}'))
             .ok()?;
         m.get("x86_64-linux")?
             .get("sha256")?

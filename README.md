@@ -70,10 +70,14 @@ fire them.
 
 ### 🛠️ MCP server bundled
 
-`winmux-mcp.exe` exposes 15 browser-automation tools (click, type,
-eval, find, snapshot, wait_for, etc.) over stdio JSON-RPC. Drop one
-line into `~/.claude/mcp.json` and Claude Code can drive the browser
-pane natively.
+`winmux-mcp.exe` exposes a stdio JSON-RPC surface that lets an agent
+drive winmux itself: discover open workspaces and panes (`list_panes`,
+`tree`, `list_workspaces`), split panes, activate workspaces, send
+keystrokes, and ping the user. Browser automation moved to
+[lean-chronoscope-mcp](https://github.com/yyhezkel/lean-chronoscope-mcp)
+which is purpose-built for that — headless Chrome in Docker, 56 tools
+across full/slim/gateway mount modes. Drop a line into `mcp.json`
+and Claude Code can drive both.
 
 ### 🚀 Server provisioning wizard
 
@@ -89,10 +93,13 @@ under `~/.ssh/` with type + fingerprint. One-click permission fix
 via `icacls` when a key is "too open". "Test connection" runs the
 full auth ladder and tells you exactly which stage failed and why.
 
-### 📁 File manager pane
+### 📁 File manager + browser as floating windows
 
-Dual-column local + remote SFTP — navigate, upload, download, rename,
-delete, mkdir. Piggy-backs on the workspace's existing SSH session.
+Workspace-scoped floating windows for both the dual-column local +
+remote SFTP file manager (navigate, upload, download, rename, delete,
+mkdir, zip/unzip on either side) and a native child Webview as a
+per-workspace browser with its own cookie / cache directory. Window
+size + position persist per workspace.
 
 ### ⚙️ Settings, notes, localization
 
@@ -109,7 +116,7 @@ and run the MSI:
 
 ```pwsh
 winget download yyhezkel/winmux   # once we ship on winget
-# or grab winmux_0.1.0_x64_en-US.msi from GitHub and double-click
+# or grab the latest winmux_X.Y.Z_x64_en-US.msi from GitHub and double-click
 ```
 
 Or build from source:
@@ -159,7 +166,7 @@ need.
 | SSH workspaces          | ✓                      | ✓                      | ✓                      | ✓                                       |
 | Splits / tabs           | ✓ (binary tree)        | ✓                      | ✓                      | ✓                                       |
 | Blocking agent hooks    | ✓                      | ✓                      | partial (built-in only)| ✗                                       |
-| Bundled MCP server      | ✓ (15 tools)           | ✗                      | ✗                      | ✗                                       |
+| Bundled MCP server      | ✓ winmux + agent tools | ✗                      | ✗                      | ✗                                       |
 | Claude Code launcher    | ✓ with session browser | ✓                      | ✗                      | ✗                                       |
 | File manager (SFTP)     | ✓                      | ✗                      | ✗                      | ✓                                       |
 | Server provisioning     | ✓ wizard               | ✗                      | ✗                      | ✓ snippets                              |
@@ -203,40 +210,56 @@ narrative version with ASCII state diagrams and module ownership.
 
 ## Roadmap
 
-**Shipped (v0.1.0 → v0.2.4):**
+**Shipped (v0.1.0 → v0.2.7):**
 
 The foundation: local PTY · BiDi (UAX #9) · SSH via russh · multi-workspace
 persistence with splits · CLI + JSON-RPC over Named Pipe + reverse SSH
-tunnel · MSI + NSIS installers · remote Linux CLI bootstrap · HMAC-SHA256
-auth · agent feed + permission cards · notes · browser panes · winmux-mcp ·
-settings panel with themes and live apply · tmux persistence · localization
-(en / he / ar / ru).
+tunnel · MSI + NSIS installers with PATH auto-registration · remote Linux
+CLI bootstrap · HMAC-SHA256 auth · agent feed + permission cards · notes ·
+winmux-mcp · settings panel with themes and live apply · tmux persistence ·
+localization (en / he / ar / ru).
 
 Connection + provisioning: smart-connect (Claude session browser,
 ssh_config import, key auto-detect, perms fix, connection test) · server
 provisioning wizard with sudo preflight · SSH key auto-setup wizard ·
-file manager with sort/filter and a side-by-side manual help pane · in-app
-updater (native ureq + rustls) with one-click install.
+*"Connect to existing server"* mode (one-shot key install for an existing
+user) · file manager + per-workspace browser as floating windows (zip /
+unzip on either side, drag/resize with persisted geometry) · in-app
+updater (native ureq + rustls) with one-click install · /doctor
+diagnostic + frontend stall instrumentation.
 
 Workflow + agent UX: cross-session memory (CLAUDE.md + DECISIONS.md) · a
 12-rule absolute-rules ruleset · ts-rs type sync between Rust and the
 frontend · rAF-coalesced xterm writer · Command Palette (Ctrl+Shift+P) ·
 OSC 9/99/777 desktop-notification detection · per-workspace and per-pane
-identity (color, emoji, dynamic window title) · auto-port-forwarding via a
-`/proc/net/tcp` watcher with kernel-assigned local ports.
+identity (color, emoji, dynamic window title) · drag-drop into terminal
+(files / URLs / clipboard images, SFTP-uploaded to the remote) ·
+auto-port-forwarding via a `/proc/net/tcp` watcher with kernel-assigned
+local ports · live diff pane (working/HEAD/arbitrary-ref) · worktree-aware
+workspaces · auto-destroy-empty-workspaces sweep · maximize pane
+(Ctrl+Enter / dbl-click) + distribute splits evenly (Ctrl+Alt+=) ·
+quadrant split shortcuts · opt-in PTY-stream bidi filter for Claude
+Code TUI panes · push-to-talk speech-to-text with Web Speech API or
+local Whisper-compatible endpoint.
+
+Agent control surface: `winmux-mcp.exe` exposes `list_panes`,
+`read_pane`, `take_screenshot`, `split_pane`, `connect_workspace`,
+`send_keys`, `notify`, `note_add`, `tree`, `list_workspaces` for
+agents that want to drive winmux from outside the pane they're
+running in.
+
+Internals: lib.rs split into 5 focused crates (winmux-types,
+winmux-core, winmux-tunnel, winmux-bootstrap, winmux-ssh) with
+CoreState refactor · 100+ unit tests pinning the workspaces.json
+wire format and pure-walker invariants.
 
 **Coming next:**
 
-- 🔮 BiDi-aware rendering for mixed Hebrew/Latin technical content in TUI panes (Claude Code, tmux output)
-- 🔮 PortsWindow polish — clearer state, full e2e validation, smarter port-watch behavior
-- 🔮 Secrets Vault — in cooperation with a separate MCP project that holds credentials; winmux exposes egress hooks (SSH env inject, child-process spawn with env)
-- 🔮 Full LLM control surface — HTTP automation API so agents can drive winmux from outside (split, screenshot, scrollback, etc.)
-- 🔮 Speech-to-text input with optional local-model endpoint (Whisper.cpp etc.)
-- 🔮 Drag-and-drop into the terminal — files / URLs / clipboard images, SFTP-uploaded to the remote with the path auto-injected
-- 🔮 Diff / patch review pane — track git diff of the active workspace live
-- 🔮 Worktree-aware workspaces — bind each workspace to a git worktree for parallel branches in the same repo
-- 🔮 /doctor diagnostic endpoint and richer telemetry across the RPC layer
-- 🔮 PATH auto-registration in the WiX / NSIS installer
+- 🔮 Code signing for the MSI + NSIS bundles (SmartScreen warning at v0.2)
+- 🔮 winget distribution
+- 🔮 Inline mic affordance + continuous mode for speech-to-text (currently push-to-talk only)
+- 🔮 Production smoke-test sweep of the v0.2.7 surface, then v0.3 cut
+- 🔮 macOS / Linux ports as a long-term direction (Tauri 2 carries most of the work)
 
 ## Documentation
 

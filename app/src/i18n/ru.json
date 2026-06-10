@@ -27,6 +27,7 @@
   "pane.tooltip.detach": "Отсоединить (сессия продолжает работать)",
   "pane.tooltip.kill_session": "Убить удалённую tmux-сессию",
   "pane.tooltip.tmux_badge": "tmux-сессия — переживает разрыв",
+  "pane.tooltip.more_connect_options": "Дополнительные варианты подключения",
   "pane.tooltip.split_right": "Разделить вправо (Ctrl+Shift+D)",
   "pane.tooltip.split_down": "Разделить вниз (Ctrl+Shift+E)",
   "pane.tooltip.close": "Закрыть панель (Ctrl+Shift+W)",

@@ -27,6 +27,7 @@
   "pane.tooltip.detach": "فصل (الجلسة تستمر)",
   "pane.tooltip.kill_session": "إنهاء جلسة tmux على الخادم البعيد",
   "pane.tooltip.tmux_badge": "جلسة tmux — تنجو من قطع الاتصال",
+  "pane.tooltip.more_connect_options": "خيارات اتصال إضافية",
   "pane.tooltip.split_right": "تقسيم لليمين (Ctrl+Shift+D)",
   "pane.tooltip.split_down": "تقسيم لأسفل (Ctrl+Shift+E)",
   "pane.tooltip.close": "إغلاق اللوحة (Ctrl+Shift+W)",

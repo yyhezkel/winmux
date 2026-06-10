@@ -27,6 +27,7 @@
   "pane.tooltip.detach": "ניתוק (ה-session ממשיך לרוץ)",
   "pane.tooltip.kill_session": "הרוג session ברימוט (אין resume)",
   "pane.tooltip.tmux_badge": "session של tmux — שורד ניתוק",
+  "pane.tooltip.more_connect_options": "אפשרויות חיבור נוספות",
   "pane.tooltip.split_right": "פצל ימינה (Ctrl+Shift+D)",
   "pane.tooltip.split_down": "פצל למטה (Ctrl+Shift+E)",
   "pane.tooltip.close": "סגור פאנל (Ctrl+Shift+W)",

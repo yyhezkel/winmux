@@ -27,6 +27,7 @@
   "pane.tooltip.detach": "Detach (session keeps running)",
   "pane.tooltip.kill_session": "Hard-kill remote session (no resume)",
   "pane.tooltip.tmux_badge": "tmux session — survives disconnect",
+  "pane.tooltip.more_connect_options": "More connect options",
   "pane.tooltip.split_right": "Split right (Ctrl+Shift+D)",
   "pane.tooltip.split_down": "Split down (Ctrl+Shift+E)",
   "pane.tooltip.close": "Close pane (Ctrl+Shift+W)",

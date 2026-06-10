@@ -559,7 +559,7 @@ export function PaneView(p: Props) {
         <Show when={p.pane.annotation}>
           <button
             class="pane-btn"
-            title="Show annotation"
+            title={t("pane.tooltip.show_annotation")}
             onClick={(e) => {
               e.stopPropagation();
               setShowAnnot(!showAnnot());
@@ -573,7 +573,7 @@ export function PaneView(p: Props) {
         </Show>
         <button
           class="pane-btn"
-          title="Edit title / annotation"
+          title={t("pane.tooltip.edit_meta")}
           onClick={(e) => {
             e.stopPropagation();
             openMeta();
@@ -649,7 +649,7 @@ export function PaneView(p: Props) {
         </button>
         <button class="pane-btn" title="Split right (Ctrl+Shift+D)" onClick={() => p.onSplit(p.pane.pane_id, "horizontal")}>↔</button>
         <button class="pane-btn" title="Split down (Ctrl+Shift+E)" onClick={() => p.onSplit(p.pane.pane_id, "vertical")}>↕</button>
-        <button class="pane-btn pane-close" title="Close pane (Ctrl+Shift+W)" onClick={() => p.onClose(p.pane.pane_id)}>×</button>
+        <button class="pane-btn pane-close" title={t("pane.tooltip.close")} onClick={() => p.onClose(p.pane.pane_id)}>×</button>
       </div>
       <Show when={editingMeta()}>
         <div class="pane-meta-editor" onMouseDown={(e) => e.stopPropagation()}>
@@ -889,7 +889,7 @@ export function PaneView(p: Props) {
                   </button>
                   <button
                     class="primary big connect-caret"
-                    title="More connect options"
+                    title={t("pane.tooltip.more_connect_options")}
                     onClick={(e) => {
                       e.stopPropagation();
                       setShowConnectMenu(!showConnectMenu());

@@ -498,12 +498,14 @@ pub(crate) fn rewrite_browser_filemanager_panes_to_terminal(
 }
 
 pub(crate) fn persist(state: &AppState) -> Result<(), String> {
+    // Phase 59.E: caller-location trace demoted dlog → tracing::debug.
+    // It fires on EVERY workspace mutation (ratio commits, title
+    // edits, splits…) and is engineer diagnostics, not user-facing —
+    // Rule 9 audience split. The REFUSING branches below stay on
+    // dlog: those are the lines a user needs to see when their
+    // workspaces.json stopped saving.
     let caller = std::panic::Location::caller();
-    dlog(&format!(
-        "persist: called from {}:{}",
-        caller.file(),
-        caller.line()
-    ));
+    tracing::debug!("persist: called from {}:{}", caller.file(), caller.line());
     // SAFETY GATE: do not persist if load failed. We'd clobber existing data with our
     // empty default state.
     let load_state = *state.load_state.lock().unwrap();
@@ -1401,15 +1403,14 @@ async fn ssh_key_offer_dismiss(
             let mut s = state.settings.lock().map_err(|e| e.to_string())?;
             s.ssh_key_offer_disabled = true;
         }
-        // Persist via the existing settings save path. We touch the
-        // file directly instead of going through settings_save to
-        // avoid needing the full Settings argument from the frontend.
-        if let Ok(dir) = config_dir() {
-            let path = dir.join("settings.json");
-            if let Ok(snapshot) = state.settings.lock().map(|s| s.clone()) {
-                if let Ok(text) = serde_json::to_string_pretty(&snapshot) {
-                    let _ = std::fs::write(&path, text);
-                }
+        // Phase 59.E: was a direct std::fs::write — non-atomic
+        // (violates Absolute Rule #7) and error-swallowing. Use the
+        // settings module's tmp+rename save; failure is logged, not
+        // raised (a failed "don't show again" persist shouldn't fail
+        // the dismiss itself — worst case the offer pops once more).
+        if let Ok(snapshot) = state.settings.lock().map(|s| s.clone()) {
+            if let Err(e) = settings::save_to_disk_pub(&snapshot) {
+                dlog(&format!("ssh_key_offer_dismiss: settings save failed: {e}"));
             }
         }
         let _ = app.emit("settings:changed", ());
@@ -1563,12 +1564,16 @@ async fn ssh_key_generate_and_install(
             let mut s = state.settings.lock().map_err(|e| e.to_string())?;
             s.ssh_key_offer_disabled = true;
         }
-        if let Ok(dir) = config_dir() {
-            let path = dir.join("settings.json");
-            if let Ok(snapshot) = state.settings.lock().map(|s| s.clone()) {
-                if let Ok(text) = serde_json::to_string_pretty(&snapshot) {
-                    let _ = std::fs::write(&path, text);
-                }
+        // Phase 59.E: atomic tmp+rename via the settings module
+        // (was a direct std::fs::write — Rule #7 violation). Failure
+        // logged, not raised: the key IS installed at this point and
+        // the workspace persisted; a failed flag save just means the
+        // offer may pop once more.
+        if let Ok(snapshot) = state.settings.lock().map(|s| s.clone()) {
+            if let Err(e) = settings::save_to_disk_pub(&snapshot) {
+                dlog(&format!(
+                    "ssh_key_generate_and_install: settings save failed: {e}"
+                ));
             }
         }
         let _ = app.emit("settings:changed", ());

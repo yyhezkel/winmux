@@ -31,6 +31,19 @@ _(nothing open — Phase 59.D swept the section; both long-running entries close
 
 ## Decided
 
+### 2026-06-10 — Phase 59 polish sweep (6 commits, 11 categories triaged)
+- **Context:** Proactive quality pass over the post-v0.2.7 codebase. 11 categories scanned; 6 produced commits, 5 were honest no-ops or already-clean.
+- **Commits:**
+  - `6b76ec2` 59.A: +35 unit tests for winmux-types (serde wire-format pins, legacy-alias loads) + winmux-core (shell_quote injection contract, layout walkers, backfill). Tunnel/bootstrap/ssh crates skipped honestly — integration-shaped, not unit-shaped.
+  - `7f9b42b` 59.B: two real STT bugs — 4xx/5xx error bodies were dropped by the ureq Status variant (now surfaced, char-safe-truncated at 200), and a fast keydown→keyup race left the mic open forever when stop() fired before getUserMedia resolved (stopRequested flag at the async boundary).
+  - `d6e53e3` 59.C: README v0.2.7 reality — MCP section rewritten post-53.G, file-manager/browser sections match the floating-window model, Shipped block cumulative through Phase 58, Coming-next reduced to what's actually pending.
+  - `f16bbbd` 59.D: DECISIONS Open section emptied (both umbrella entries moved to Decided with closure notes); CLAUDE.md "smoke-test browser panes" → workspace Browser window steps.
+  - `cc319f1` 59.E: **Rule #7 violations fixed** — ssh_key_offer_dismiss + ssh_key_generate_and_install wrote settings.json with direct fs::write (non-atomic, error-swallowed); both now use the tmp+rename save with logged failures. Also: `persist: called from` caller trace demoted dlog→tracing::debug (fired on every workspace mutation into the user-visible log).
+  - `fd51653` 59.F: 4 hardcoded PaneView tooltips wired to t(). Finding of the day: 3 of the 4 keys were already translated in all 4 locales — sitting unused while Hebrew-UI users saw English tooltips.
+- **Honest no-ops:** CHANGELOG.md (deliberately doesn't exist per Phase 49-F — habit lives in CONTRIBUTING.md); diff watcher perf (hash-gated, error-deduped, page-cache-warm — no profiling evidence of a problem); port watcher (snapshot diffing in place since 46/47); i18n parity (zero drift before the sweep, 523 keys × 4 locales after).
+- **Flagged, not fixed blind:** focus-return after modal close (does focus land back in the terminal?) needs live smoke-testing, not a static-analysis guess — queue for the next session with the app running. Also from 59.B's audit: the STT push-to-talk hotkey field is a plain text input; the ShortcutRow recorder component would be a nicer fit.
+- **Net:** tests 64 → 108; user-facing fixes: STT error visibility + mic-leak race + atomic settings saves + Hebrew tooltips actually appearing.
+
 ### 2026-05-27 → 2026-06-09 — Competitive-scan ideas inventory (umbrella, fully triaged)
 - **Context:** Survey of 8 winmux GitHub projects produced an inventory of ~25 ideas to potentially adopt. Highest-impact triple: HTTP Automation API for LLM control (#2.1), Auto port forwarding (#2.2), Secrets Vault (#3.2).
 - **Source docs:** `docs/COMPETITIVE-SCAN.md` (full report + Secrets Vault design), `docs/IDEAS-RANKING.md` (decision table).

@@ -25,26 +25,24 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
-### 2026-05-27 — Competitive-scan ideas inventory (triage in progress)
-- **Context:** Survey of 8 winmux GitHub projects produced an inventory of ~25 ideas to potentially adopt. Highest-impact triple: HTTP Automation API for LLM control (#2.1), Auto port forwarding (#2.2), Secrets Vault (#3.2).
-- **Source docs:** `docs/COMPETITIVE-SCAN.md` (full report + Secrets Vault design), `docs/IDEAS-RANKING.md` (decision table).
-- **Status:** Every individual scan item is now Decided. 5 MUST closed in Phase 35 (`bddc0b0`), auto port forwarding closed in Phase 36 / 36.A (`95de6f1`). Pipe hardening landed in Phase 44 (`c65b0c5`). Phase 48 closed #1.4 Ctrl+Alt+Arrow split-or-move, #3.3 ADR + threat-model docs, #4.9 /doctor diagnostic endpoint, #4.10 frontend stall instrumentation, plus BiDi 33A. Phase 49 closed #2.3 drag-drop, #4.3 auto-destroy empty workspaces, #4.5 git worktree, #4.6 quadrant split keymap, #4.7 CHANGELOG habit (lives in CONTRIBUTING.md). Phase 50 closed #2.4 Diff pane. Phase 51 closed #3.1 lib.rs split. Phase 52 closed #3.2 BiDi 33B. Phase 53 closed #4.8 browser-per-workspace + deleted winmux's internal browser MCP surface (lean-chronoscope-mcp supersedes). **B1 (`1fc850b`, 2026-06-09) closed the final item #2.1 Full LLM control** — 6 new RPC methods + 6 new winmux-mcp tools. Secrets Vault remains a deferred → external MCP integration call. **The competitive-scan umbrella is now historical; this entry stays as a pointer to the scan doc and the closure trail.**
-- **Also flagged:** the `winmux` name is taken by 8 projects on GitHub — rebrand caveat (see scan doc's "Naming Caveat" section).
-
-### 2026-05-27 — Full LLM control of the app (= scan #2.1, HTTP Automation API)
-- **Context:** Today Claude runs *inside* winmux panes; goal is to also let Claude *drive* winmux from the outside — "open me a pane on server X and run cargo build", "read me the scrollback of pane #3", "screenshot the workspace", etc.
-- **Foundation already in place:** `rpc_server.rs` (JSON-RPC v2 over Named Pipe), 15 browser-automation tools in `winmux-mcp.exe`, methods for list-workspaces / tree / send / send-key / feed.push.
-- **Gap to close:**
-  - New RPC methods: `pane.scrollback`, `pane.screenshot`, `ui.tree`, `action.split`, `action.connect`
-  - Expose via `winmux-mcp.exe` as new tools: `read_pane`, `take_screenshot`, `list_panes`, `split_pane`, `connect_workspace`
-  - Optional: HTTP endpoint on 127.0.0.1 with auth token for scripters who don't want MCP
-- **Effort:** ~5-7 days (per scan estimate).
-- **Sources:** `docs/COMPETITIVE-SCAN.md` §2.1 (full design borrowed from editnori/WinMux's `NativeAutomationServer.cs`), `docs/IDEAS-RANKING.md` row 2.1 (✅ MUST).
-- **Status:** Moved to bottom of Open 2026-05-28 — Yossi: "not ready yet, keep on roadmap." The big-ticket next focus once the Sprint 1 quick wins settle.
+_(nothing open — Phase 59.D swept the section; both long-running entries closed below)_
 
 ---
 
 ## Decided
+
+### 2026-05-27 → 2026-06-09 — Competitive-scan ideas inventory (umbrella, fully triaged)
+- **Context:** Survey of 8 winmux GitHub projects produced an inventory of ~25 ideas to potentially adopt. Highest-impact triple: HTTP Automation API for LLM control (#2.1), Auto port forwarding (#2.2), Secrets Vault (#3.2).
+- **Source docs:** `docs/COMPETITIVE-SCAN.md` (full report + Secrets Vault design), `docs/IDEAS-RANKING.md` (decision table).
+- **Closure trail:** 5 MUST closed in Phase 35 (`bddc0b0`), auto port forwarding in Phase 36 / 36.A (`95de6f1`), pipe hardening in Phase 44 (`c65b0c5`). Phase 48: #1.4 Ctrl+Alt+Arrow, #3.3 ADR + threat-model docs, #4.9 /doctor, #4.10 stall instrumentation, BiDi 33A. Phase 49: #2.3 drag-drop, #4.3 auto-destroy, #4.5 git worktree, #4.6 quadrant splits, #4.7 CHANGELOG habit. Phase 50: #2.4 Diff pane. Phase 51: #3.1 lib.rs split. Phase 52: #3.2 BiDi 33B. Phase 53: #4.8 browser-per-workspace. B1 (`1fc850b`): #2.1 Full LLM control — the final item.
+- **Decision:** Umbrella closed 2026-06-09 with B1. Secrets Vault remains a deferred → external MCP integration call (not a winmux feature). This entry is the pointer to the scan doc + closure trail.
+- **Also flagged:** the `winmux` name is taken by 8 projects on GitHub — rebrand caveat (see scan doc's "Naming Caveat" section). Still unaddressed; resurface if/when the project goes public-facing.
+
+### 2026-05-27 → 2026-06-09 — Full LLM control of the app (= scan #2.1, closed by B1 `1fc850b`)
+- **Context:** Today Claude runs *inside* winmux panes; goal was to also let Claude *drive* winmux from the outside — "open me a pane on server X and run cargo build", "read me the scrollback of pane #3", "screenshot the workspace", etc.
+- **What shipped (B1, 2026-06-09):** 6 RPC methods (`ui.tree`, `action.connect`, `action.split`, `action.send_keys`, `pane.scrollback`, `pane.screenshot`) + 6 winmux-mcp tools (`list_panes`, `connect_workspace`, `split_pane`, `send_keys`, `read_pane`, `take_screenshot`). Scrollback + screenshot return documented errors with workarounds — backend doesn't buffer PTY content (Absolute Rule #1) and the xterm canvas lives on the frontend; a ring buffer is a future call once the privacy boundary is reviewed.
+- **Dropped from the original sketch:** the optional 127.0.0.1 HTTP endpoint (named-pipe MCP covers the agent use case; revisit only if a non-MCP scripter actually asks) and the "15 browser-automation tools" foundation line (those tools were deleted in Phase 53.G — lean-chronoscope-mcp supersedes).
+- **Sources:** `docs/COMPETITIVE-SCAN.md` §2.1, `docs/IDEAS-RANKING.md` row 2.1 (✅ MUST).
 
 ### 2026-06-09 — Speech-to-text with optional local model (Phase 58, `4a13240` / `dfe254c` / `449e510` / 58.D)
 - **Context:** Closes the 2026-06-02 Open entry. Voice input → text in winmux with the choice between a built-in path (Web Speech API in WebView2) and a configurable local-model endpoint (Whisper.cpp's server, faster-whisper-server, OpenAI-compatible proxies).

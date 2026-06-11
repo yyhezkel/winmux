@@ -1044,6 +1044,66 @@ fn line_ending_for(_kind: ShellKind) -> &'static str {
     "\r\n"
 }
 
+/// Phase 61: Smart Connect (mode="cmd"/"claude") injection script, shaped
+/// for the pane's shell. POSIX keeps the historical `exec` form (the
+/// launched process replaces the shell); PowerShell and Cmd have no
+/// `exec`, so the command runs in the shell and the user gets the prompt
+/// back when it exits. Returns "" when there is nothing to inject.
+fn build_smart_connect_script(
+    kind: ShellKind,
+    mode: &str,
+    cwd_override: Option<&str>,
+    cmd: Option<&str>,
+    claude_args: Option<&str>,
+) -> String {
+    let run = match mode {
+        "cmd" => match cmd {
+            Some(c) if !c.trim().is_empty() => c.trim().to_string(),
+            _ => return String::new(),
+        },
+        "claude" => {
+            let args = claude_args.unwrap_or("").trim();
+            if args.is_empty() {
+                "claude".to_string()
+            } else {
+                format!("claude {args}")
+            }
+        }
+        _ => return String::new(),
+    };
+    let cwd = cwd_override.filter(|s| !s.is_empty());
+    match kind {
+        ShellKind::Posix => {
+            let mut s = String::new();
+            if let Some(d) = cwd {
+                s.push_str(&format!("cd {} && ", shell_quote(d)));
+            }
+            format!("{s}exec {run}\r\n")
+        }
+        ShellKind::PowerShell => {
+            let mut s = String::new();
+            if let Some(d) = cwd {
+                // -LiteralPath: no wildcard expansion on [brackets] in paths.
+                s.push_str(&format!(
+                    "Set-Location -LiteralPath '{}'; ",
+                    d.replace('\'', "''")
+                ));
+            }
+            format!("{s}{run}\r\n")
+        }
+        ShellKind::Cmd => {
+            let mut s = String::new();
+            if let Some(d) = cwd {
+                // `/d` switches drive too. cmd can't escape `"` inside a
+                // quoted arg — strip quotes/newlines instead.
+                let clean = d.replace(['"', '\n', '\r'], "");
+                s.push_str(&format!("cd /d \"{clean}\" && "));
+            }
+            format!("{s}{run}\r\n")
+        }
+    }
+}
+
 /// Phase 7.C: after the shell has had a moment to print its banner and prompt,
 /// inject the workspace's `env` exports + `setup_command` as if the user typed them.
 /// Phase 11.A: tmux session names disallow `.` and `:` and (for sane shell
@@ -4169,41 +4229,23 @@ async fn pane_connect(
 
     // Phase 12.B Smart Connect: when mode is "cmd" or "claude", inject the
     // command after a 1.1s delay (after env exports + setup_command + tmux
-    // wrap have all settled). cwd_override changes directory first. We use
-    // `exec` so the launched process replaces the shell — the user gets
-    // back to a clean prompt only when the command exits.
+    // wrap have all settled). cwd_override changes directory first.
+    // Phase 61: the script is shaped per shell_kind, so local PowerShell /
+    // Cmd panes get working syntax too (POSIX `exec` form unchanged).
     let smart_mode = mode.clone();
     if matches!(smart_mode.as_deref(), Some("cmd") | Some("claude")) {
-        let sessions_clone = state.core.sessions.clone();
-        let session_id_clone = session_id.clone();
-        let mode_str = smart_mode.unwrap_or_default();
-        let cwd_str = cwd_override.clone();
-        let cmd_str = cmd.clone();
-        let claude_args_str = claude_args.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-            let mut script = String::new();
-            if let Some(cwd) = cwd_str.filter(|s| !s.is_empty()) {
-                script.push_str(&format!("cd {} && ", shell_quote(&cwd)));
-            }
-            match mode_str.as_str() {
-                "cmd" => {
-                    if let Some(c) = cmd_str.filter(|s| !s.trim().is_empty()) {
-                        script.push_str(&format!("exec {}\r\n", c));
-                    }
-                }
-                "claude" => {
-                    let args = claude_args_str.unwrap_or_default();
-                    let trimmed = args.trim();
-                    if trimmed.is_empty() {
-                        script.push_str("exec claude\r\n");
-                    } else {
-                        script.push_str(&format!("exec claude {}\r\n", trimmed));
-                    }
-                }
-                _ => {}
-            }
-            if !script.is_empty() {
+        let script = build_smart_connect_script(
+            shell_kind,
+            smart_mode.as_deref().unwrap_or_default(),
+            cwd_override.as_deref(),
+            cmd.as_deref(),
+            claude_args.as_deref(),
+        );
+        if !script.is_empty() {
+            let sessions_clone = state.core.sessions.clone();
+            let session_id_clone = session_id.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
                 let mut sessions = sessions_clone.lock().unwrap();
                 if let Some(s) = sessions.get_mut(&session_id_clone) {
                     match s {
@@ -4217,8 +4259,8 @@ async fn pane_connect(
                         }
                     }
                 }
-            }
-        });
+            });
+        }
     }
 
     Ok(session_id)
@@ -5729,6 +5771,87 @@ mod migration_tests {
         assert_eq!(
             rewrite_browser_filemanager_panes_to_terminal(&mut file),
             0
+        );
+    }
+}
+
+#[cfg(test)]
+mod smart_connect_tests {
+    // Phase 61: Smart Connect injection became shell-aware so local
+    // PowerShell / Cmd panes can launch Claude Code too. POSIX must keep
+    // its historical `exec` form byte-for-byte; the other two must not
+    // contain `exec` (it doesn't exist there).
+    use super::{build_smart_connect_script, ShellKind};
+
+    #[test]
+    fn posix_claude_keeps_exec_form() {
+        assert_eq!(
+            build_smart_connect_script(ShellKind::Posix, "claude", None, None, None),
+            "exec claude\r\n"
+        );
+        assert_eq!(
+            build_smart_connect_script(
+                ShellKind::Posix,
+                "claude",
+                Some("/home/x/my proj"),
+                None,
+                Some("--resume abc"),
+            ),
+            "cd '/home/x/my proj' && exec claude --resume abc\r\n"
+        );
+    }
+
+    #[test]
+    fn powershell_claude_no_exec_and_quotes_escaped() {
+        assert_eq!(
+            build_smart_connect_script(ShellKind::PowerShell, "claude", None, None, Some("--continue")),
+            "claude --continue\r\n"
+        );
+        assert_eq!(
+            build_smart_connect_script(
+                ShellKind::PowerShell,
+                "claude",
+                Some(r"C:\Users\yo'si\code"),
+                None,
+                None,
+            ),
+            "Set-Location -LiteralPath 'C:\\Users\\yo''si\\code'; claude\r\n"
+        );
+    }
+
+    #[test]
+    fn cmd_claude_uses_cd_slash_d_and_strips_quotes() {
+        assert_eq!(
+            build_smart_connect_script(
+                ShellKind::Cmd,
+                "claude",
+                Some(r#"D:\pro"j"#),
+                None,
+                None,
+            ),
+            "cd /d \"D:\\proj\" && claude\r\n"
+        );
+    }
+
+    #[test]
+    fn cmd_mode_runs_command_and_empty_returns_nothing() {
+        assert_eq!(
+            build_smart_connect_script(ShellKind::PowerShell, "cmd", None, Some("npm run dev"), None),
+            "npm run dev\r\n"
+        );
+        assert_eq!(
+            build_smart_connect_script(ShellKind::Posix, "cmd", None, Some("htop"), None),
+            "exec htop\r\n"
+        );
+        // Empty / whitespace command → nothing to inject, even with a cwd.
+        assert_eq!(
+            build_smart_connect_script(ShellKind::Cmd, "cmd", Some(r"C:\x"), Some("  "), None),
+            ""
+        );
+        // Unknown mode → nothing.
+        assert_eq!(
+            build_smart_connect_script(ShellKind::Posix, "default", None, None, None),
+            ""
         );
     }
 }

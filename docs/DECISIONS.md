@@ -25,17 +25,24 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
-### 2026-06-10 — B1 agent-control UX is unclear to the user (onboarding gap)
-- **Context:** v0.2.7 smoke test. Yossi on the B1 surface: "לא ברור לי איך זה צריך לעבוד — זה אמור להיות קלוד שרץ על המחשב שלי? אם כן למה בהתחברות מקומית אין גם את כל הפקודות שמפעילות את קלוד?" The B1 implementation (6 RPC methods + 6 winmux-mcp tools, `1fc850b`) works, but nothing in the product explains WHO calls it or HOW to set it up.
-- **What needs deciding / doing:**
-  1. Clarify in docs and/or UI that this is Claude Code running LOCALLY on the Windows machine, talking to winmux through `winmux-mcp.exe` over the named pipe (one line in the local `mcp.json`). It is NOT the remote-SSH agent path.
-  2. The Smart Connect dropdown's Claude launchers (claude / --resume / session browser) only appear for SSH workspaces — add the same launchers for LOCAL connections so a locally-running Claude Code is a first-class flow, not an undocumented one.
-  3. Possibly: a Settings → Agents page or a first-run hint that shows the `mcp.json` snippet for winmux-mcp.
-- **Status:** Open — waiting for Yossi's call on scope (docs-only vs local-launcher parity vs full onboarding page). Flagged 2026-06-10 during the Phase 60 fix batch; deliberately NOT fixed in that batch.
+(empty)
 
 ---
 
 ## Decided
+
+### 2026-06-11 — Phase 61: local Claude launchers (B1 onboarding gap, scope decided)
+- **Context:** Follow-up to the Open entry below-dated 2026-06-10. Yossi's scope call: the gap that bothered him is the missing launchers — "בפתיחה של סשן חדש [ב-SSH] יש אפשרות להריץ את קלוד ישירות, למה בחיבור מקומי אין את זה?"
+- **Done (Phase 61):** Smart Connect Claude launchers (claude / --continue / --resume / --dangerously-skip-permissions / Resume from list…) now show for LOCAL connections too. Root cause of the SSH-only gate: the injected script was POSIX-only (`exec claude`, POSIX quoting). New `build_smart_connect_script(ShellKind, …)` shapes the injection per shell — PowerShell (`Set-Location -LiteralPath '…'; claude …`), Cmd (`cd /d "…" && claude …`), POSIX unchanged (`cd '…' && exec claude …`). Applies to mode="cmd" (Run command…) as well, which was equally POSIX-only. The session picker already worked locally (`list_claude_sessions_local`). 4 unit tests pin the three shapes.
+- **Deferred:** docs/UI explanation of the winmux-mcp local-agent path (item 1) and a Settings → Agents / first-run `mcp.json` hint (item 3) — not requested; revisit if the question comes up again.
+
+### 2026-06-10 — B1 agent-control UX is unclear to the user (onboarding gap) [CLOSED by Phase 61 above]
+- **Context:** v0.2.7 smoke test. Yossi on the B1 surface: "לא ברור לי איך זה צריך לעבוד — זה אמור להיות קלוד שרץ על המחשב שלי? אם כן למה בהתחברות מקומית אין גם את כל הפקודות שמפעילות את קלוד?" The B1 implementation (6 RPC methods + 6 winmux-mcp tools, `1fc850b`) works, but nothing in the product explains WHO calls it or HOW to set it up.
+- **What needed deciding / doing:**
+  1. Clarify in docs and/or UI that this is Claude Code running LOCALLY on the Windows machine, talking to winmux through `winmux-mcp.exe` over the named pipe (one line in the local `mcp.json`). It is NOT the remote-SSH agent path.
+  2. The Smart Connect dropdown's Claude launchers (claude / --resume / session browser) only appear for SSH workspaces — add the same launchers for LOCAL connections so a locally-running Claude Code is a first-class flow, not an undocumented one.
+  3. Possibly: a Settings → Agents page or a first-run hint that shows the `mcp.json` snippet for winmux-mcp.
+- **Resolution:** Item 2 done in Phase 61 (Yossi's scope call); items 1 + 3 deferred.
 
 ### 2026-06-10 — Phase 59 polish sweep (6 commits, 11 categories triaged)
 - **Context:** Proactive quality pass over the post-v0.2.7 codebase. 11 categories scanned; 6 produced commits, 5 were honest no-ops or already-clean.

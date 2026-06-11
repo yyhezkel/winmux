@@ -239,7 +239,7 @@ export function PaneView(p: Props) {
   // Phase 23.D: workspace dictates connection type. Check pane's own
   // connection first (set on wired Terminal panes), then fall back to
   // the workspace's canonical connection so SSH-only menu items
-  // (tmux, claude --resume…) show up from FM / Browser / Chat panes too.
+  // (tmux) show up from FM / Browser / Chat panes too.
   const isSsh = () =>
     (p.pane.connection?.type ?? p.workspaceConnection?.type) === "ssh";
   const isTmux = () => !!p.tmuxSession;
@@ -920,7 +920,10 @@ export function PaneView(p: Props) {
                         Run command…
                       </button>
                       <hr />
-                      <Show when={isSsh()}>
+                      {/* Phase 61: Claude launchers are no longer SSH-only —
+                          the backend injects shell-appropriate syntax for
+                          local PowerShell / Cmd panes too. */}
+                      <>
                         <div class="connect-menu-section">Run Claude Code:</div>
                         <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude" }); }}>
                           claude
@@ -937,7 +940,7 @@ export function PaneView(p: Props) {
                         <button onClick={() => { closeConnectMenu(); setShowClaudePicker(true); }}>
                           Resume from list…
                         </button>
-                      </Show>
+                      </>
                     </div>
                   </Show>
                 </div>

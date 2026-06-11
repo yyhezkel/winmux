@@ -923,24 +923,22 @@ export function PaneView(p: Props) {
                       {/* Phase 61: Claude launchers are no longer SSH-only —
                           the backend injects shell-appropriate syntax for
                           local PowerShell / Cmd panes too. */}
-                      <>
-                        <div class="connect-menu-section">Run Claude Code:</div>
-                        <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude" }); }}>
-                          claude
-                        </button>
-                        <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--continue" }); }}>
-                          claude --continue
-                        </button>
-                        <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--resume" }); }}>
-                          claude --resume
-                        </button>
-                        <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--dangerously-skip-permissions" }); }}>
-                          claude --dangerously-skip-permissions
-                        </button>
-                        <button onClick={() => { closeConnectMenu(); setShowClaudePicker(true); }}>
-                          Resume from list…
-                        </button>
-                      </>
+                      <div class="connect-menu-section">Run Claude Code:</div>
+                      <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude" }); }}>
+                        claude
+                      </button>
+                      <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--continue" }); }}>
+                        claude --continue
+                      </button>
+                      <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--resume" }); }}>
+                        claude --resume
+                      </button>
+                      <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--dangerously-skip-permissions" }); }}>
+                        claude --dangerously-skip-permissions
+                      </button>
+                      <button onClick={() => { closeConnectMenu(); setShowClaudePicker(true); }}>
+                        Resume from list…
+                      </button>
                     </div>
                   </Show>
                 </div>

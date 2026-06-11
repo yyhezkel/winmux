@@ -225,6 +225,8 @@
   "fm.zip.done": "כווץ ל-{out} ✓",
   "fm.unzip.done": "חולץ ל-{dest} ✓",
   "fm.unzip.error.notZip": "בחר קובץ .zip לחילוץ.",
+  "fm.unzip.confirmOverwrite": "התיקייה \"{dest}\" כבר קיימת — החילוץ ידרוס קבצים בתוכה. להמשיך?",
+  "browser.window.urlBar.placeholder": "הקלד כתובת ולחץ Enter…",
   "fm.btn.download": "↤ הורדה",
   "fm.label.pane": "🗂 מנהל קבצים",
   "fm.empty.no_ssh": "צד מרוחק לא זמין — חבר תחילה פאנל SSH ב-workspace הזה.",

@@ -5439,6 +5439,8 @@ pub fn run() {
             file_manager::file_manager_unzip_local,
             file_manager::file_manager_zip_remote,
             file_manager::file_manager_unzip_remote,
+            file_manager::file_manager_unzip_local_check,
+            file_manager::file_manager_unzip_remote_check,
             stt::stt_transcribe_local,
             claude_summary::claude_summarize,
             // Phase 24.D: claude_log_* commands KEPT (registered but

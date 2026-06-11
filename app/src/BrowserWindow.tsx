@@ -1,26 +1,37 @@
 import {
   createEffect,
   createSignal,
-  onCleanup,
   Show,
 } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { Workspace } from "./types";
 import { t } from "./i18n";
 
-// Phase 53 (rebased): workspace-level Browser floating window.
+// Phase 53 (rebased) → Phase 60 smoke-test fixes: workspace-level
+// Browser floating window.
 //
-// Owns an HTML "shell" (header + slot div + resize grip) plus a per-
-// workspace geometry signal. The native child Webview (managed by
-// `workspace_browser` on the Rust side) paints above the slot at the
-// same logical rect. Geometry is hydrated from localStorage on mount
-// and persisted on every change so the next open lands at the same
-// size + position the user left it at.
+// The component owns an HTML "shell" (header + URL bar + slot +
+// resize grip) and a per-workspace geometry signal. The native child
+// Webview (managed by `workspace_browser` on the Rust side) paints
+// above the SLOT — and only the slot. Phase 60 root-caused the
+// "can't close the browser" smoke-test bug to the Webview being
+// positioned over the ENTIRE window rect, covering the header, the
+// X button, and the resize grip with native content that eats every
+// click. The slot rect now excludes the chrome:
 //
-// Z-order: native Webview always paints above HTML, so any modal
-// opening in the SolidJS layer hides this Webview via App.tsx's
-// `anyModalOpen` effect. On modal close, the show effect below re-
-// fires with the current geometry.
+//   ┌─────────────────────────────┐ ← y
+//   │ header (drag + title + X)   │   CHROME_TOP_PX
+//   │ URL bar                     │
+//   ├─────────────────────────────┤
+//   │                             │
+//   │   native Webview lives here │   (the slot)
+//   │                             │
+//   ├─────────────────────────────┤
+//   │ bottom strip      [grip] ↘  │   CHROME_BOTTOM_PX
+//   └─────────────────────────────┘ ← y + h
+//
+// Close = HIDE, not destroy: page state survives reopen. The
+// workspace's Webview is only destroyed by workspace_delete.
 
 interface Props {
   open: boolean;
@@ -36,9 +47,18 @@ type Geometry = { x: number; y: number; w: number; h: number };
 const DEFAULT_GEOMETRY: Geometry = { x: 120, y: 80, w: 1100, h: 700 };
 const MIN_W = 480;
 const MIN_H = 320;
+/** Header (32) + URL bar (32). Must match the CSS heights. */
+const CHROME_TOP_PX = 64;
+/** Bottom strip that hosts the resize grip, clear of the Webview. */
+const CHROME_BOTTOM_PX = 16;
 const STORAGE_KEY = (workspaceId: string) =>
   `winmux.workspace-browser-geometry.${workspaceId}`;
-const HOME_URL = "about:blank";
+const URL_KEY = (workspaceId: string) =>
+  `winmux.workspace-browser-url.${workspaceId}`;
+// Phase 60: about:blank rendered as a white void (smoke-test bug
+// 2b). First open now lands on a real page; afterwards the last
+// navigated URL is restored per workspace.
+const DEFAULT_URL = "https://www.google.com";
 
 function loadGeometry(workspaceId: string): Geometry {
   try {
@@ -76,55 +96,116 @@ function saveGeometry(workspaceId: string, g: Geometry): void {
   }
 }
 
+function loadUrl(workspaceId: string): string {
+  try {
+    return localStorage.getItem(URL_KEY(workspaceId)) || DEFAULT_URL;
+  } catch {
+    return DEFAULT_URL;
+  }
+}
+
+function saveUrl(workspaceId: string, url: string): void {
+  try {
+    localStorage.setItem(URL_KEY(workspaceId), url);
+  } catch {
+    // ignore
+  }
+}
+
+/** The rect the native Webview should occupy, derived from the
+ *  window geometry minus the chrome. */
+function slotRect(g: Geometry): Geometry {
+  return {
+    x: g.x,
+    y: g.y + CHROME_TOP_PX,
+    w: g.w,
+    h: Math.max(1, g.h - CHROME_TOP_PX - CHROME_BOTTOM_PX),
+  };
+}
+
 export function BrowserWindow(p: Props) {
   const [geom, setGeom] = createSignal<Geometry>(DEFAULT_GEOMETRY);
+  const [urlInput, setUrlInput] = createSignal("");
 
-  // Workspace changed → load that workspace's saved geometry.
+  // Phase 60: track the workspace by ID, not object identity. The
+  // previous effect read `p.workspace` directly — every file()
+  // refresh (persist, pane status, ratio commit) produces NEW
+  // workspace objects, so the effect re-ran constantly and snapped
+  // the geometry back to the stored value mid-drag ("the window is
+  // stuck" smoke-test report).
+  let lastWsId: string | null = null;
   createEffect(() => {
-    const w = p.workspace;
-    if (!w) return;
-    setGeom(loadGeometry(w.id));
+    const id = p.workspace?.id;
+    if (!id || id === lastWsId) return;
+    lastWsId = id;
+    setGeom(loadGeometry(id));
+    setUrlInput(loadUrl(id));
   });
 
-  // Spawn / show effect. Fires when the window opens, when the
-  // workspace changes, or when modals close (anyModalOpen→false).
-  // The backend's workspace_browser_show spawns the Webview on first
-  // call for the workspace and reposition+shows it on subsequent calls
-  // — page state survives across hide/show cycles.
+  // Spawn / show / reposition. Fires when the window opens, the
+  // geometry changes (drag/resize), or modals close. The backend's
+  // workspace_browser_show spawns on first call and repositions +
+  // shows on subsequent ones — page state survives hide/show.
   createEffect(() => {
     if (!p.open) return;
-    const w = p.workspace;
-    if (!w) return;
+    const id = p.workspace?.id;
+    if (!id) return;
     if (p.anyModalOpen()) return;
-    const g = geom();
+    const s = slotRect(geom());
     void invoke("workspace_browser_show", {
-      workspaceId: w.id,
-      url: HOME_URL,
-      x: g.x,
-      y: g.y,
-      w: g.w,
-      h: g.h,
+      workspaceId: id,
+      url: loadUrl(id),
+      x: s.x,
+      y: s.y,
+      w: s.w,
+      h: s.h,
     }).catch((err) =>
       console.error("workspace_browser_show failed", err),
     );
   });
 
-  // Hide (not close) on unmount so the next open restores page state.
-  // workspace_delete is the only path that hard-closes the Webview.
-  onCleanup(() => {
-    const w = p.workspace;
-    if (!w) return;
-    void invoke("workspace_browser_hide", {
-      workspaceId: w.id,
-    }).catch(() => {});
+  // Phase 60: hide the Webview when the window CLOSES — not only on
+  // component unmount. The original code put this in onCleanup(),
+  // which never fires when the inner <Show> collapses (the component
+  // itself stays mounted in App.tsx). Result: closing the shell left
+  // the native Webview orphaned on screen, eating clicks — including
+  // the FileManagerWindow underneath it ("FM is stuck" was THIS bug,
+  // not an FM bug).
+  let wasOpen = false;
+  createEffect(() => {
+    const open = p.open;
+    const id = p.workspace?.id;
+    if (wasOpen && !open && id) {
+      void invoke("workspace_browser_hide", { workspaceId: id }).catch(
+        () => {},
+      );
+    }
+    wasOpen = open;
   });
 
-  // Persist geometry whenever it changes.
+  // Persist geometry whenever it changes (keyed write — cheap).
   createEffect(() => {
-    const w = p.workspace;
-    if (!w) return;
-    saveGeometry(w.id, geom());
+    const id = p.workspace?.id;
+    if (!id) return;
+    saveGeometry(id, geom());
   });
+
+  const navigate = () => {
+    const id = p.workspace?.id;
+    if (!id) return;
+    let url = urlInput().trim();
+    if (!url) return;
+    // Friendly default: no scheme → https.
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) {
+      url = `https://${url}`;
+      setUrlInput(url);
+    }
+    saveUrl(id, url);
+    void invoke("workspace_browser_navigate", {
+      workspaceId: id,
+      url,
+    }).catch((err) => console.error("workspace_browser_navigate failed", err));
+  };
 
   // ── Drag (header) ────────────────────────────────────────────────
   let dragState: { startX: number; startY: number; origX: number; origY: number } | null = null;
@@ -209,12 +290,37 @@ export function BrowserWindow(p: Props) {
             ×
           </button>
         </div>
+        {/* Phase 60: URL bar — part of the bug-2b fix (blank screen
+            with no way to navigate anywhere). Enter or the ⏎ button
+            navigates; the last URL persists per workspace. */}
+        <div class="browser-window-urlbar">
+          <input
+            type="text"
+            value={urlInput()}
+            placeholder={t("browser.window.urlBar.placeholder")}
+            onInput={(e) => setUrlInput(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                navigate();
+              }
+              // Keep keystrokes out of the global shortcut handler
+              // (Ctrl+Enter would otherwise toggle pane-maximize).
+              e.stopPropagation();
+            }}
+          />
+          <button onClick={navigate} title={t("browser.window.urlBar.placeholder")}>
+            ⏎
+          </button>
+        </div>
         <div class="browser-window-slot" />
-        <div
-          class="browser-window-resize"
-          onMouseDown={onResizeStart}
-          title={t("browser.window.resize.tooltip")}
-        />
+        <div class="browser-window-bottom">
+          <div
+            class="browser-window-resize"
+            onMouseDown={onResizeStart}
+            title={t("browser.window.resize.tooltip")}
+          />
+        </div>
       </div>
     </Show>
   );

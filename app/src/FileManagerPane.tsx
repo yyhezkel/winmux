@@ -504,6 +504,33 @@ export function FileManagerPane(p: Props) {
       setErr(t("fm.unzip.error.notZip"));
       return;
     }
+    // Phase 60 (smoke-test 3b): pre-flight — when the destination
+    // folder already exists (locally: exists AND non-empty), confirm
+    // before the extraction overwrites files in it. OK = overwrite,
+    // Cancel = abort. (Per-file Skip/Rename is a dialog component —
+    // deferred until someone actually needs it.)
+    const destName = name.replace(/\.zip$/i, "");
+    try {
+      const conflict =
+        s.side === "local"
+          ? await invoke<boolean>("file_manager_unzip_local_check", {
+              zipPath: fullLocal(name),
+            })
+          : await invoke<boolean>("file_manager_unzip_remote_check", {
+              workspaceId: p.workspaceId,
+              zipPath: fullRemote(name),
+            });
+      if (conflict) {
+        const proceed = window.confirm(
+          t("fm.unzip.confirmOverwrite", { dest: destName })
+        );
+        if (!proceed) return;
+      }
+    } catch (e) {
+      // Check failure shouldn't block the user — log + proceed (the
+      // unzip itself surfaces real errors through wrap()).
+      console.warn("unzip pre-flight check failed", e);
+    }
     if (s.side === "local") {
       const out = await wrap(`unzip ${name}`, () =>
         invoke<string>("file_manager_unzip_local", {

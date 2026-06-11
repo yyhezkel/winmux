@@ -260,6 +260,27 @@ export class TerminalInstance {
       return true;
     });
 
+    // Phase 60 (smoke-test #8): right-click = paste, PuTTY-style.
+    // Without this, WebView2 pops its own context menu over the
+    // terminal — that was the "default menu opens and I can't copy"
+    // report (combined with tmux mouse-tracking eating left-drag
+    // selection; the bundled conf now defaults `mouse off`). The
+    // full mouse contract is:
+    //   left-drag      → native xterm selection
+    //   Ctrl+C w/ sel  → copy (copy-on-select setting, above)
+    //   Ctrl+Shift+C   → copy (global shortcut table)
+    //   right-click    → paste from clipboard
+    this.container.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigator.clipboard
+        .readText()
+        .then((text) => {
+          if (text) this.term.paste(text);
+        })
+        .catch((err) => console.warn("right-click paste failed", err));
+    });
+
     // Phase 15.A: only load the WebGL addon for the non-auto modes.
     // `auto_per_line` needs the DOM renderer so we can attach
     // dir="auto" per row. WebGL paints to a canvas and has no per-cell

@@ -43,14 +43,8 @@ interface Props {
   // Phase 39.A: global Ports button (opens the window on the "All
   // workspaces" tab, no workspace context).
   onOpenPortsGlobal: () => void;
-  // Phase 53 (rebased): open the workspace-level Browser floating
-  // window for the currently active workspace. Each workspace has its
-  // own browser session + persisted geometry.
-  onOpenBrowser: () => void;
-  // Phase 53 (rebased): open the workspace-level File Manager
-  // floating window for the currently active workspace. Wraps the
-  // existing dual-column FileManagerPane.
-  onOpenFiles: () => void;
+  // Phase 60: onOpenBrowser / onOpenFiles props removed — the
+  // buttons moved to the workspace header (App.tsx, next to + diff).
 }
 
 export function Sidebar(p: Props) {
@@ -201,18 +195,9 @@ export function Sidebar(p: Props) {
           🌐 {t("sidebar.ports.label")}
         </button>
       </div>
-      {/* Phase 53 (rebased): workspace-level Browser + Files as
-          floating windows (was per-pane kinds). One Webview per
-          workspace for Browser; pure HTML for Files. Geometry
-          persists per-workspace in localStorage. */}
-      <div class="sidebar-actions-row">
-        <button class="ws-action-half" onClick={p.onOpenBrowser} title={t("sidebar.browser.tooltip")}>
-          🌐 {t("sidebar.browser.label")}
-        </button>
-        <button class="ws-action-half" onClick={p.onOpenFiles} title={t("sidebar.files.tooltip")}>
-          🗂 {t("sidebar.files.label")}
-        </button>
-      </div>
+      {/* Phase 60 (smoke-test 2a): the Browser + Files row moved to
+          the workspace header next to "+ diff" — they're workspace-
+          scoped tools and Yossi found them misplaced here. */}
       <button class="ws-add" onClick={p.onCreate}>
         {t("sidebar.new_workspace")}
       </button>

@@ -940,6 +940,66 @@ pub(crate) async fn file_manager_zip_local(
     Ok(out_pb.to_string_lossy().to_string())
 }
 
+/// Phase 60 (smoke-test 3b): pre-flight for the local unzip — does
+/// the destination directory already exist with content? The FE asks
+/// before extraction and shows an overwrite confirmation when true.
+/// An existing-but-EMPTY dir doesn't count as a conflict (nothing to
+/// lose).
+#[tauri::command]
+pub(crate) fn file_manager_unzip_local_check(zip_path: String) -> Result<bool, String> {
+    let zip_pb = std::path::PathBuf::from(expand_path(&zip_path));
+    let parent = zip_pb
+        .parent()
+        .ok_or_else(|| "unzip check: zip_path has no parent".to_string())?;
+    let stem = zip_pb
+        .file_stem()
+        .ok_or_else(|| "unzip check: zip_path has no file stem".to_string())?;
+    let dest = parent.join(stem);
+    if !dest.exists() {
+        return Ok(false);
+    }
+    let non_empty = std::fs::read_dir(&dest)
+        .map(|mut it| it.next().is_some())
+        .unwrap_or(false);
+    Ok(non_empty)
+}
+
+/// Phase 60 (smoke-test 3b): remote-side pre-flight. `[ -e <dest> ]`
+/// over the workspace's SSH handle; exit 0 = exists. We don't probe
+/// emptiness remotely — a one-liner `ls -A | head` adds a quoting
+/// surface for marginal value; "the folder exists" is warning enough.
+#[tauri::command]
+pub(crate) async fn file_manager_unzip_remote_check(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    zip_path: String,
+) -> Result<bool, String> {
+    let zp = std::path::Path::new(&zip_path);
+    let parent_dir = zp
+        .parent()
+        .and_then(|p| p.to_str())
+        .ok_or_else(|| "unzip check: zip_path has no parent".to_string())?
+        .to_string();
+    let stem = zp
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "unzip check: zip_path has no file stem".to_string())?
+        .to_string();
+    let dest = if parent_dir.is_empty() {
+        stem
+    } else {
+        format!("{parent_dir}/{stem}")
+    };
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| {
+            "no active SSH session for this workspace — connect a terminal pane first"
+                .to_string()
+        })?;
+    let cmd = format!("test -e {}", winmux_core::shell_quote(&dest));
+    let (_out, code) = remote_exec(&handle, &cmd).await?;
+    Ok(code == 0)
+}
+
 /// Phase 57: extract `zip_path` into `<dirname(zip_path)>/<basename(zip_path)
 /// without .zip>/`. Returns the destination directory's path.
 #[tauri::command]

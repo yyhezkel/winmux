@@ -3740,10 +3740,54 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   color: var(--w-text-primary, #e6edf3);
   background: var(--w-surface-hover, #1f2630);
 }
+/* Phase 60: URL bar between the header and the slot. Heights here
+   MUST stay in sync with CHROME_TOP_PX in BrowserWindow.tsx (header
+   32 + urlbar 32 = 64). */
+.browser-window-urlbar {
+  height: 32px;
+  flex: 0 0 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: var(--w-surface, #161b22);
+  border-bottom: 1px solid var(--w-border, #21262d);
+}
+.browser-window-urlbar input {
+  flex: 1;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--w-text-primary, #e6edf3);
+  background: var(--w-bg, #0e1116);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 4px;
+  outline: none;
+}
+.browser-window-urlbar input:focus { border-color: var(--w-accent, #7aa2f7); }
+.browser-window-urlbar button {
+  background: transparent;
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 4px;
+  color: var(--w-text-secondary, #7d8590);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.browser-window-urlbar button:hover { color: var(--w-text-primary, #e6edf3); }
 .browser-window-slot {
   flex: 1;
   background: var(--w-bg, #0e1116);
-  /* Empty — native Webview paints over it. */
+  /* Empty — native Webview paints over it (and ONLY it; the chrome
+     above/below stays clickable — Phase 60 fix). */
+}
+/* Phase 60: bottom strip keeps the resize grip clear of the native
+   Webview rect. Height must match CHROME_BOTTOM_PX (16). */
+.browser-window-bottom {
+  height: 16px;
+  flex: 0 0 16px;
+  position: relative;
+  background: var(--w-surface-raised, #1c232c);
+  border-top: 1px solid var(--w-border, #21262d);
 }
 .browser-window-resize {
   position: absolute;

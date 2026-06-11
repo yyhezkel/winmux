@@ -225,6 +225,8 @@
   "fm.zip.done": "Заархивировано → {out} ✓",
   "fm.unzip.done": "Распаковано → {dest} ✓",
   "fm.unzip.error.notZip": "Выберите файл .zip для распаковки.",
+  "fm.unzip.confirmOverwrite": "Папка \"{dest}\" уже существует — распаковка перезапишет файлы внутри. Продолжить?",
+  "browser.window.urlBar.placeholder": "Введите URL и нажмите Enter…",
   "fm.btn.download": "↤ Скачать",
   "fm.label.pane": "🗂 файловый менеджер",
   "fm.empty.no_ssh": "Удалённая сторона недоступна — сначала подключите SSH-панель в этом пространстве.",

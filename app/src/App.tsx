@@ -1074,24 +1074,39 @@ function App() {
     }
   };
 
-  // Phase 55-B: distribute split ratios evenly. Walks the active
-  // workspace's tree and resets every Split.ratio to 0.5 via the
-  // backend tauri command, then fits + resizes every pane so xterm
-  // catches up to the new column widths.
+  // Phase 55-B → 60: distribute split ratios evenly. Phase 60
+  // (smoke-test 4.2) made the reset OPTIMISTIC: apply the 0.5 ratios
+  // to the local file() signal immediately, then let the backend
+  // persist + return the canonical snapshot. The visual reset is now
+  // instant and independent of the invoke round-trip, and if the
+  // backend errors the next workspaces:changed refresh reconciles.
   const distributeEvenly = async () => {
     const ws = activeWs();
     if (!ws) return;
+    // Optimistic local pass — walk the layout, reset every ratio.
+    const resetRatios = (n: LayoutNode): LayoutNode =>
+      n.kind === "split"
+        ? { ...n, ratio: 0.5, first: resetRatios(n.first), second: resetRatios(n.second) }
+        : n;
+    if (ws.layout) {
+      const updated = resetRatios(ws.layout);
+      setFile({
+        ...file(),
+        workspaces: file().workspaces.map((w) =>
+          w.id === ws.id ? { ...w, layout: updated } : w,
+        ),
+      });
+      queueMicrotask(() => {
+        for (const pid of collectPanes(updated)) {
+          terms.get(pid)?.fitAndResize();
+        }
+      });
+    }
     try {
       const f = await invoke<WorkspacesFile>("workspace_distribute_evenly", {
         workspaceId: ws.id,
       });
       updateFile(f);
-      queueMicrotask(() => {
-        if (!ws.layout) return;
-        for (const pid of collectPanes(ws.layout)) {
-          terms.get(pid)?.fitAndResize();
-        }
-      });
     } catch (e) {
       console.error("workspace_distribute_evenly failed", e);
     }
@@ -1202,12 +1217,17 @@ function App() {
         }
       }
     }
-    // Phase 55-B: Ctrl+Alt+= → distribute splits evenly. Resets every
-    // split's ratio to 0.5 across the active workspace. Doubles for
-    // the underlying physical key on most layouts; Shift+= types "+"
-    // so a matches() check on "=" still fires when Shift+Alt+Ctrl+=
-    // arrives at the keyboard layer.
-    if (e.ctrlKey && e.altKey && (e.key === "=" || e.key === "+")) {
+    // Phase 55-B → 60 (smoke-test 4.2): Ctrl+Alt+= → distribute
+    // splits evenly. The original check matched e.key only — on a
+    // Hebrew layout Ctrl+Alt is AltGr and e.key can come back as
+    // something other than "="/"+" depending on the compose state.
+    // e.code === "Equal" identifies the PHYSICAL key independent of
+    // layout, so the shortcut now fires on any keyboard.
+    if (
+      e.ctrlKey &&
+      e.altKey &&
+      (e.key === "=" || e.key === "+" || e.code === "Equal")
+    ) {
       e.preventDefault();
       void distributeEvenly();
       return;
@@ -1660,8 +1680,6 @@ function App() {
             setShowPortsWindow(true);
           }}
           onOpenPortsGlobal={() => setShowPortsWindow(true)}
-          onOpenBrowser={() => setShowBrowserWindow(true)}
-          onOpenFiles={() => setShowFilesWindow(true)}
         />
       </ErrorBoundary>
       <div class="main">
@@ -1714,10 +1732,6 @@ function App() {
                 {collectPanes(activeWs()!.layout!).length} panes
               </span>
             </Show>
-            {/* Phase 53 (rebased): the "+ browser" and "+ files"
-                split-pane buttons are gone — both surfaces are now
-                workspace-level floating windows opened from the
-                sidebar (🌐 Browser / 🗂 Files). */}
             <Show when={activeWs()!.layout && activePaneId()}>
               {/* Phase 50: add a Diff pane (#2.4). Same split mechanic
                   as the other kinds. */}
@@ -1730,6 +1744,26 @@ function App() {
                 }}
               >
                 {t("ws_header.add_diff")}
+              </button>
+              {/* Phase 60 (smoke-test 2a): Browser + Files buttons
+                  live HERE, next to + diff — they're workspace-scoped
+                  tools, so they belong in the workspace header, not
+                  in the global sidebar. The i18n keys keep their
+                  historical "sidebar." prefix; renaming 8 keys × 4
+                  locales for a cosmetic prefix isn't worth the churn. */}
+              <button
+                class="ws-header-btn"
+                title={t("sidebar.browser.tooltip")}
+                onClick={() => setShowBrowserWindow(true)}
+              >
+                🌐 {t("sidebar.browser.label")}
+              </button>
+              <button
+                class="ws-header-btn"
+                title={t("sidebar.files.tooltip")}
+                onClick={() => setShowFilesWindow(true)}
+              >
+                🗂 {t("sidebar.files.label")}
               </button>
               {/* Phase 24.D: removed + chat / + claude log buttons.
                   The two pane kinds + their backends are rolled back

@@ -25,7 +25,13 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
-_(nothing open — Phase 59.D swept the section; both long-running entries closed below)_
+### 2026-06-10 — B1 agent-control UX is unclear to the user (onboarding gap)
+- **Context:** v0.2.7 smoke test. Yossi on the B1 surface: "לא ברור לי איך זה צריך לעבוד — זה אמור להיות קלוד שרץ על המחשב שלי? אם כן למה בהתחברות מקומית אין גם את כל הפקודות שמפעילות את קלוד?" The B1 implementation (6 RPC methods + 6 winmux-mcp tools, `1fc850b`) works, but nothing in the product explains WHO calls it or HOW to set it up.
+- **What needs deciding / doing:**
+  1. Clarify in docs and/or UI that this is Claude Code running LOCALLY on the Windows machine, talking to winmux through `winmux-mcp.exe` over the named pipe (one line in the local `mcp.json`). It is NOT the remote-SSH agent path.
+  2. The Smart Connect dropdown's Claude launchers (claude / --resume / session browser) only appear for SSH workspaces — add the same launchers for LOCAL connections so a locally-running Claude Code is a first-class flow, not an undocumented one.
+  3. Possibly: a Settings → Agents page or a first-run hint that shows the `mcp.json` snippet for winmux-mcp.
+- **Status:** Open — waiting for Yossi's call on scope (docs-only vs local-launcher parity vs full onboarding page). Flagged 2026-06-10 during the Phase 60 fix batch; deliberately NOT fixed in that batch.
 
 ---
 

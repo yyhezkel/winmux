@@ -74,18 +74,24 @@ function isSshWorkspace(w: Workspace | null): boolean {
 export function FileManagerWindow(p: Props) {
   const [geom, setGeom] = createSignal<Geometry>(DEFAULT_GEOMETRY);
 
-  // Workspace changed → load that workspace's saved geometry.
+  // Phase 60: workspace tracked by ID, not object identity. Reading
+  // `p.workspace` directly made this effect re-run on EVERY file()
+  // refresh (new object identities each persist) and snap the
+  // geometry back to the stored value — the "window is fixed in
+  // place" smoke-test report. Same fix as BrowserWindow.
+  let lastWsId: string | null = null;
   createEffect(() => {
-    const w = p.workspace;
-    if (!w) return;
-    setGeom(loadGeometry(w.id));
+    const id = p.workspace?.id;
+    if (!id || id === lastWsId) return;
+    lastWsId = id;
+    setGeom(loadGeometry(id));
   });
 
   // Persist whenever geometry changes.
   createEffect(() => {
-    const w = p.workspace;
-    if (!w) return;
-    saveGeometry(w.id, geom());
+    const id = p.workspace?.id;
+    if (!id) return;
+    saveGeometry(id, geom());
   });
 
   // ── Drag (header) ────────────────────────────────────────────────

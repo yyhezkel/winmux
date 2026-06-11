@@ -225,6 +225,8 @@
   "fm.zip.done": "تم الضغط إلى {out} ✓",
   "fm.unzip.done": "تم الفك إلى {dest} ✓",
   "fm.unzip.error.notZip": "اختر ملف .zip لفك الضغط.",
+  "fm.unzip.confirmOverwrite": "المجلد \"{dest}\" موجود بالفعل — سيؤدي الاستخراج إلى استبدال الملفات بداخله. هل تريد المتابعة؟",
+  "browser.window.urlBar.placeholder": "أدخل العنوان واضغط Enter…",
   "fm.btn.download": "↤ تنزيل",
   "fm.label.pane": "🗂 مدير الملفات",
   "fm.empty.no_ssh": "البعيد غير متوفر — قم أولاً بتوصيل لوحة SSH في بيئة العمل هذه.",

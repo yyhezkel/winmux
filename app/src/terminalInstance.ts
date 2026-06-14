@@ -3,6 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
 import { reorderRtlForDisplay } from "./bidi";
+import { t } from "./i18n";
 
 // Phase 9.A live font apply + Phase 15.A per-line auto-direction.
 //
@@ -126,6 +127,77 @@ export async function copyTerminalSelection(): Promise<boolean> {
     }
   }
   return false;
+}
+
+// Phase 62.A (item E): custom terminal right-click menu. Phase 60
+// blocked the native WebView2 context menu (which the user had been
+// using to Copy/Paste in the PLAIN terminal) and replaced right-click
+// with paste-only — that read as "copy AND paste stopped working".
+// This restores a discoverable Copy / Paste / Select-all menu. The
+// native menu stays suppressed. One menu at a time, document-wide.
+let g_termMenu: HTMLDivElement | null = null;
+function dismissTerminalMenu(): void {
+  if (!g_termMenu) return;
+  g_termMenu.remove();
+  g_termMenu = null;
+  document.removeEventListener("mousedown", onTermMenuOutside, true);
+  document.removeEventListener("keydown", onTermMenuKey, true);
+  window.removeEventListener("blur", dismissTerminalMenu);
+  window.removeEventListener("resize", dismissTerminalMenu);
+}
+function onTermMenuOutside(e: MouseEvent): void {
+  if (g_termMenu && !g_termMenu.contains(e.target as Node)) dismissTerminalMenu();
+}
+function onTermMenuKey(e: KeyboardEvent): void {
+  if (e.key === "Escape") dismissTerminalMenu();
+}
+function showTerminalContextMenu(ti: TerminalInstance, x: number, y: number): void {
+  dismissTerminalMenu();
+  const sel = ti.term.getSelection();
+  const menu = document.createElement("div");
+  menu.className = "term-ctx-menu";
+  const addItem = (label: string, enabled: boolean, action: () => void) => {
+    const b = document.createElement("button");
+    b.className = "term-ctx-item";
+    b.textContent = label;
+    b.disabled = !enabled;
+    b.addEventListener("click", () => {
+      action();
+      dismissTerminalMenu();
+    });
+    menu.appendChild(b);
+  };
+  addItem(t("term.ctx.copy"), !!sel, () => {
+    if (sel) {
+      navigator.clipboard
+        .writeText(sel)
+        .catch((err) => console.warn("terminal copy failed", err));
+    }
+  });
+  addItem(t("term.ctx.paste"), true, () => {
+    navigator.clipboard
+      .readText()
+      .then((text) => {
+        if (text) ti.term.paste(text);
+      })
+      .catch((err) => console.warn("terminal paste failed", err));
+  });
+  addItem(t("term.ctx.selectAll"), true, () => ti.term.selectAll());
+
+  // Append first so we can measure, then clamp inside the viewport.
+  document.body.appendChild(menu);
+  const r = menu.getBoundingClientRect();
+  const px = Math.max(4, Math.min(x, window.innerWidth - r.width - 8));
+  const py = Math.max(4, Math.min(y, window.innerHeight - r.height - 8));
+  menu.style.left = `${px}px`;
+  menu.style.top = `${py}px`;
+  g_termMenu = menu;
+  // Capture-phase dismiss so a click anywhere else closes it before
+  // that click does anything surprising.
+  document.addEventListener("mousedown", onTermMenuOutside, true);
+  document.addEventListener("keydown", onTermMenuKey, true);
+  window.addEventListener("blur", dismissTerminalMenu);
+  window.addEventListener("resize", dismissTerminalMenu);
 }
 
 export class TerminalInstance {
@@ -260,25 +332,21 @@ export class TerminalInstance {
       return true;
     });
 
-    // Phase 60 (smoke-test #8): right-click = paste, PuTTY-style.
-    // Without this, WebView2 pops its own context menu over the
-    // terminal — that was the "default menu opens and I can't copy"
-    // report (combined with tmux mouse-tracking eating left-drag
-    // selection; the bundled conf now defaults `mouse off`). The
-    // full mouse contract is:
+    // Phase 60 → 62.A (item E): right-click opens a custom Copy / Paste
+    // / Select-all menu. Phase 60 suppressed the native WebView2 menu
+    // and made right-click paste-only; in the plain terminal that lost
+    // the user's Copy affordance entirely ("copy and paste stopped
+    // working"). We keep the native menu suppressed but give back a
+    // real menu. The full mouse contract is now:
     //   left-drag      → native xterm selection
     //   Ctrl+C w/ sel  → copy (copy-on-select setting, above)
     //   Ctrl+Shift+C   → copy (global shortcut table)
-    //   right-click    → paste from clipboard
+    //   Ctrl+Shift+V   → paste (global shortcut table)
+    //   right-click    → Copy / Paste / Select-all menu
     this.container.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      navigator.clipboard
-        .readText()
-        .then((text) => {
-          if (text) this.term.paste(text);
-        })
-        .catch((err) => console.warn("right-click paste failed", err));
+      showTerminalContextMenu(this, e.clientX, e.clientY);
     });
 
     // Phase 15.A: only load the WebGL addon for the non-auto modes.
@@ -487,6 +555,9 @@ export class TerminalInstance {
   }
 
   dispose() {
+    // Phase 62.A (item E): close the right-click menu if it's open over
+    // this terminal — its actions reference this.term.
+    dismissTerminalMenu();
     // Phase 35: flush any queued PTY chunks synchronously before the
     // rAF can fire, so the last bytes aren't lost when a pane closes
     // mid-stream. Then cancel the pending frame.

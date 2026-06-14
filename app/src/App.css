@@ -2239,6 +2239,34 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: rgba(247, 118, 142, 0.14) !important;
 }
 
+/* Phase 62.A (item E): terminal right-click menu (Copy / Paste /
+   Select all). Mirrors the file-manager context menu; position-fixed,
+   created in terminalInstance.ts and appended to <body>. */
+.term-ctx-menu {
+  position: fixed;
+  z-index: 300;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border-hi, #30363d);
+  border-radius: var(--w-r-md, 6px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.term-ctx-item {
+  text-align: start;
+  background: transparent;
+  border: none;
+  color: var(--w-text);
+  font-size: var(--w-fs-sm);
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.term-ctx-item:hover:not(:disabled) { background: var(--w-surface-hi); }
+.term-ctx-item:disabled { opacity: 0.4; cursor: default; }
+
 /* Phase 62 (item 6): in-pane confirm toast (delete / zip / unzip).
    Anchored bottom-centre of the file-manager pane (which is
    position: relative), floating above the columns. */

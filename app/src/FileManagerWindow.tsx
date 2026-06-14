@@ -6,6 +6,11 @@ import {
 import type { Workspace } from "./types";
 import { FileManagerPane } from "./FileManagerPane";
 import { t } from "./i18n";
+import {
+  makeWindowControls,
+  ResizeHandles,
+  type Geometry,
+} from "./floatingWindow";
 
 // Phase 53 (rebased): workspace-level File Manager floating window.
 //
@@ -22,8 +27,6 @@ interface Props {
   hasActiveSession: boolean;
   onClose: () => void;
 }
-
-type Geometry = { x: number; y: number; w: number; h: number };
 
 const DEFAULT_GEOMETRY: Geometry = { x: 160, y: 100, w: 1100, h: 700 };
 const MIN_W = 600;
@@ -94,63 +97,14 @@ export function FileManagerWindow(p: Props) {
     saveGeometry(id, geom());
   });
 
-  // ── Drag (header) ────────────────────────────────────────────────
-  let dragState: { startX: number; startY: number; origX: number; origY: number } | null = null;
-  const onDragMouseMove = (e: MouseEvent) => {
-    if (!dragState) return;
-    setGeom((g) => ({
-      ...g,
-      x: Math.max(0, dragState!.origX + (e.clientX - dragState!.startX)),
-      y: Math.max(0, dragState!.origY + (e.clientY - dragState!.startY)),
-    }));
-  };
-  const onDragMouseUp = () => {
-    dragState = null;
-    window.removeEventListener("mousemove", onDragMouseMove);
-    window.removeEventListener("mouseup", onDragMouseUp);
-  };
-  const onDragStart = (e: MouseEvent) => {
-    if ((e.target as HTMLElement).closest(".fm-window-x")) return;
-    e.preventDefault();
-    const g = geom();
-    dragState = {
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: g.x,
-      origY: g.y,
-    };
-    window.addEventListener("mousemove", onDragMouseMove);
-    window.addEventListener("mouseup", onDragMouseUp);
-  };
-
-  // ── Resize (bottom-right grip) ───────────────────────────────────
-  let resizeState: { startX: number; startY: number; origW: number; origH: number } | null = null;
-  const onResizeMouseMove = (e: MouseEvent) => {
-    if (!resizeState) return;
-    setGeom((g) => ({
-      ...g,
-      w: Math.max(MIN_W, resizeState!.origW + (e.clientX - resizeState!.startX)),
-      h: Math.max(MIN_H, resizeState!.origH + (e.clientY - resizeState!.startY)),
-    }));
-  };
-  const onResizeMouseUp = () => {
-    resizeState = null;
-    window.removeEventListener("mousemove", onResizeMouseMove);
-    window.removeEventListener("mouseup", onResizeMouseUp);
-  };
-  const onResizeStart = (e: MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const g = geom();
-    resizeState = {
-      startX: e.clientX,
-      startY: e.clientY,
-      origW: g.w,
-      origH: g.h,
-    };
-    window.addEventListener("mousemove", onResizeMouseMove);
-    window.addEventListener("mouseup", onResizeMouseUp);
-  };
+  // Phase 62 (item 2): shared header-drag + 8-way resize.
+  const { onDragStart, onResizeStart } = makeWindowControls({
+    geom,
+    setGeom,
+    minW: MIN_W,
+    minH: MIN_H,
+    closeGuardSelector: ".fm-window-x",
+  });
 
   return (
     <Show when={p.open && p.workspace}>
@@ -163,18 +117,23 @@ export function FileManagerWindow(p: Props) {
           height: `${geom().h}px`,
         }}
       >
+        {/* Phase 62 (item 3): the close button is the FIRST header child
+            so it lands on the inline-start corner — left in LTR, right in
+            RTL (the header flex follows the document `dir`). It sits on the
+            opposite edge from the side a docked pane snaps to. */}
         <div class="fm-window-header" onMouseDown={onDragStart}>
-          <span class="fm-window-title">
-            🗂{" "}
-            {t("files.window.title", { workspace: p.workspace!.name })}
-          </span>
           <button
             class="fm-window-x"
             onClick={p.onClose}
             title={t("common.close")}
+            aria-label={t("common.close")}
           >
             ×
           </button>
+          <span class="fm-window-title">
+            🗂{" "}
+            {t("files.window.title", { workspace: p.workspace!.name })}
+          </span>
         </div>
         <div class="fm-window-body">
           <FileManagerPane
@@ -183,11 +142,8 @@ export function FileManagerWindow(p: Props) {
             hasActiveSession={p.hasActiveSession}
           />
         </div>
-        <div
-          class="fm-window-resize"
-          onMouseDown={onResizeStart}
-          title={t("files.window.resize.tooltip")}
-        />
+        {/* Phase 62 (item 2): 4 edges + 4 corners. */}
+        <ResizeHandles onStart={onResizeStart} />
       </div>
     </Show>
   );

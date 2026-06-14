@@ -1997,6 +1997,14 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   align-items: center;
   cursor: pointer;
   border-bottom: 1px solid transparent;
+  /* Phase 62 (item 5): the whole row carries the onClick. Without
+     this, clicking the filename text (rendered as a selectable
+     <code> token by TechText) started a text selection instead of a
+     clean row click/dblclick — so only the emoji-icon cell (no text)
+     felt "live". Killing text selection makes every cell behave the
+     same. The single ⧉ "copy path" toolbar button covers the rare
+     case where the user actually wants the name on the clipboard. */
+  user-select: none;
 }
 .fm-row:hover { background: var(--w-surface-hi); }
 .fm-row.selected {
@@ -2229,6 +2237,45 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 }
 .fm-action-danger:hover:not(:disabled) {
   background: rgba(247, 118, 142, 0.14) !important;
+}
+
+/* Phase 62 (item 6): in-pane confirm toast (delete / zip / unzip).
+   Anchored bottom-centre of the file-manager pane (which is
+   position: relative), floating above the columns. */
+.fm-confirm-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 320px;
+  max-width: 90%;
+  padding: 14px 16px;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border-hi, #30363d);
+  border-radius: var(--w-r-md, 8px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  animation: feed-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.fm-confirm-toast.danger {
+  border-color: rgba(247, 118, 142, 0.5);
+}
+.fm-confirm-title {
+  font-size: var(--w-fs-md);
+  color: var(--w-text);
+}
+.fm-confirm-detail {
+  margin-top: 3px;
+  font-size: var(--w-fs-sm);
+  color: var(--w-text-dim);
+}
+.fm-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* Phase 23: column highlight when OS is dragging a file over it. */
@@ -3708,7 +3755,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .browser-window-header {
   height: 32px;
   flex: 0 0 32px;
-  padding: 0 8px 0 12px;
+  padding: 0 8px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3726,19 +3773,27 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Phase 62 (item 3): close button — always visible (faint chip so it
+   reads as a button even at rest), conventional red wash on hover. */
 .browser-window-x {
-  background: transparent;
-  border: none;
+  flex: 0 0 auto;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
   color: var(--w-text-secondary, #7d8590);
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
-  padding: 2px 6px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   border-radius: 4px;
 }
 .browser-window-x:hover {
-  color: var(--w-text-primary, #e6edf3);
-  background: var(--w-surface-hover, #1f2630);
+  color: #fff;
+  background: var(--w-error, #f7768e);
+  border-color: var(--w-error, #f7768e);
 }
 /* Phase 60: URL bar between the header and the slot. Heights here
    MUST stay in sync with CHROME_TOP_PX in BrowserWindow.tsx (header
@@ -3789,29 +3844,6 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: var(--w-surface-raised, #1c232c);
   border-top: 1px solid var(--w-border, #21262d);
 }
-.browser-window-resize {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 16px;
-  height: 16px;
-  cursor: nwse-resize;
-  background:
-    linear-gradient(
-      135deg,
-      transparent 0%,
-      transparent 50%,
-      var(--w-text-secondary, #7d8590) 50%,
-      var(--w-text-secondary, #7d8590) 60%,
-      transparent 60%,
-      transparent 70%,
-      var(--w-text-secondary, #7d8590) 70%,
-      var(--w-text-secondary, #7d8590) 80%,
-      transparent 80%
-    );
-  opacity: 0.5;
-}
-.browser-window-resize:hover { opacity: 1; }
 
 /* Phase 53 (rebased): fallback rendering when a hand-edited
    workspaces.json still has a legacy Browser / FileManager pane.
@@ -3843,7 +3875,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .fm-window-header {
   height: 32px;
   flex: 0 0 32px;
-  padding: 0 8px 0 12px;
+  padding: 0 8px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3861,19 +3893,27 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Phase 62 (item 3): always-visible close chip, red wash on hover.
+   Matches .browser-window-x. */
 .fm-window-x {
-  background: transparent;
-  border: none;
+  flex: 0 0 auto;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
   color: var(--w-text-secondary, #7d8590);
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
-  padding: 2px 6px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   border-radius: 4px;
 }
 .fm-window-x:hover {
-  color: var(--w-text-primary, #e6edf3);
-  background: var(--w-surface-hover, #1f2630);
+  color: #fff;
+  background: var(--w-error, #f7768e);
+  border-color: var(--w-error, #f7768e);
 }
 .fm-window-body {
   flex: 1;
@@ -3882,13 +3922,24 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   /* FileManagerPane renders its own dual-column layout inside this. */
 }
 .fm-window-body > * { flex: 1; min-height: 0; }
-.fm-window-resize {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 16px;
-  height: 16px;
-  cursor: nwse-resize;
+
+/* Phase 62 (item 2): shared 8-way resize handles for the floating
+   Browser / File-Manager windows. Absolutely positioned inside the
+   `position: fixed` window. Edges are thin strips; corners are small
+   squares that sit above the edges. For the Browser, the native Webview
+   is inset by the same strip width so these HTML handles aren't
+   swallowed by native content. */
+.fw-resize { position: absolute; z-index: 6; }
+.fw-resize-n { top: 0; left: 0; right: 0; height: 6px; cursor: ns-resize; }
+.fw-resize-s { bottom: 0; left: 0; right: 0; height: 6px; cursor: ns-resize; }
+.fw-resize-e { top: 0; bottom: 0; right: 0; width: 6px; cursor: ew-resize; }
+.fw-resize-w { top: 0; bottom: 0; left: 0; width: 6px; cursor: ew-resize; }
+.fw-resize-ne { top: 0; right: 0; width: 12px; height: 12px; cursor: nesw-resize; z-index: 7; }
+.fw-resize-nw { top: 0; left: 0; width: 12px; height: 12px; cursor: nwse-resize; z-index: 7; }
+.fw-resize-se { bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; z-index: 7; }
+.fw-resize-sw { bottom: 0; left: 0; width: 14px; height: 14px; cursor: nesw-resize; z-index: 7; }
+/* The bottom-right corner gets the classic grip texture as an affordance. */
+.fw-resize-se {
   background:
     linear-gradient(
       135deg,
@@ -3904,7 +3955,11 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
     );
   opacity: 0.5;
 }
-.fm-window-resize:hover { opacity: 1; }
+.fw-resize-se:hover { opacity: 1; }
+/* Phase 62 (item 3): keep the close button clickable above the corner
+   handles that overlap it. */
+.fm-window-x,
+.browser-window-x { position: relative; z-index: 8; }
 
 /* Phase 58: speech-to-text recording indicator + error toast.
    Floating top-centre, pill-shaped, doesn't intercept clicks. */

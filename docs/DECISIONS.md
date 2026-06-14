@@ -25,12 +25,34 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
-(empty)
+### 2026-06-14 — Phase 62 part 2: Browser/FileManager 3-mode window UX (Pane / Float / Pop-out)
+- **Context:** Yossi's Phase 60+61 smoke test produced a 6-item list, all about the floating Browser + File-Manager windows. Items 5 (hit-area), 3 (X button), 2 (resize), 6 (toasts+tooltips) shipped in Phase 62 (commit pending). The headline item (1+4) — make these windows true windows with three modes — is the large architectural piece, deliberately split out so it gets a focused pass instead of endangering the quick-win smoke build.
+- **Spec (Yossi):** every window kind (Browser, FileManager) switches between:
+  1. **Pane** — docked to the edge like a side panel. Side follows UI `dir`: RTL → left, LTR → right.
+  2. **Float** — current modal-style div over the workspace; drag header + 8-way resize (already shipped in P62).
+  3. **Pop-out** — a standalone OS window (draggable to a 2nd monitor). Closing it restores the previous mode.
+- **Transitions:** three header buttons (📌 pin-to-side, 🪟 float, 🗗 pop-out) + drag-the-header gestures: drag outside the main window → pop-out; drag to the docked edge (RTL left / LTR right) → snap-to-pane; else float.
+- **Design notes / risks:**
+  - **Browser is a native child Webview** (`workspace_browser_*`, painted over a slot). It cannot be re-parented into another OS window cheaply. Cleanest pop-out for Browser = open a real standalone `WebviewWindow` navigated to the current URL (it IS a browser), hide the in-app child Webview, and on close re-show + restore mode. FileManager is pure HTML → pop-out = a `WebviewWindow` loading the app with a `?popout=files&ws=<id>` route that renders only `<FileManagerPane>`.
+  - **Persistence:** store per-kind `{ mode, floatRect, popoutRect(+display) }`. Current geometry already persists in localStorage per workspace; extend that (localStorage is the right home for per-machine window geometry — avoids settings.json churn + Rule #7 surface). Yossi's message suggested a Rust `FloatingWindowState` in settings; localStorage chosen instead, documented here.
+  - **Multi-monitor:** save popout screen position; on next launch, if the saved monitor is gone, fall back to the main window's monitor.
+  - **JS-side `WebviewWindow` creation** needs the `core:webview:allow-create-webview-window` capability — verify/add in `tauri.conf.json` capabilities before building.
+  - Pane mode needs a docked container in `.main` (flex sibling of the layout-root) — there is no existing SidePane infra (Notes/Settings are modals, not docks), so this is net-new CSS + a slot in App.tsx.
+- **Status:** Open — next sub-phase. Estimate: large (Rust commands for popout lifecycle + TS mode state machine + CSS dock + drag-transition + capability change). Build incrementally (FileManager first — pure HTML — then Browser).
 
 ---
 
 ## Decided
 
+### 2026-06-14 — Phase 62 (part 1): floating-window quick wins (items 5, 3, 2, 6)
+- **Context:** First round of Yossi's 6-item floating-window smoke-test list. The four tractable, low-risk items, shipped ahead of the big 3-mode piece (logged Open above).
+- **Done:**
+  - **(5) FileManager hit-area** — clicking a filename did nothing while clicking the emoji icon worked. Root cause: `.fm-row` lacked `user-select: none`, so clicking the name (a selectable `<code>` token from TechText) started a text selection instead of a clean row click/dblclick. One CSS line fixes the whole row. (Multi-row Shift/Ctrl select deferred — the selection model is single-item; proper multi-select would ripple through every bulk action.)
+  - **(3) Close button** — moved to the inline-start corner (LTR left / RTL right, via header child order + dir-aware flex) on BOTH windows, restyled as an always-visible chip with a red hover wash, and given `z-index` above the corner resize handles so it's always clickable.
+  - **(2) Resize** — new shared `floatingWindow.tsx` (`makeWindowControls` + `<ResizeHandles>` + pure `resizeRect`) gives both windows 4 edges + 4 corners with min-size clamping (pins the opposite edge on N/W drags). Browser's native Webview is inset by `CHROME_SIDE_PX` so the HTML edge handles aren't swallowed. Geometry still persists per-workspace in localStorage.
+  - **(6) Toasts + tooltips** — delete / zip / unzip-overwrite now use an in-pane confirm toast (Cancel + danger-styled confirm) instead of `window.confirm`. Descriptive tooltips added for every FM toolbar action + the Browser go button, across all 4 locales (en/he/ar/ru, +13 keys each, 538 total, zero drift). "Open" → "open on the local machine"; "Edit" → "open & edit in the built-in editor on the selected side".
+
+### 2026-06-11 — Phase 61: local Claude launchers (B1 onboarding gap, scope decided)
 ### 2026-06-11 — Phase 61: local Claude launchers (B1 onboarding gap, scope decided)
 - **Context:** Follow-up to the Open entry below-dated 2026-06-10. Yossi's scope call: the gap that bothered him is the missing launchers — "בפתיחה של סשן חדש [ב-SSH] יש אפשרות להריץ את קלוד ישירות, למה בחיבור מקומי אין את זה?"
 - **Done (Phase 61):** Smart Connect Claude launchers (claude / --continue / --resume / --dangerously-skip-permissions / Resume from list…) now show for LOCAL connections too. Root cause of the SSH-only gate: the injected script was POSIX-only (`exec claude`, POSIX quoting). New `build_smart_connect_script(ShellKind, …)` shapes the injection per shell — PowerShell (`Set-Location -LiteralPath '…'; claude …`), Cmd (`cd /d "…" && claude …`), POSIX unchanged (`cd '…' && exec claude …`). Applies to mode="cmd" (Run command…) as well, which was equally POSIX-only. The session picker already worked locally (`list_claude_sessions_local`). 4 unit tests pin the three shapes.

@@ -50,6 +50,20 @@ export function FileManagerPane(p: Props) {
   const [busy, setBusy] = createSignal(false);
   const [err, setErr] = createSignal<string | null>(null);
   const [status, setStatus] = createSignal<string>("");
+
+  // Phase 62 (item 6): in-pane confirm toast with Confirm/Cancel
+  // actions. Replaces window.confirm for destructive (delete, unzip
+  // overwrite) and packing (zip) operations — the native dialog is
+  // jarring and can render off the floating window.
+  type ConfirmReq = {
+    title: string;
+    detail?: string;
+    confirmLabel: string;
+    danger: boolean;
+    onConfirm: () => void;
+  };
+  const [confirmToast, setConfirmToast] = createSignal<ConfirmReq | null>(null);
+  const askConfirm = (o: ConfirmReq) => setConfirmToast(o);
   // Phase 16/29: toolbar toggle for hiding the local column when the
   // user only cares about remote. Phase 29: default flipped to FALSE
   // — Yossi's workflow is remote-first on SSH workspaces, the local
@@ -464,9 +478,9 @@ export function FileManagerPane(p: Props) {
   // managers. The output zip name is derived from the basename so
   // identical entries can sit side-by-side post-zip without colliding
   // unless the user re-runs the action.
-  const zipSel = async () => {
-    const s = selectedEntry();
-    if (!s) return;
+  // Phase 62 (item 6): zip now confirms first (toast). The actual work
+  // is in performZip; zipSel just gates it behind the confirm toast.
+  const performZip = async (s: { side: Side; entry: FileEntry }) => {
     const name = s.entry.name;
     const outputName = `${name}.zip`;
     if (s.side === "local") {
@@ -496,41 +510,22 @@ export function FileManagerPane(p: Props) {
       }
     }
   };
-  const unzipSel = async () => {
+  const zipSel = () => {
     const s = selectedEntry();
     if (!s) return;
+    askConfirm({
+      title: t("fm.confirm.zip.title", {
+        name: s.entry.name,
+        out: `${s.entry.name}.zip`,
+      }),
+      confirmLabel: t("fm.zip.button"),
+      danger: false,
+      onConfirm: () => void performZip(s),
+    });
+  };
+
+  const performUnzip = async (s: { side: Side; entry: FileEntry }) => {
     const name = s.entry.name;
-    if (!name.toLowerCase().endsWith(".zip")) {
-      setErr(t("fm.unzip.error.notZip"));
-      return;
-    }
-    // Phase 60 (smoke-test 3b): pre-flight — when the destination
-    // folder already exists (locally: exists AND non-empty), confirm
-    // before the extraction overwrites files in it. OK = overwrite,
-    // Cancel = abort. (Per-file Skip/Rename is a dialog component —
-    // deferred until someone actually needs it.)
-    const destName = name.replace(/\.zip$/i, "");
-    try {
-      const conflict =
-        s.side === "local"
-          ? await invoke<boolean>("file_manager_unzip_local_check", {
-              zipPath: fullLocal(name),
-            })
-          : await invoke<boolean>("file_manager_unzip_remote_check", {
-              workspaceId: p.workspaceId,
-              zipPath: fullRemote(name),
-            });
-      if (conflict) {
-        const proceed = window.confirm(
-          t("fm.unzip.confirmOverwrite", { dest: destName })
-        );
-        if (!proceed) return;
-      }
-    } catch (e) {
-      // Check failure shouldn't block the user — log + proceed (the
-      // unzip itself surfaces real errors through wrap()).
-      console.warn("unzip pre-flight check failed", e);
-    }
     if (s.side === "local") {
       const out = await wrap(`unzip ${name}`, () =>
         invoke<string>("file_manager_unzip_local", {
@@ -554,11 +549,50 @@ export function FileManagerPane(p: Props) {
       }
     }
   };
+  const unzipSel = async () => {
+    const s = selectedEntry();
+    if (!s) return;
+    const name = s.entry.name;
+    if (!name.toLowerCase().endsWith(".zip")) {
+      setErr(t("fm.unzip.error.notZip"));
+      return;
+    }
+    // Phase 60 (smoke-test 3b) → 62: pre-flight — when the destination
+    // folder already exists (locally: exists AND non-empty), confirm
+    // before the extraction overwrites files in it. The confirm is now
+    // the in-pane toast instead of window.confirm. (Per-file
+    // Skip/Rename is a dialog component — deferred until needed.)
+    const destName = name.replace(/\.zip$/i, "");
+    let conflict = false;
+    try {
+      conflict =
+        s.side === "local"
+          ? await invoke<boolean>("file_manager_unzip_local_check", {
+              zipPath: fullLocal(name),
+            })
+          : await invoke<boolean>("file_manager_unzip_remote_check", {
+              workspaceId: p.workspaceId,
+              zipPath: fullRemote(name),
+            });
+    } catch (e) {
+      // Check failure shouldn't block the user — log + proceed (the
+      // unzip itself surfaces real errors through wrap()).
+      console.warn("unzip pre-flight check failed", e);
+    }
+    if (conflict) {
+      askConfirm({
+        title: t("fm.unzip.confirmOverwrite", { dest: destName }),
+        confirmLabel: t("fm.unzip.button"),
+        danger: true,
+        onConfirm: () => void performUnzip(s),
+      });
+    } else {
+      void performUnzip(s);
+    }
+  };
 
-  const deleteSel = async (side: Side) => {
-    const name = side === "local" ? localSel() : remoteSel();
-    if (!name) return;
-    if (!window.confirm(t("fm.action.confirm_delete", { name }))) return;
+  // Phase 62 (item 6): delete confirms via the in-pane toast.
+  const performDelete = async (side: Side, name: string) => {
     if (side === "local") {
       const path = fullLocal(name);
       await wrap(`delete ${name}`, () => invoke("file_delete_local", { path }));
@@ -570,6 +604,17 @@ export function FileManagerPane(p: Props) {
       );
       await refreshRemote();
     }
+  };
+  const deleteSel = (side: Side) => {
+    const name = side === "local" ? localSel() : remoteSel();
+    if (!name) return;
+    askConfirm({
+      title: t("fm.confirm.delete.title", { name }),
+      detail: t("fm.confirm.delete.detail"),
+      confirmLabel: t("common.delete"),
+      danger: true,
+      onConfirm: () => void performDelete(side, name),
+    });
   };
   const renameSel = async (side: Side) => {
     const name = side === "local" ? localSel() : remoteSel();
@@ -921,7 +966,7 @@ export function FileManagerPane(p: Props) {
         </span>
         <button
           class="fm-action"
-          title={t("fm.action.open")}
+          title={t("fm.action.open.tooltip")}
           disabled={busy() || !selectedEntry()}
           onClick={() => {
             const s = selectedEntry();
@@ -934,7 +979,7 @@ export function FileManagerPane(p: Props) {
         </button>
         <button
           class="fm-action"
-          title={t("fm.action.edit")}
+          title={t("fm.action.edit.tooltip")}
           disabled={busy() || !selectedEntry() || !!selectedEntry()?.entry.is_dir}
           onClick={() => {
             const s = selectedEntry();
@@ -951,7 +996,7 @@ export function FileManagerPane(p: Props) {
         <Show when={p.hasSsh}>
           <button
             class="fm-action"
-            title={t("fm.btn.upload")}
+            title={t("fm.btn.upload.tooltip")}
             disabled={
               busy() ||
               !selectedEntry() ||
@@ -964,7 +1009,7 @@ export function FileManagerPane(p: Props) {
           </button>
           <button
             class="fm-action"
-            title={t("fm.btn.download")}
+            title={t("fm.btn.download.tooltip")}
             disabled={
               busy() ||
               !selectedEntry() ||
@@ -978,7 +1023,7 @@ export function FileManagerPane(p: Props) {
         </Show>
         <button
           class="fm-action"
-          title={t("common.rename")}
+          title={t("fm.action.rename.tooltip")}
           disabled={busy() || !selectedEntry()}
           onClick={() => {
             const s = selectedEntry();
@@ -989,7 +1034,7 @@ export function FileManagerPane(p: Props) {
         </button>
         <button
           class="fm-action"
-          title={t("fm.action.copy_path")}
+          title={t("fm.action.copy_path.tooltip")}
           disabled={busy() || !selectedEntry()}
           onClick={() => {
             const s = selectedEntry();
@@ -1005,15 +1050,15 @@ export function FileManagerPane(p: Props) {
             dir, unzip → <name>/ in the same dir. */}
         <button
           class="fm-action"
-          title={t("fm.zip.button")}
+          title={t("fm.zip.tooltip")}
           disabled={busy() || !selectedEntry()}
-          onClick={() => void zipSel()}
+          onClick={() => zipSel()}
         >
           {t("fm.zip.button")}
         </button>
         <button
           class="fm-action"
-          title={t("fm.unzip.button")}
+          title={t("fm.unzip.tooltip")}
           disabled={
             busy() ||
             !selectedEntry() ||
@@ -1025,7 +1070,7 @@ export function FileManagerPane(p: Props) {
         </button>
         <button
           class="fm-action fm-action-danger"
-          title={t("common.delete")}
+          title={t("fm.action.delete.tooltip")}
           disabled={busy() || !selectedEntry()}
           onClick={() => {
             const s = selectedEntry();
@@ -1279,6 +1324,41 @@ export function FileManagerPane(p: Props) {
             </div>
           );
         })()}
+      </Show>
+
+      {/* Phase 62 (item 6): confirm toast for delete / zip / unzip-
+           overwrite. Replaces the native window.confirm with an in-pane
+           card carrying Cancel + a (danger-styled) confirm action. */}
+      <Show when={confirmToast()}>
+        {(c) => (
+          <div
+            class={`fm-confirm-toast ${c().danger ? "danger" : ""}`}
+            role="alertdialog"
+            aria-modal="false"
+          >
+            <div class="fm-confirm-body">
+              <div class="fm-confirm-title">{c().title}</div>
+              <Show when={c().detail}>
+                <div class="fm-confirm-detail">{c().detail}</div>
+              </Show>
+            </div>
+            <div class="fm-confirm-actions">
+              <button class="fm-action" onClick={() => setConfirmToast(null)}>
+                {t("common.cancel")}
+              </button>
+              <button
+                class={`fm-action ${c().danger ? "fm-action-danger" : ""}`}
+                onClick={() => {
+                  const fn = c().onConfirm;
+                  setConfirmToast(null);
+                  fn();
+                }}
+              >
+                {c().confirmLabel}
+              </button>
+            </div>
+          </div>
+        )}
       </Show>
 
       <Show when={editorOpen() && editorTarget()}>

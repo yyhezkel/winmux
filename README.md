@@ -99,7 +99,10 @@ Workspace-scoped floating windows for both the dual-column local +
 remote SFTP file manager (navigate, upload, download, rename, delete,
 mkdir, zip/unzip on either side) and a native child Webview as a
 per-workspace browser with its own cookie / cache directory. Window
-size + position persist per workspace.
+size + position persist per workspace; both windows drag by the header
+and resize from all four edges + corners, with an always-visible close
+button on the inline-start corner. Destructive / packing actions
+(delete, zip, unzip-overwrite) confirm via an in-pane toast.
 
 ### ⚙️ Settings, notes, localization
 

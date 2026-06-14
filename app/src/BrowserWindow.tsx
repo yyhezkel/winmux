@@ -6,6 +6,11 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import type { Workspace } from "./types";
 import { t } from "./i18n";
+import {
+  makeWindowControls,
+  ResizeHandles,
+  type Geometry,
+} from "./floatingWindow";
 
 // Phase 53 (rebased) → Phase 60 smoke-test fixes: workspace-level
 // Browser floating window.
@@ -42,8 +47,6 @@ interface Props {
   anyModalOpen: () => boolean;
 }
 
-type Geometry = { x: number; y: number; w: number; h: number };
-
 const DEFAULT_GEOMETRY: Geometry = { x: 120, y: 80, w: 1100, h: 700 };
 const MIN_W = 480;
 const MIN_H = 320;
@@ -51,6 +54,11 @@ const MIN_H = 320;
 const CHROME_TOP_PX = 64;
 /** Bottom strip that hosts the resize grip, clear of the Webview. */
 const CHROME_BOTTOM_PX = 16;
+/** Phase 62 (item 2): horizontal inset so the native Webview clears the
+ *  left/right resize handles (native content paints above HTML and would
+ *  otherwise eat the edge-handle mouse events). Matches the .fw-resize
+ *  strip width in App.css. */
+const CHROME_SIDE_PX = 6;
 const STORAGE_KEY = (workspaceId: string) =>
   `winmux.workspace-browser-geometry.${workspaceId}`;
 const URL_KEY = (workspaceId: string) =>
@@ -116,9 +124,9 @@ function saveUrl(workspaceId: string, url: string): void {
  *  window geometry minus the chrome. */
 function slotRect(g: Geometry): Geometry {
   return {
-    x: g.x,
+    x: g.x + CHROME_SIDE_PX,
     y: g.y + CHROME_TOP_PX,
-    w: g.w,
+    w: Math.max(1, g.w - 2 * CHROME_SIDE_PX),
     h: Math.max(1, g.h - CHROME_TOP_PX - CHROME_BOTTOM_PX),
   };
 }
@@ -207,64 +215,16 @@ export function BrowserWindow(p: Props) {
     }).catch((err) => console.error("workspace_browser_navigate failed", err));
   };
 
-  // ── Drag (header) ────────────────────────────────────────────────
-  let dragState: { startX: number; startY: number; origX: number; origY: number } | null = null;
-  const onDragMouseMove = (e: MouseEvent) => {
-    if (!dragState) return;
-    setGeom((g) => ({
-      ...g,
-      x: Math.max(0, dragState!.origX + (e.clientX - dragState!.startX)),
-      y: Math.max(0, dragState!.origY + (e.clientY - dragState!.startY)),
-    }));
-  };
-  const onDragMouseUp = () => {
-    dragState = null;
-    window.removeEventListener("mousemove", onDragMouseMove);
-    window.removeEventListener("mouseup", onDragMouseUp);
-  };
-  const onDragStart = (e: MouseEvent) => {
-    // Don't drag when the user clicked the close button itself.
-    if ((e.target as HTMLElement).closest(".browser-window-x")) return;
-    e.preventDefault();
-    const g = geom();
-    dragState = {
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: g.x,
-      origY: g.y,
-    };
-    window.addEventListener("mousemove", onDragMouseMove);
-    window.addEventListener("mouseup", onDragMouseUp);
-  };
-
-  // ── Resize (bottom-right grip) ───────────────────────────────────
-  let resizeState: { startX: number; startY: number; origW: number; origH: number } | null = null;
-  const onResizeMouseMove = (e: MouseEvent) => {
-    if (!resizeState) return;
-    setGeom((g) => ({
-      ...g,
-      w: Math.max(MIN_W, resizeState!.origW + (e.clientX - resizeState!.startX)),
-      h: Math.max(MIN_H, resizeState!.origH + (e.clientY - resizeState!.startY)),
-    }));
-  };
-  const onResizeMouseUp = () => {
-    resizeState = null;
-    window.removeEventListener("mousemove", onResizeMouseMove);
-    window.removeEventListener("mouseup", onResizeMouseUp);
-  };
-  const onResizeStart = (e: MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const g = geom();
-    resizeState = {
-      startX: e.clientX,
-      startY: e.clientY,
-      origW: g.w,
-      origH: g.h,
-    };
-    window.addEventListener("mousemove", onResizeMouseMove);
-    window.addEventListener("mouseup", onResizeMouseUp);
-  };
+  // Phase 62 (item 2): shared header-drag + 8-way resize. The geometry
+  // effect above re-pushes the slot rect to the native Webview on every
+  // change, so resizing live-tracks the page.
+  const { onDragStart, onResizeStart } = makeWindowControls({
+    geom,
+    setGeom,
+    minW: MIN_W,
+    minH: MIN_H,
+    closeGuardSelector: ".browser-window-x",
+  });
 
   return (
     <Show when={p.open && p.workspace}>
@@ -277,18 +237,21 @@ export function BrowserWindow(p: Props) {
           height: `${geom().h}px`,
         }}
       >
+        {/* Phase 62 (item 3): close button first → inline-start corner
+            (left in LTR, right in RTL), matching the File Manager window. */}
         <div class="browser-window-header" onMouseDown={onDragStart}>
-          <span class="browser-window-title">
-            🌐{" "}
-            {t("browser.window.title", { workspace: p.workspace!.name })}
-          </span>
           <button
             class="browser-window-x"
             onClick={p.onClose}
             title={t("common.close")}
+            aria-label={t("common.close")}
           >
             ×
           </button>
+          <span class="browser-window-title">
+            🌐{" "}
+            {t("browser.window.title", { workspace: p.workspace!.name })}
+          </span>
         </div>
         {/* Phase 60: URL bar — part of the bug-2b fix (blank screen
             with no way to navigate anywhere). Enter or the ⏎ button
@@ -309,18 +272,16 @@ export function BrowserWindow(p: Props) {
               e.stopPropagation();
             }}
           />
-          <button onClick={navigate} title={t("browser.window.urlBar.placeholder")}>
+          <button onClick={navigate} title={t("browser.urlBar.go.tooltip")}>
             ⏎
           </button>
         </div>
         <div class="browser-window-slot" />
-        <div class="browser-window-bottom">
-          <div
-            class="browser-window-resize"
-            onMouseDown={onResizeStart}
-            title={t("browser.window.resize.tooltip")}
-          />
-        </div>
+        <div class="browser-window-bottom" />
+        {/* Phase 62 (item 2): 4 edges + 4 corners. The native Webview is
+            inset by CHROME_SIDE_PX / CHROME_BOTTOM_PX so these HTML
+            handles aren't swallowed by native content. */}
+        <ResizeHandles onStart={onResizeStart} />
       </div>
     </Show>
   );

@@ -98,11 +98,15 @@ full auth ladder and tells you exactly which stage failed and why.
 Workspace-scoped floating windows for both the dual-column local +
 remote SFTP file manager (navigate, upload, download, rename, delete,
 mkdir, zip/unzip on either side) and a native child Webview as a
-per-workspace browser with its own cookie / cache directory. Window
-size + position persist per workspace; both windows drag by the header
-and resize from all four edges + corners, with an always-visible close
-button on the inline-start corner. Destructive / packing actions
-(delete, zip, unzip-overwrite) confirm via an in-pane toast.
+per-workspace browser. The browser is a window onto the services
+running ON the server: instead of a free URL bar it offers the remote
+ports the port-watcher has detected — pick a port, add an optional
+path, and it forwards on demand and loads it over the tunnel (no
+external browsing). Window size + position persist per workspace; both
+windows drag by the header and resize from all four edges + corners,
+with an always-visible close button on the inline-end corner.
+Destructive / packing actions (delete, zip, unzip-overwrite) confirm
+via an in-pane toast.
 
 ### ⚙️ Settings, notes, localization
 

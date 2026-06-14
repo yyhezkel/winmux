@@ -117,11 +117,15 @@ export function FileManagerWindow(p: Props) {
           height: `${geom().h}px`,
         }}
       >
-        {/* Phase 62 (item 3): the close button is the FIRST header child
-            so it lands on the inline-start corner — left in LTR, right in
-            RTL (the header flex follows the document `dir`). It sits on the
-            opposite edge from the side a docked pane snaps to. */}
+        {/* Phase 62.A (item A): the close button is the LAST header child
+            so it lands on the inline-END corner — right in LTR, left in
+            RTL (the header flex follows the document `dir`). Matches the
+            Windows/macOS convention Yossi expects. */}
         <div class="fm-window-header" onMouseDown={onDragStart}>
+          <span class="fm-window-title">
+            🗂{" "}
+            {t("files.window.title", { workspace: p.workspace!.name })}
+          </span>
           <button
             class="fm-window-x"
             onClick={p.onClose}
@@ -130,10 +134,6 @@ export function FileManagerWindow(p: Props) {
           >
             ×
           </button>
-          <span class="fm-window-title">
-            🗂{" "}
-            {t("files.window.title", { workspace: p.workspace!.name })}
-          </span>
         </div>
         <div class="fm-window-body">
           <FileManagerPane

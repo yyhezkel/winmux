@@ -3798,7 +3798,9 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 /* Phase 60: URL bar between the header and the slot. Heights here
    MUST stay in sync with CHROME_TOP_PX in BrowserWindow.tsx (header
    32 + urlbar 32 = 64). */
-.browser-window-urlbar {
+/* Phase 62.C: port bar — replaces the free URL bar. Refresh · server:
+   port dropdown · path · Go. Height (32) + header (32) = CHROME_TOP_PX. */
+.browser-window-portbar {
   height: 32px;
   flex: 0 0 32px;
   display: flex;
@@ -3808,8 +3810,45 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: var(--w-surface, #161b22);
   border-bottom: 1px solid var(--w-border, #21262d);
 }
-.browser-window-urlbar input {
+.bw-port-btn {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 4px;
+  color: var(--w-text-secondary, #7d8590);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.bw-port-btn:hover { color: var(--w-text-primary, #e6edf3); }
+.bw-port-server {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--w-text-dim, #7d8590);
+  user-select: none;
+}
+.bw-port-none {
   flex: 1;
+  font-size: 12px;
+  color: var(--w-text-dim, #7d8590);
+  font-style: italic;
+}
+.bw-port-select {
+  flex: 0 0 auto;
+  max-width: 220px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--w-text-primary, #e6edf3);
+  background: var(--w-bg, #0e1116);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: 4px;
+  outline: none;
+}
+.bw-port-select:focus { border-color: var(--w-accent, #7aa2f7); }
+.bw-port-sep { flex: 0 0 auto; color: var(--w-text-dim, #7d8590); }
+.bw-port-path {
+  flex: 1;
+  min-width: 80px;
   height: 24px;
   padding: 0 8px;
   font-size: 12px;
@@ -3819,21 +3858,68 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   border-radius: 4px;
   outline: none;
 }
-.browser-window-urlbar input:focus { border-color: var(--w-accent, #7aa2f7); }
-.browser-window-urlbar button {
-  background: transparent;
-  border: 1px solid var(--w-border, #21262d);
+.bw-port-path:focus { border-color: var(--w-accent, #7aa2f7); }
+.bw-port-go {
+  flex: 0 0 auto;
+  background: var(--w-accent, #7aa2f7);
+  border: 1px solid var(--w-accent, #7aa2f7);
   border-radius: 4px;
-  color: var(--w-text-secondary, #7d8590);
-  padding: 2px 8px;
+  color: #0e1116;
+  padding: 2px 12px;
   cursor: pointer;
+  font-weight: 600;
 }
-.browser-window-urlbar button:hover { color: var(--w-text-primary, #e6edf3); }
+.bw-port-go:disabled { opacity: 0.45; cursor: default; }
 .browser-window-slot {
   flex: 1;
+  position: relative;
   background: var(--w-bg, #0e1116);
-  /* Empty — native Webview paints over it (and ONLY it; the chrome
-     above/below stays clickable — Phase 60 fix). */
+  /* Native Webview paints over it (and ONLY it; the chrome above/below
+     stays clickable — Phase 60). The empty-state below shows through
+     while the Webview is hidden (no port loaded yet — Phase 62.C). */
+}
+.browser-window-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.bw-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 460px;
+  text-align: center;
+}
+.bw-empty-icon { font-size: 40px; opacity: 0.85; }
+.bw-empty-title {
+  margin: 0;
+  font-size: var(--w-fs-lg, 16px);
+  color: var(--w-text);
+}
+.bw-empty-body {
+  margin: 0;
+  font-size: var(--w-fs-sm);
+  color: var(--w-text-dim);
+  line-height: 1.5;
+}
+.bw-empty-refresh {
+  margin-top: 6px;
+  background: transparent;
+  border: 1px solid var(--w-border-hi, #30363d);
+  border-radius: var(--w-r-md, 6px);
+  color: var(--w-text);
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.bw-empty-refresh:hover { background: var(--w-surface-hi); }
+.bw-empty-err {
+  margin: 6px 0 0;
+  font-size: var(--w-fs-sm);
+  color: var(--w-error, #f7768e);
 }
 /* Phase 60: bottom strip keeps the resize grip clear of the native
    Webview rect. Height must match CHROME_BOTTOM_PX (16). */

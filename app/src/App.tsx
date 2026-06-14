@@ -559,21 +559,12 @@ function App() {
   // alone don't fill the FE signal when the workspace was previously
   // active in another session — the detected_ports state may exist on
   // the backend without the FE having seen its events.
-  let lastPortsEnsuredWs: string | null = null;
-  createEffect(() => {
-    const ws = activeWs();
-    if (!ws) {
-      lastPortsEnsuredWs = null;
-      return;
-    }
-    // Re-fire when the workspace itself changes OR its toggle flips on
-    // (so flipping the toggle "live" also kicks the watcher).
-    const key = `${ws.id}:${ws.auto_port_forward ? 1 : 0}`;
-    if (key === lastPortsEnsuredWs) return;
-    lastPortsEnsuredWs = key;
-    if (ws.connection?.type !== "ssh") return;
-    if (!ws.auto_port_forward) return;
-    const wsId = ws.id;
+  // Phase 47 → 62.C: ensure the remote port-watcher is running and pull
+  // a fresh snapshot of detected ports into the FE signal. Extracted from
+  // the workspace-activation effect so the Browser window (item C) can
+  // call it on open / Refresh too — the Browser needs the port list even
+  // when auto_port_forward is off (it forwards on demand per chosen port).
+  const ensurePortsSnapshot = (wsId: string) => {
     void invoke("workspace_ensure_port_watcher", { workspaceId: wsId }).catch((e) =>
       console.warn("workspace_ensure_port_watcher failed", e),
     );
@@ -595,6 +586,23 @@ function App() {
         });
       })
       .catch((e) => console.warn("list_detected_ports failed", e));
+  };
+
+  let lastPortsEnsuredWs: string | null = null;
+  createEffect(() => {
+    const ws = activeWs();
+    if (!ws) {
+      lastPortsEnsuredWs = null;
+      return;
+    }
+    // Re-fire when the workspace itself changes OR its toggle flips on
+    // (so flipping the toggle "live" also kicks the watcher).
+    const key = `${ws.id}:${ws.auto_port_forward ? 1 : 0}`;
+    if (key === lastPortsEnsuredWs) return;
+    lastPortsEnsuredWs = key;
+    if (ws.connection?.type !== "ssh") return;
+    if (!ws.auto_port_forward) return;
+    ensurePortsSnapshot(ws.id);
   });
 
   const reconcilePanes = (file: WorkspacesFile) => {
@@ -2027,6 +2035,35 @@ function App() {
         workspace={activeWs()}
         anyModalOpen={anyModalOpen}
         onClose={() => setShowBrowserWindow(false)}
+        detectedPorts={(() => {
+          const id = file().active_workspace_id;
+          return id
+            ? detectedPorts()
+                .filter((p) => p.workspace_id === id)
+                .map((p) => ({
+                  remote_port: p.remote_port,
+                  addr: p.addr,
+                  family: p.family,
+                }))
+            : [];
+        })()}
+        forwards={(() => {
+          const id = file().active_workspace_id;
+          return id
+            ? portForwards()
+                .filter((f) => f.workspace_id === id)
+                .map((f) => ({
+                  remote_port: f.remote_port,
+                  local_port: f.local_port,
+                }))
+            : [];
+        })()}
+        onEnsurePorts={ensurePortsSnapshot}
+        onStartForward={(remotePort) => {
+          const id = file().active_workspace_id;
+          if (!id) return Promise.reject(new Error("no active workspace"));
+          return startForward(id, remotePort);
+        }}
       />
 
       {/* Phase 53 (rebased): floating workspace-level File Manager

@@ -154,6 +154,13 @@ pub(crate) struct AppState {
     /// `workspace_browser::cleanup_workspace_sessions` to remove the
     /// matching `browser-sessions/<workspace_id>/` directory.
     pub(crate) workspace_browsers: workspace_browser::WorkspaceBrowserMap,
+    /// Phase 62.A (item D): serializes native Browser Webview creation.
+    /// WebView2's `add_child` intermittently returns 0x8007139F
+    /// (ERROR_INVALID_STATE) when two creations race, or when a
+    /// just-closed webview hasn't fully released its WebView2
+    /// environment. Held across the (retrying) slow path in
+    /// `workspace_browser_show` so at most one creation runs at a time.
+    pub(crate) browser_create_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 pub(crate) static NOTIF_COUNTER: AtomicU64 = AtomicU64::new(0);

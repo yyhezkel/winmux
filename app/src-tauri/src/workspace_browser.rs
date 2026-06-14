@@ -117,7 +117,33 @@ pub(crate) async fn workspace_browser_show(
             return Ok(());
         }
     }
-    // Slow path: spawn a new child Webview.
+    // Slow path: spawn a new child Webview. Phase 62.A (item D):
+    // serialize creation across ALL workspaces — WebView2 dislikes
+    // concurrent environment creation and returns 0x8007139F
+    // (ERROR_INVALID_STATE). The guard is held across the whole creation
+    // (including the retry backoff) so two rapid opens can't race.
+    let _create_guard = state.browser_create_lock.lock().await;
+
+    // Re-check under the creation lock: another call may have created
+    // the webview while we were waiting on the lock. Without this, two
+    // concurrent show() calls for the same workspace would both miss the
+    // fast path above and both call add_child → a duplicate-label /
+    // same-user-data-dir failure (a second ERROR_INVALID_STATE source).
+    {
+        let map = state.workspace_browsers.lock().unwrap();
+        if let Some(webview) = map.get(&workspace_id).cloned() {
+            drop(map);
+            webview
+                .set_position(LogicalPosition::new(x, y))
+                .map_err(|e| format!("set_position: {e}"))?;
+            webview
+                .set_size(LogicalSize::new(w.max(1.0), h.max(1.0)))
+                .map_err(|e| format!("set_size: {e}"))?;
+            webview.show().map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    }
+
     let main_window = app
         .get_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
@@ -127,16 +153,43 @@ pub(crate) async fn workspace_browser_show(
     let label = webview_label(&workspace_id);
     let user_data_arg = user_data_dir_arg(&workspace_id)?;
 
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed_url))
-        .additional_browser_args(&user_data_arg);
-
-    let webview = main_window
-        .add_child(
+    // Retry the transient WebView2 ERROR_INVALID_STATE a couple of times
+    // with a short backoff (the builder is consumed by add_child, so we
+    // rebuild it each attempt). A clean failure is surfaced to the FE
+    // only after all attempts are exhausted.
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut last_err = String::new();
+    let mut created = None;
+    for attempt in 1..=MAX_ATTEMPTS {
+        let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed_url.clone()))
+            .additional_browser_args(&user_data_arg);
+        match main_window.add_child(
             builder,
             LogicalPosition::new(x, y),
             LogicalSize::new(w.max(1.0), h.max(1.0)),
-        )
-        .map_err(|e| format!("add_child: {e}"))?;
+        ) {
+            Ok(wv) => {
+                dlog(&format!(
+                    "[workspace_browser_show] add_child ws={} ok (attempt {}/{})",
+                    workspace_id, attempt, MAX_ATTEMPTS
+                ));
+                created = Some(wv);
+                break;
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                dlog(&format!(
+                    "[workspace_browser_show] add_child ws={} attempt {}/{} FAILED: {}",
+                    workspace_id, attempt, MAX_ATTEMPTS, last_err
+                ));
+                if attempt < MAX_ATTEMPTS {
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                }
+            }
+        }
+    }
+    let webview =
+        created.ok_or_else(|| format!("add_child failed after {MAX_ATTEMPTS} attempts: {last_err}"))?;
 
     state
         .workspace_browsers

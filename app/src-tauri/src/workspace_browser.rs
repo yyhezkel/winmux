@@ -6,10 +6,16 @@
 //! frontend calls `workspace_browser_show(w_X, url, x, y, w, h)`:
 //!
 //! - If no Webview exists for `w_X` yet, we spawn one via
-//!   `Window::add_child(WebviewBuilder, ...)` with
-//!   `--user-data-dir="<config_dir>/browser-sessions/<w_X>/"` so
-//!   cookies + localStorage + cache survive restarts and don't
-//!   cross-contaminate between workspaces.
+//!   `Window::add_child(WebviewBuilder, ...)`. Phase 62.A (item D):
+//!   all browser webviews share the process-DEFAULT WebView2
+//!   environment (same as the main window). We do NOT pass a
+//!   per-workspace `--user-data-dir` — that forced a SEPARATE WebView2
+//!   environment per workspace, and WebView2 does not support multiple
+//!   environments in one process: the conflict surfaced as
+//!   intermittent 0x8007139F (ERROR_INVALID_STATE) on creation. The
+//!   supported shape is one environment with many webviews. Trade-off:
+//!   workspaces share browser cookies / cache (acceptable — the
+//!   browser only views tunneled localhost services).
 //! - If one already exists, we reposition/resize it and call
 //!   `.show()` (the floating-window pattern can hide a workspace's
 //!   browser when the user closes the floating panel, then bring it
@@ -47,19 +53,6 @@ fn webview_label(workspace_id: &str) -> String {
     format!("workspace-browser-{workspace_id}")
 }
 
-/// Resolve the per-workspace browser session directory. Created on
-/// first spawn; never auto-deleted (sessions outlive any modal that
-/// was open over them). `workspace_delete` is responsible for
-/// `rm -rf` on the workspace's dir — see `cleanup_workspace_sessions`
-/// below.
-fn workspace_session_dir(workspace_id: &str) -> Result<std::path::PathBuf, String> {
-    let dir = config_dir()?
-        .join("browser-sessions")
-        .join(sanitize_for_path(workspace_id));
-    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir session dir: {e}"))?;
-    Ok(dir)
-}
-
 /// Workspace IDs are `w_<hex>` so this is defence-in-depth — any
 /// `..`, `/`, `\` would already be rejected by the ID format.
 fn sanitize_for_path(s: &str) -> String {
@@ -72,17 +65,6 @@ fn sanitize_for_path(s: &str) -> String {
             }
         })
         .collect()
-}
-
-/// Build the `--user-data-dir=...` arg that WebView2 picks up. The
-/// path is wrapped in double-quotes because Windows paths contain
-/// backslashes that WebView2's arg parser otherwise mishandles.
-fn user_data_dir_arg(workspace_id: &str) -> Result<String, String> {
-    let dir = workspace_session_dir(workspace_id)?;
-    Ok(format!(
-        "--user-data-dir=\"{}\"",
-        dir.to_string_lossy().replace('"', "")
-    ))
 }
 
 /// Spawn (if absent) + reposition + show. Frontend calls this every
@@ -151,18 +133,21 @@ pub(crate) async fn workspace_browser_show(
         .parse()
         .map_err(|e| format!("invalid url {url:?}: {e}"))?;
     let label = webview_label(&workspace_id);
-    let user_data_arg = user_data_dir_arg(&workspace_id)?;
 
     // Retry the transient WebView2 ERROR_INVALID_STATE a couple of times
     // with a short backoff (the builder is consumed by add_child, so we
     // rebuild it each attempt). A clean failure is surfaced to the FE
-    // only after all attempts are exhausted.
+    // only after all attempts are exhausted. NOTE: the real fix for the
+    // 0x8007139F Yossi hit is using the DEFAULT WebView2 environment (no
+    // per-workspace --user-data-dir) — see the module doc. The retry /
+    // creation lock stay as defense-in-depth for genuine transients.
     const MAX_ATTEMPTS: u32 = 3;
     let mut last_err = String::new();
     let mut created = None;
     for attempt in 1..=MAX_ATTEMPTS {
-        let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed_url.clone()))
-            .additional_browser_args(&user_data_arg);
+        // Default environment — shared with the main window + every other
+        // workspace browser. One WebView2 environment per process.
+        let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed_url.clone()));
         match main_window.add_child(
             builder,
             LogicalPosition::new(x, y),

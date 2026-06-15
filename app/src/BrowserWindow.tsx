@@ -20,8 +20,9 @@ import {
 // tunnel. The free-form URL bar is gone. Instead the user picks one of
 // the ports the remote port-watcher has detected, optionally types a
 // path, and the window forwards that remote port on demand and points
-// the native child Webview at http://localhost:<local_tunnel_port>/<path>.
-// External browsing is intentionally not offered here.
+// the native child Webview at http://127.0.0.1:<local_tunnel_port>/<path>
+// (127.0.0.1, not localhost — see item F note in go()). External
+// browsing is intentionally not offered here.
 //
 // The native child Webview (managed by `workspace_browser` on the Rust
 // side) paints above the SLOT and only the slot — the chrome around it
@@ -289,7 +290,14 @@ export function BrowserWindow(p: Props) {
     const path = normalizePath(pathInput());
     savePort(ws.id, port);
     savePath(ws.id, pathInput());
-    setCurrentUrl(`http://localhost:${local}${path}`);
+    // Phase 62.A (item F): use 127.0.0.1, NOT localhost. The local
+    // tunnel listener binds 127.0.0.1 (IPv4) only; on dual-stack
+    // Windows `localhost` resolves to ::1 (IPv6) first, which both
+    // fails to connect AND — when it falls back — makes the page ORIGIN
+    // differ from the 127.0.0.1 origin the Ports window uses, tripping
+    // the service's CORS / cookie checks. PortsWindow already learned
+    // this; the in-app browser now matches it.
+    setCurrentUrl(`http://127.0.0.1:${local}${path}`);
   };
 
   const refresh = () => {

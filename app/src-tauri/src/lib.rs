@@ -2672,8 +2672,12 @@ pub(crate) async fn open_auto_forward(
             cancel: Some(cancel_tx),
         },
     );
+    // Phase 62.A (item F): the local tunnel listener is loopback-only
+    // (127.0.0.1) — services are reachable from this machine, never the
+    // LAN/external IP. Logged explicitly so a future "it's going through
+    // my external IP" report can be ruled out from the debug.log.
     dlog(&format!(
-        "open_auto_forward[{}:{}]: bound 127.0.0.1:{} (kernel-assigned)",
+        "open_auto_forward[{}:{}]: bound 127.0.0.1:{} (loopback only, kernel-assigned)",
         workspace_id, remote_port, local_port
     ));
 

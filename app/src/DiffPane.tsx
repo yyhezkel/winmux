@@ -16,6 +16,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { DiffSource } from "./bindings/DiffSource";
 import type { LayoutNode } from "./types";
 import { t } from "./i18n";
+import { keyEq } from "./shortcuts";
 import { TechText } from "./TechText";
 
 interface Props {
@@ -176,8 +177,10 @@ export function DiffPane(p: Props) {
     const total = parsed().hunks.length;
     if (total === 0) return;
     let delta = 0;
-    if (e.key === "ArrowDown" || e.key === "j") delta = 1;
-    else if (e.key === "ArrowUp" || e.key === "k") delta = -1;
+    // Phase 62.B (item G): keyEq for the vim-style j/k so they work on a
+    // Hebrew layout; arrows are layout-independent already.
+    if (e.key === "ArrowDown" || keyEq(e, "j")) delta = 1;
+    else if (e.key === "ArrowUp" || keyEq(e, "k")) delta = -1;
     else return;
     e.preventDefault();
     const next = Math.max(0, Math.min(total - 1, hunkIdx() + delta));

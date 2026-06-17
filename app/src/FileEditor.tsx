@@ -1,6 +1,7 @@
 import { createSignal, Show, onMount, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { keyEq } from "./shortcuts";
 import { TechText } from "./TechText";
 
 // Phase 17.B: minimal built-in editor. A modal with a monospace
@@ -306,17 +307,19 @@ export function FileEditor(p: Props) {
   // Esc → close bar (or modal if bar is already closed).
   const keydown = (e: KeyboardEvent) => {
     if (!p.open) return;
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "s" || e.key === "S")) {
+    // Phase 62.B (item G): keyEq → physical-key match so Ctrl+S/F/H work
+    // on a Hebrew (non-US) layout too.
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && keyEq(e, "s")) {
       e.preventDefault();
       void save();
       return;
     }
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && keyEq(e, "f")) {
       e.preventDefault();
       openFindBar(false);
       return;
     }
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "h" || e.key === "H")) {
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && keyEq(e, "h")) {
       e.preventDefault();
       openFindBar(true);
       return;

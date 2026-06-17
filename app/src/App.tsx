@@ -32,7 +32,7 @@ import {
   type HooksOutdatedInfo,
 } from "./settings";
 import { applyI18nSettings, t } from "./i18n";
-import { buildShortcutTable, matches, parseShortcut, type ParsedShortcut } from "./shortcuts";
+import { buildShortcutTable, keyEq, matches, parseShortcut, type ParsedShortcut } from "./shortcuts";
 import { makeSttRecorder, type SttRecorder } from "./stt";
 import {
   collectPanes,
@@ -1167,7 +1167,7 @@ function App() {
     // shortcut-table model. Everything else flows through the table.
     // Phase 35 (#1.3): Ctrl+Shift+P opens the command palette. Hardcoded
     // (not in the shortcut table) — it's a global app action.
-    if (e.ctrlKey && e.shiftKey && (e.key === "P" || e.key === "p")) {
+    if (e.ctrlKey && e.shiftKey && keyEq(e, "p")) {
       e.preventDefault();
       setShowPalette((v) => !v);
       return;
@@ -1262,11 +1262,13 @@ function App() {
       // corner's direction pair. The 50-50 split convention means the
       // result is approximate — good enough for the common 1-pane and
       // 2-pane starts; complex layouts may land off-corner.
+      // Phase 62.B (item G): keyEq → physical-key match so I/O/K/L fire
+      // on a Hebrew layout too.
       const qkey: "topLeft" | "topRight" | "bottomLeft" | "bottomRight" | null =
-        e.key === "i" || e.key === "I" ? "topLeft"
-        : e.key === "o" || e.key === "O" ? "topRight"
-        : e.key === "k" || e.key === "K" ? "bottomLeft"
-        : e.key === "l" || e.key === "L" ? "bottomRight"
+        keyEq(e, "i") ? "topLeft"
+        : keyEq(e, "o") ? "topRight"
+        : keyEq(e, "k") ? "bottomLeft"
+        : keyEq(e, "l") ? "bottomRight"
         : null;
       if (qkey) {
         e.preventDefault();
@@ -1285,13 +1287,14 @@ function App() {
     if (!e.ctrlKey || !e.shiftKey) return;
     const target = activePaneId();
     if (!target) return;
-    if (e.key === "D" || e.key === "d") {
+    // Phase 62.B (item G): keyEq → physical-key match (Hebrew layout).
+    if (keyEq(e, "d")) {
       e.preventDefault();
       splitPane(target, "horizontal");
-    } else if (e.key === "E" || e.key === "e") {
+    } else if (keyEq(e, "e")) {
       e.preventDefault();
       splitPane(target, "vertical");
-    } else if (e.key === "W" || e.key === "w") {
+    } else if (keyEq(e, "w")) {
       e.preventDefault();
       closePane(target);
     }

@@ -92,16 +92,63 @@ export function parseShortcut(s: string | undefined | null): ParsedShortcut | nu
   return { ctrl, alt, shift, meta, key };
 }
 
+// Phase 62.B (item G): the layout-INDEPENDENT key for an event, derived
+// from `event.code` (the physical key). Returns a token comparable to
+// normalizeKey() output — lowercase letter, digit, or punctuation char —
+// or null for keys we don't map physically (named keys like Enter /
+// ArrowUp, which are already layout-independent in `event.key`, so
+// callers fall back to that). This is what makes letter / digit / punct
+// shortcuts (copy, the STT push-to-talk hotkey, …) fire on non-US
+// layouts, where `event.key` is the localized character — e.g. Hebrew
+// "צ" for the physical M key, which previously never matched "m".
+const CODE_PUNCT: Record<string, string> = {
+  Equal: "=",
+  Minus: "-",
+  Comma: ",",
+  Period: ".",
+  Slash: "/",
+  Semicolon: ";",
+  Quote: "'",
+  Backquote: "`",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Backslash: "\\",
+};
+export function physicalKey(e: KeyboardEvent): string | null {
+  const code = e.code;
+  if (!code) return null;
+  if (code.length === 4 && code.startsWith("Key")) return code[3].toLowerCase(); // KeyM → "m"
+  if (code.length === 6 && code.startsWith("Digit")) return code[5]; // Digit5 → "5"
+  if (code.startsWith("Numpad")) {
+    const rest = code.slice(6);
+    if (rest.length === 1 && rest >= "0" && rest <= "9") return rest; // Numpad5 → "5"
+  }
+  return CODE_PUNCT[code] ?? null;
+}
+
+/** Layout-independent single-key compare for HARDCODED shortcuts.
+ *  Matches `key` (a normalized lowercase letter / digit / punct / named
+ *  key) against BOTH the logical `event.key` and the physical
+ *  `event.code`, so e.g. `keyEq(e, "p")` fires for the physical P key on
+ *  a Hebrew layout (where `event.key` is "פ"). The caller checks
+ *  modifiers. */
+export function keyEq(e: KeyboardEvent, key: string): boolean {
+  const k = key.toLowerCase();
+  if (e.key.toLowerCase() === k) return true;
+  const phys = physicalKey(e);
+  return phys != null && phys.toLowerCase() === k;
+}
+
 export function matches(e: KeyboardEvent, accel: ParsedShortcut | null): boolean {
   if (!accel) return false;
   if (e.ctrlKey !== accel.ctrl) return false;
   if (e.altKey !== accel.alt) return false;
   if (e.shiftKey !== accel.shift) return false;
   if (e.metaKey !== accel.meta) return false;
-  // event.key is upper-case for letters when Shift is held; comparing
-  // against our normalised lower-case form would miss "C" vs "c".
-  // Match either case.
-  return e.key === accel.key || e.key.toLowerCase() === accel.key.toLowerCase();
+  // Match the logical key (event.key, handles named keys + US layout)
+  // OR the physical key (event.code, layout-independent). The physical
+  // fallback is what makes a letter hotkey work on a Hebrew layout.
+  return keyEq(e, accel.key);
 }
 
 /** Build a parsed-shortcut table from the current settings (with the
@@ -139,7 +186,11 @@ export function formatEvent(e: KeyboardEvent): string | null {
   if (e.metaKey) parts.push("Meta");
   // Exclude bare modifier keys.
   if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return null;
-  let label = e.key;
+  // Phase 62.B (item G): prefer the PHYSICAL key so recording the hotkey
+  // on a non-US layout still stores the canonical accelerator (physical
+  // M → "M", not the Hebrew "צ"). Named keys (Enter, ArrowUp…) have no
+  // physical mapping → fall back to event.key.
+  let label = physicalKey(e) ?? e.key;
   // Letters: uppercase for display ("Ctrl+Shift+C", not "Ctrl+Shift+c").
   if (label.length === 1 && label.match(/[a-z]/i)) label = label.toUpperCase();
   // Space → "Space" for readability.

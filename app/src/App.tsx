@@ -981,6 +981,9 @@ function App() {
     const ws = activeWs();
     if (!ws) return;
     const ti = ensureTerm(paneId);
+    // Phase 62.B (item J): tag the terminal with its workspace so an
+    // OSC 8 file:// link click knows which remote to SFTP-download from.
+    ti.workspaceId = ws.id;
     setStatus(paneId, "connecting…", false);
     try {
       const sessionId = await invoke<string>("pane_connect", {
@@ -1701,11 +1704,37 @@ function App() {
     };
     window.addEventListener("winmux:pane-maximize", handlePaneMaximize);
 
+    // Phase 62.B (item J): a terminal OSC 8 file:// link was clicked.
+    // SFTP-download it to the user's Downloads folder, with toasts.
+    const handleOscFileLink = (e: Event) => {
+      const detail = (e as CustomEvent).detail as {
+        workspaceId: string | null;
+        path: string;
+      } | null;
+      if (!detail) return;
+      const name = detail.path.split("/").filter(Boolean).pop() || detail.path;
+      if (!detail.workspaceId) {
+        flashSummaryToast("err", t("osc.download.noRemote"));
+        return;
+      }
+      flashSummaryToast("ok", t("osc.download.started", { name }));
+      invoke<string>("download_remote_file_via_osc", {
+        workspaceId: detail.workspaceId,
+        remotePath: detail.path,
+      })
+        .then((local) => flashSummaryToast("ok", t("osc.download.done", { path: local })))
+        .catch((err) =>
+          flashSummaryToast("err", t("osc.download.failed", { msg: String(err) })),
+        );
+    };
+    window.addEventListener("winmux:osc-file-link", handleOscFileLink);
+
     onCleanup(() => {
       for (const u of unlistens) u();
       window.removeEventListener("keydown", handleKey);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("winmux:pane-maximize", handlePaneMaximize);
+      window.removeEventListener("winmux:osc-file-link", handleOscFileLink);
       for (const [pid] of paneToSession) {
         invoke("pane_disconnect", { paneId: pid }).catch(() => {});
       }

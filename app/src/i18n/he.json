@@ -1,5 +1,9 @@
 {
   "sidebar.title": "winmux",
+  "osc.download.noRemote": "קישור הקובץ דורש סביבת עבודה מרוחקת מחוברת.",
+  "osc.download.started": "מוריד את {name}…",
+  "osc.download.done": "הורד אל {path}",
+  "osc.download.failed": "ההורדה נכשלה: {msg}",
   "sidebar.collapse.tooltip": "כיווץ הסרגל",
   "sidebar.expand.tooltip": "הרחבת הסרגל",
   "sidebar.resize.tooltip": "גרור לשינוי רוחב הסרגל",

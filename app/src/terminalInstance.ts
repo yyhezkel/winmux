@@ -2,8 +2,30 @@ import { Terminal, type IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { reorderRtlForDisplay } from "./bidi";
 import { t } from "./i18n";
+
+// Phase 62.B (item J): parse a `file://` URI (as emitted in Claude Code's
+// OSC 8 hyperlinks, e.g. `file:///home/runner/.env.prod`) into the bare
+// remote path. Returns null for non-file URIs. Handles the empty-host
+// form (`file:///path`) and a `file://host/path` form, plus percent-
+// decoding.
+function fileUriToPath(uri: string): string | null {
+  if (!uri.startsWith("file://")) return null;
+  let rest = uri.slice("file://".length);
+  if (!rest.startsWith("/")) {
+    // `file://host/path` — drop the host component.
+    const slash = rest.indexOf("/");
+    rest = slash >= 0 ? rest.slice(slash) : "/";
+  }
+  try {
+    rest = decodeURIComponent(rest);
+  } catch {
+    // Leave as-is if it isn't valid percent-encoding.
+  }
+  return rest;
+}
 
 // Phase 9.A live font apply + Phase 15.A per-line auto-direction.
 //
@@ -206,6 +228,11 @@ export class TerminalInstance {
   container: HTMLDivElement;
   sessionId: string | null = null;
   paneId: string;
+  // Phase 62.B (item J): the workspace this pane belongs to, set on
+  // connect. Needed so an OSC 8 `file://` link click can SFTP-download
+  // from the right remote. null until connected (download needs a live
+  // SSH session anyway).
+  workspaceId: string | null = null;
   /** The RTL mode active when this terminal was constructed. Changing
    * settings later only affects the data-write pipeline (and the
    * per-row dir attribute observer); the renderer choice is sticky. */
@@ -284,6 +311,35 @@ export class TerminalInstance {
       scrollback: 10000,
       windowsPty: { backend: "conpty" },
       windowOptions: { setWinSizeChars: true },
+      // Phase 62.B (item J): handle OSC 8 hyperlinks. Claude Code emits
+      // file:// links for files it produces; clicking one SFTP-downloads
+      // it to the user's Downloads folder. http(s) links open in the
+      // system browser. allowNonHttpProtocols lets xterm render the
+      // file:// runs as clickable links at all.
+      linkHandler: {
+        allowNonHttpProtocols: true,
+        activate: (_event: MouseEvent, uri: string) => {
+          const filePath = fileUriToPath(uri);
+          if (filePath !== null) {
+            // Dispatch to App, which owns the toast + the download invoke.
+            window.dispatchEvent(
+              new CustomEvent("winmux:osc-file-link", {
+                detail: { workspaceId: this.workspaceId, path: filePath },
+              }),
+            );
+            return;
+          }
+          if (/^https?:\/\//i.test(uri)) {
+            void openUrl(uri).catch((e) => console.warn("openUrl failed", e));
+          }
+        },
+        hover: (_event: MouseEvent, uri: string) => {
+          this.container.title = uri;
+        },
+        leave: () => {
+          this.container.removeAttribute("title");
+        },
+      },
       // Phase 55-C: convertEol stays FALSE. Despite occasional
       // complaints that "newlines look wrong after a resize," flipping
       // this to true would double every CRLF that ConPTY (and every

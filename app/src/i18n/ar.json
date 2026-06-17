@@ -1,5 +1,9 @@
 {
   "sidebar.title": "winmux",
+  "osc.download.noRemote": "يتطلب رابط الملف مساحة عمل بعيدة متصلة.",
+  "osc.download.started": "جارٍ تنزيل {name}…",
+  "osc.download.done": "تم التنزيل إلى {path}",
+  "osc.download.failed": "فشل التنزيل: {msg}",
   "sidebar.collapse.tooltip": "طيّ الشريط الجانبي",
   "sidebar.expand.tooltip": "توسيع الشريط الجانبي",
   "sidebar.resize.tooltip": "اسحب لتغيير عرض الشريط الجانبي",

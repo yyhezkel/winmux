@@ -1,5 +1,9 @@
 {
   "sidebar.title": "winmux",
+  "osc.download.noRemote": "Для ссылки на файл нужно подключённое удалённое рабочее пространство.",
+  "osc.download.started": "Загрузка {name}…",
+  "osc.download.done": "Загружено в {path}",
+  "osc.download.failed": "Не удалось загрузить: {msg}",
   "sidebar.collapse.tooltip": "Свернуть боковую панель",
   "sidebar.expand.tooltip": "Развернуть боковую панель",
   "sidebar.resize.tooltip": "Потяните, чтобы изменить ширину панели",

@@ -1,5 +1,9 @@
 {
   "sidebar.title": "winmux",
+  "osc.download.noRemote": "This file link needs a connected remote workspace.",
+  "osc.download.started": "Downloading {name}…",
+  "osc.download.done": "Downloaded to {path}",
+  "osc.download.failed": "Download failed: {msg}",
   "sidebar.collapse.tooltip": "Collapse sidebar",
   "sidebar.expand.tooltip": "Expand sidebar",
   "sidebar.resize.tooltip": "Drag to resize the sidebar",

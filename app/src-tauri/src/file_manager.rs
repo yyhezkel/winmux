@@ -555,6 +555,48 @@ pub(crate) async fn file_download(
     Ok(buf.len() as u64)
 }
 
+/// Phase 62.B (item J): download a file referenced by an OSC 8 hyperlink
+/// in the terminal. Claude Code (and other tools) emit
+/// `\e]8;;file:///<absolute remote path>\e\\name\e]8;;\e\\`; the frontend
+/// terminal linkHandler extracts the path from the `file://` URI and
+/// calls this. SFTP-pulls the remote path into the user's Downloads
+/// folder and returns the local destination (shown in a toast).
+#[tauri::command]
+pub(crate) async fn download_remote_file_via_osc(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    remote_path: String,
+) -> Result<String, String> {
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| "no active SSH session for this workspace".to_string())?;
+    // Basename of a POSIX remote path; fall back to a generic name.
+    let base = remote_path
+        .rsplit('/')
+        .find(|s| !s.is_empty())
+        .unwrap_or("download")
+        .to_string();
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "cannot resolve home directory".to_string())?;
+    let downloads = std::path::Path::new(&home).join("Downloads");
+    std::fs::create_dir_all(&downloads)
+        .map_err(|e| format!("mkdir Downloads: {e}"))?;
+    let local = downloads.join(&base);
+    let sftp = open_sftp(&handle).await?;
+    let mut file = sftp
+        .open(&remote_path)
+        .await
+        .map_err(|e| format!("sftp open {remote_path}: {e}"))?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)
+        .await
+        .map_err(|e| format!("read: {e}"))?;
+    drop(file);
+    std::fs::write(&local, &buf).map_err(|e| format!("write {local:?}: {e}"))?;
+    let _ = sftp.close().await;
+    Ok(local.to_string_lossy().to_string())
+}
+
 // ─── Phase 17: Open with OS default app ────────────────────────────────────
 
 /// Spawn the Windows shell `start` to launch a file with whatever app

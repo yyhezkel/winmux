@@ -56,7 +56,10 @@ export function Sidebar(p: Props) {
 
   return (
     <div class={`sidebar ${p.mode}`}>
+      {/* Phase 62.C: header stacks vertically — logo (+ wordmark in full
+          mode) on top, the collapse arrow on its own line below. */}
       <div class="sidebar-header">
+        <div class="sidebar-brand-row">
         <svg
           class="sidebar-logo"
           viewBox="0 0 1024 1024"
@@ -96,9 +99,11 @@ export function Sidebar(p: Props) {
           <circle cx="848" cy="176" r="20" fill="#5cd87f" />
         </svg>
         <span class="sidebar-brand">{t("sidebar.title")}</span>
+        </div>
         {/* Phase 62.B (item I): header toggle flips full ↔ icons (per
             Yossi's spec). Hidden is reached via Ctrl+B / the cycle; the
-            reopen tab (App.tsx) brings it back. */}
+            reopen tab (App.tsx) brings it back. Phase 62.C: now on its
+            own line below the logo. */}
         <button
           class="sidebar-collapse-btn"
           onClick={() => p.onSetMode(p.mode === "full" ? "icons" : "full")}

@@ -135,7 +135,7 @@ body {
 
 /* Phase 62.B (item I): collapse / expand toggle in the sidebar header. */
 .sidebar-collapse-btn {
-  margin-inline-start: auto;
+  align-self: center;
   flex-shrink: 0;
   width: 22px;
   height: 22px;
@@ -168,8 +168,9 @@ body {
 .sidebar.icons .ws-worktree-chip,
 .sidebar.icons .ws-live,
 .sidebar.icons .ws-action-label { display: none; }
-.sidebar.icons .ws-action-emoji { margin-inline-end: 0; }
-.sidebar.icons .sidebar-header { padding: 12px 0; justify-content: center; }
+.sidebar.icons .ws-action-emoji { margin-inline-end: 0; font-size: 16px; }
+.sidebar.icons .sidebar-header { padding: 12px 0; align-items: center; }
+.sidebar.icons .sidebar-brand-row { justify-content: center; }
 .sidebar.icons .sidebar-list { padding: 6px 0; }
 .sidebar.icons .ws-item {
   justify-content: center;
@@ -188,14 +189,40 @@ body {
   box-shadow: 0 0 0 2px var(--w-surface), 0 0 0 4px var(--w-accent),
     0 0 8px 1px rgba(122, 162, 247, 0.6);
 }
-/* Action buttons → vertical stack of centered icons. */
-.sidebar.icons .sidebar-actions-row { flex-direction: column; }
+/* Phase 62.C: action buttons → a UNIFORM vertical stack of 32×32
+   icon squares (48×48 footprint incl. the 8px gap), all identical
+   regardless of their full-mode styling (Notes/Settings/Ports are
+   transparent halves; New/Provision are accent/bordered blocks — all
+   normalized here). Consistent transparent rest + highlighted hover. */
+.sidebar.icons .sidebar-actions-row {
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  border-top: none;
+}
 .sidebar.icons .ws-action-half,
 .sidebar.icons .ws-add,
 .sidebar.icons .ws-provision {
-  width: 100%;
-  text-align: center;
-  padding: 9px 0;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin: 8px auto;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--w-text-secondary, #7d8590);
+  box-shadow: none;
+}
+.sidebar.icons .ws-action-half:hover,
+.sidebar.icons .ws-add:hover,
+.sidebar.icons .ws-provision:hover {
+  background: var(--w-surface-hi);
+  color: var(--w-text);
+  border-color: var(--w-border);
 }
 
 /* HIDDEN mode — the sidebar is gone; App.tsx renders a thin reopen tab
@@ -264,9 +291,12 @@ body {
 }
 
 .sidebar-header {
+  /* Phase 62.C: vertical stack — brand row on top, collapse arrow below
+     on its own line. */
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--w-border);
   font-weight: 600;
@@ -274,6 +304,12 @@ body {
   color: var(--w-text);
   font-family: var(--w-font-mono);
   font-size: var(--w-fs-lg);
+}
+.sidebar-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 .sidebar-header .sidebar-logo {
   width: 22px;

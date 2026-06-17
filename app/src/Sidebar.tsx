@@ -2,6 +2,7 @@ import { For, Show, createSignal } from "solid-js";
 import { collectPanes, findPane, type Workspace, type ForwardRow } from "./types";
 import { t } from "./i18n";
 import { TechText } from "./TechText";
+import type { SidebarMode } from "./settings";
 
 function workspaceBadge(w: Workspace): { label: string; cls: string; title: string } {
   if (!w.layout) {
@@ -45,16 +46,16 @@ interface Props {
   onOpenPortsGlobal: () => void;
   // Phase 60: onOpenBrowser / onOpenFiles props removed — the
   // buttons moved to the workspace header (App.tsx, next to + diff).
-  // Phase 62.B (item I): collapse to a narrow icon strip.
-  collapsed: boolean;
-  onToggleCollapse: () => void;
+  // Phase 62.B (item I): 3-state sidebar — full / icons / hidden.
+  mode: SidebarMode;
+  onSetMode: (mode: SidebarMode) => void;
 }
 
 export function Sidebar(p: Props) {
   const [menuFor, setMenuFor] = createSignal<string | null>(null);
 
   return (
-    <div class={`sidebar ${p.collapsed ? "collapsed" : ""}`}>
+    <div class={`sidebar ${p.mode}`}>
       <div class="sidebar-header">
         <svg
           class="sidebar-logo"
@@ -95,14 +96,16 @@ export function Sidebar(p: Props) {
           <circle cx="848" cy="176" r="20" fill="#5cd87f" />
         </svg>
         <span class="sidebar-brand">{t("sidebar.title")}</span>
-        {/* Phase 62.B (item I): collapse / expand toggle. */}
+        {/* Phase 62.B (item I): header toggle flips full ↔ icons (per
+            Yossi's spec). Hidden is reached via Ctrl+B / the cycle; the
+            reopen tab (App.tsx) brings it back. */}
         <button
           class="sidebar-collapse-btn"
-          onClick={p.onToggleCollapse}
-          title={p.collapsed ? t("sidebar.expand.tooltip") : t("sidebar.collapse.tooltip")}
-          aria-label={p.collapsed ? t("sidebar.expand.tooltip") : t("sidebar.collapse.tooltip")}
+          onClick={() => p.onSetMode(p.mode === "full" ? "icons" : "full")}
+          title={p.mode === "full" ? t("sidebar.collapse.tooltip") : t("sidebar.expand.tooltip")}
+          aria-label={p.mode === "full" ? t("sidebar.collapse.tooltip") : t("sidebar.expand.tooltip")}
         >
-          {p.collapsed ? "»" : "«"}
+          {p.mode === "full" ? "«" : "»"}
         </button>
       </div>
       <div class="sidebar-list">
@@ -114,7 +117,7 @@ export function Sidebar(p: Props) {
               }`}
               data-has-color={w.color ? "true" : "false"}
               style={w.color ? `--ws-color: ${w.color}` : undefined}
-              title={p.collapsed ? w.name : undefined}
+              title={p.mode === "icons" ? w.name : undefined}
               onClick={() => p.onActivate(w.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -194,33 +197,37 @@ export function Sidebar(p: Props) {
           )}
         </For>
       </div>
-      {/* Phase 39: Notes + Settings paired row, then New workspace,
-          then Provision server. Ports panel removed — reachable via the
-          per-workspace 🌐 badge → floating Ports window.
-          Phase 62.B (item I): hidden in the collapsed icon strip (expand
-          to reach them — too wide to fit at 52px). */}
-      <Show when={!p.collapsed}>
+      {/* Phase 39: Notes + Settings + Ports row, then New workspace,
+          then Provision server.
+          Phase 62.B (item I): each button is an emoji icon + a text
+          label span. In icons mode CSS hides the labels and stacks the
+          row vertically, so these stay reachable as icons (with
+          tooltips) instead of disappearing. */}
       <div class="sidebar-actions-row">
         <button class="ws-action-half" onClick={p.onOpenNotes} title={t("sidebar.notes.tooltip")}>
-          📝 {t("sidebar.notes.tooltip")}
+          <span class="ws-action-emoji">📝</span>
+          <span class="ws-action-label">{t("sidebar.notes.tooltip")}</span>
         </button>
         <button class="ws-action-half" onClick={p.onOpenSettings} title={t("sidebar.settings.tooltip")}>
-          ⚙ {t("sidebar.settings.tooltip")}
+          <span class="ws-action-emoji">⚙</span>
+          <span class="ws-action-label">{t("sidebar.settings.tooltip")}</span>
         </button>
         <button class="ws-action-half" onClick={p.onOpenPortsGlobal} title={t("sidebar.ports.tooltip")}>
-          🌐 {t("sidebar.ports.label")}
+          <span class="ws-action-emoji">🌐</span>
+          <span class="ws-action-label">{t("sidebar.ports.label")}</span>
         </button>
       </div>
       {/* Phase 60 (smoke-test 2a): the Browser + Files row moved to
           the workspace header next to "+ diff" — they're workspace-
           scoped tools and Yossi found them misplaced here. */}
-      <button class="ws-add" onClick={p.onCreate}>
-        {t("sidebar.new_workspace")}
+      <button class="ws-add" onClick={p.onCreate} title={t("sidebar.new_workspace")}>
+        <span class="ws-action-emoji">＋</span>
+        <span class="ws-action-label">{t("sidebar.new_workspace")}</span>
       </button>
       <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
-        {t("sidebar.provision_server")}
+        <span class="ws-action-emoji">☁</span>
+        <span class="ws-action-label">{t("sidebar.provision_server")}</span>
       </button>
-      </Show>
     </div>
   );
 }

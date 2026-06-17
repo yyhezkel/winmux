@@ -154,16 +154,76 @@ body {
   background: var(--w-surface-hi);
 }
 
-/* Phase 62.B (item I): collapsed icon strip — hide text, center the
-   workspace dots/badges. Names show on hover via the row's title. */
-.sidebar.collapsed .sidebar-brand,
-.sidebar.collapsed .ws-name { display: none; }
-.sidebar.collapsed .sidebar-header { padding: 12px 6px; }
-.sidebar.collapsed .ws-item {
+/* Phase 62.B (item I): action-button emoji + label. Full mode shows
+   both inline; icons mode (below) hides the label. */
+.ws-action-emoji { margin-inline-end: 6px; }
+
+/* Phase 62.B (item I): ICONS mode — narrow strip; workspace dots only
+   (full name on hover via the row title); action buttons become a
+   vertical stack of centered emoji icons. No nested pane lists. */
+.sidebar.icons .sidebar-brand,
+.sidebar.icons .ws-name,
+.sidebar.icons .ws-badge,
+.sidebar.icons .ws-port-badge,
+.sidebar.icons .ws-worktree-chip,
+.sidebar.icons .ws-live,
+.sidebar.icons .ws-action-label { display: none; }
+.sidebar.icons .ws-action-emoji { margin-inline-end: 0; }
+.sidebar.icons .sidebar-header { padding: 12px 0; justify-content: center; }
+.sidebar.icons .sidebar-list { padding: 6px 0; }
+.sidebar.icons .ws-item {
   justify-content: center;
-  gap: 4px;
-  padding: 8px 4px;
+  gap: 0;
+  padding: 7px 0;
 }
+/* Bigger centered colored circle = the workspace's icon. */
+.sidebar.icons .ws-dot { width: 18px; height: 18px; }
+/* Active workspace = glow ring around its dot (the inset bar + tint
+   from full mode are suppressed in the strip). */
+.sidebar.icons .ws-item.active {
+  background: transparent;
+  box-shadow: none;
+}
+.sidebar.icons .ws-item.active .ws-dot {
+  box-shadow: 0 0 0 2px var(--w-surface), 0 0 0 4px var(--w-accent),
+    0 0 8px 1px rgba(122, 162, 247, 0.6);
+}
+/* Action buttons → vertical stack of centered icons. */
+.sidebar.icons .sidebar-actions-row { flex-direction: column; }
+.sidebar.icons .ws-action-half,
+.sidebar.icons .ws-add,
+.sidebar.icons .ws-provision {
+  width: 100%;
+  text-align: center;
+  padding: 9px 0;
+}
+
+/* HIDDEN mode — the sidebar is gone; App.tsx renders a thin reopen tab
+   at the sidebar's own (inline-start) edge. */
+.sidebar.hidden { display: none; }
+.sidebar-reopen {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 60;
+  width: 16px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--w-surface);
+  color: var(--w-text-secondary, #7d8590);
+  border: 1px solid var(--w-border);
+  border-inline-start: none;
+  border-start-end-radius: 6px;
+  border-end-end-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.sidebar-reopen:hover { color: var(--w-text); background: var(--w-surface-hi); }
+/* The reopen chevron points "inward" — flip it in RTL. */
+[dir="rtl"] .sidebar-reopen { transform: translateY(-50%) scaleX(-1); }
 
 /* ─── Splash overlay (fades out shortly after first paint) ─── */
 

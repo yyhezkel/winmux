@@ -28,6 +28,7 @@ import {
   DEFAULT_SHORTCUTS,
   DEFAULT_HOOKS_UPDATES,
   type Settings,
+  type SidebarMode,
   type UpdateInfo,
   type HooksOutdatedInfo,
 } from "./settings";
@@ -58,15 +59,16 @@ import "./App.css";
 
 type PaneStatus = { msg: string; err: boolean };
 
-// Phase 62.B (item I): sidebar width + collapsed state persist
-// per-machine in localStorage — UI geometry, same home as the
-// floating-window rects (not settings.json; avoids Rule #7 churn).
+// Phase 62.B (item I): sidebar is a 3-state control — full / icons /
+// hidden. The MODE persists in settings.json (atomic, Rule #7 — see
+// settings.rs `sidebar_mode`). The full-mode WIDTH (continuous drag
+// geometry) stays in localStorage, the right home for per-machine
+// pixel geometry.
 const SIDEBAR_MIN_W = 160;
 const SIDEBAR_MAX_W = 480;
 const SIDEBAR_DEFAULT_W = 224;
-const SIDEBAR_COLLAPSED_W = 52;
+const SIDEBAR_ICONS_W = 48;
 const SIDEBAR_W_KEY = "winmux.sidebar-width";
-const SIDEBAR_COLLAPSED_KEY = "winmux.sidebar-collapsed";
 function loadSidebarWidth(): number {
   try {
     const n = Number(localStorage.getItem(SIDEBAR_W_KEY));
@@ -75,13 +77,6 @@ function loadSidebarWidth(): number {
     // ignore
   }
   return SIDEBAR_DEFAULT_W;
-}
-function loadSidebarCollapsed(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
-  }
 }
 
 function App() {
@@ -163,10 +158,32 @@ function App() {
   // Phase 53 (rebased): workspace-level File Manager floating window.
   // Pure HTML — wraps the existing FileManagerPane component.
   const [showFilesWindow, setShowFilesWindow] = createSignal(false);
-  // Phase 62.B (item I): sidebar width + collapse.
+  // Phase 62.B (item I): sidebar mode (full / icons / hidden) lives in
+  // settings.json; full-mode width lives in localStorage.
   const [sidebarWidth, setSidebarWidth] = createSignal(loadSidebarWidth());
-  const [sidebarCollapsed, setSidebarCollapsed] = createSignal(loadSidebarCollapsed());
-  const sidebarPx = () => (sidebarCollapsed() ? SIDEBAR_COLLAPSED_W : sidebarWidth());
+  const sidebarMode = (): SidebarMode =>
+    (settings()?.sidebar_mode as SidebarMode | undefined) ?? "full";
+  const sidebarPx = () => {
+    const m = sidebarMode();
+    if (m === "hidden") return 0;
+    if (m === "icons") return SIDEBAR_ICONS_W;
+    return sidebarWidth();
+  };
+  const setSidebarMode = (mode: SidebarMode) => {
+    const s = settings();
+    if (!s) return;
+    const next: Settings = { ...s, sidebar_mode: mode };
+    setSettings(next);
+    void saveSettings(next).catch((e) =>
+      console.warn("saveSettings (sidebar_mode) failed", e),
+    );
+  };
+  // Ctrl+B cycles full → icons → hidden → full (all three reachable by
+  // keyboard); the header button toggles full ↔ icons (per Yossi's spec).
+  const cycleSidebarMode = () => {
+    const order: SidebarMode[] = ["full", "icons", "hidden"];
+    setSidebarMode(order[(order.indexOf(sidebarMode()) + 1) % order.length]);
+  };
   createEffect(() => {
     try {
       localStorage.setItem(SIDEBAR_W_KEY, String(sidebarWidth()));
@@ -174,17 +191,8 @@ function App() {
       // ignore (quota / private mode)
     }
   });
-  createEffect(() => {
-    try {
-      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed() ? "1" : "0");
-    } catch {
-      // ignore
-    }
-  });
   const startSidebarResize = (e: MouseEvent) => {
     e.preventDefault();
-    // Dragging the handle expands a collapsed sidebar.
-    if (sidebarCollapsed()) setSidebarCollapsed(false);
     // Direction-aware: in RTL the sidebar sits on the right, so its
     // width grows as the pointer moves LEFT — measure from the correct
     // edge.
@@ -1241,6 +1249,20 @@ function App() {
       setShowPalette((v) => !v);
       return;
     }
+    // Phase 62.B (item I): Ctrl+B cycles the sidebar mode (full → icons
+    // → hidden → full), VS Code-style. Crucially, do NOT steal it when a
+    // terminal is focused — Ctrl+b is tmux's prefix and must reach the
+    // PTY. Only act when focus is outside an xterm container.
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && keyEq(e, "b")) {
+      const inTerminal = (e.target as HTMLElement | null)?.closest?.(
+        ".terminal-container",
+      );
+      if (!inTerminal) {
+        e.preventDefault();
+        cycleSidebarMode();
+        return;
+      }
+    }
     const sc = shortcutTable();
     if (matches(e, sc.toggle_notes)) {
       e.preventDefault();
@@ -1789,19 +1811,34 @@ function App() {
             setShowPortsWindow(true);
           }}
           onOpenPortsGlobal={() => setShowPortsWindow(true)}
-          collapsed={sidebarCollapsed()}
-          onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+          mode={sidebarMode()}
+          onSetMode={setSidebarMode}
         />
       </ErrorBoundary>
-      {/* Phase 62.B (item I): drag handle on the sidebar/main boundary.
-          Positioned at the live sidebar width; dragging resizes (and
-          expands a collapsed sidebar). */}
-      <div
-        class="sidebar-resizer"
-        style={{ "inset-inline-start": `${sidebarPx()}px` }}
-        onMouseDown={startSidebarResize}
-        title={t("sidebar.resize.tooltip")}
-      />
+      {/* Phase 62.B (item I): drag handle on the sidebar/main boundary —
+          only in full mode (icons/hidden are fixed widths). */}
+      <Show when={sidebarMode() === "full"}>
+        <div
+          class="sidebar-resizer"
+          style={{ "inset-inline-start": `${sidebarPx()}px` }}
+          onMouseDown={startSidebarResize}
+          title={t("sidebar.resize.tooltip")}
+        />
+      </Show>
+      {/* Phase 62.B (item I): when hidden, the only affordance is a thin
+          reopen tab at the sidebar's own (inline-start) edge → full. No
+          hover auto-expand anywhere — state changes only on explicit
+          click / Ctrl+B (Yossi's call: avoids accidental edge-bumps). */}
+      <Show when={sidebarMode() === "hidden"}>
+        <button
+          class="sidebar-reopen"
+          onClick={() => setSidebarMode("full")}
+          title={t("sidebar.expand.tooltip")}
+          aria-label={t("sidebar.expand.tooltip")}
+        >
+          ›
+        </button>
+      </Show>
       <div class="main">
         {/* Phase 30: per-workspace accent strip. Sets the CSS variable
             inline so the rule in App.css can paint it without needing a

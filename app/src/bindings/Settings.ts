@@ -62,4 +62,13 @@ migrations: MigrationFlags,
  * `#[serde(default)]` so older settings.json files load with
  * `enabled = false` + the default backend.
  */
-stt: SttSettings, };
+stt: SttSettings, 
+/**
+ * Phase 62.B (item I): sidebar display mode — "full" | "icons" |
+ * "hidden". A String (not an enum) to match the rtl_mode /
+ * matcher_mode pattern and keep the TS binding a plain union.
+ * Persisted here (atomic settings write, Rule #7) so the choice
+ * survives restarts. `default = "full"` keeps older settings.json
+ * loading unchanged.
+ */
+sidebar_mode: string, };

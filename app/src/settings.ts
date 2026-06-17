@@ -183,7 +183,12 @@ export interface Settings {
   // serde(default) on the Rust side, so older settings.json files
   // load with stt: { enabled: false, backend: "webspeech", ... }.
   stt?: SttSettings;
+  // Phase 62.B (item I): sidebar display mode. Backend defaults to
+  // "full" via serde(default); always one of the three.
+  sidebar_mode?: SidebarMode;
 }
+
+export type SidebarMode = "full" | "icons" | "hidden";
 
 export interface SummaryResult {
   text: string;

@@ -409,6 +409,18 @@ pub(crate) struct Settings {
     /// `enabled = false` + the default backend.
     #[serde(default)]
     pub stt: SttSettings,
+    /// Phase 62.B (item I): sidebar display mode — "full" | "icons" |
+    /// "hidden". A String (not an enum) to match the rtl_mode /
+    /// matcher_mode pattern and keep the TS binding a plain union.
+    /// Persisted here (atomic settings write, Rule #7) so the choice
+    /// survives restarts. `default = "full"` keeps older settings.json
+    /// loading unchanged.
+    #[serde(default = "default_sidebar_mode")]
+    pub sidebar_mode: String,
+}
+
+fn default_sidebar_mode() -> String {
+    "full".to_string()
 }
 
 /// Phase 58: speech-to-text settings.
@@ -588,6 +600,7 @@ impl Default for Settings {
             auto_destroy_empty_workspaces_days: None,
             migrations: MigrationFlags::default(),
             stt: SttSettings::default(),
+            sidebar_mode: default_sidebar_mode(),
         }
     }
 }

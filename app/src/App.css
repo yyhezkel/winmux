@@ -108,10 +108,61 @@ body {
 
 .app {
   display: grid;
+  /* Phase 62.B (item I): first column width is set inline from the
+     sidebar width / collapsed signals (default 224px). */
   grid-template-columns: 224px 1fr;
   height: 100vh;
   width: 100vw;
   background: var(--w-bg);
+  position: relative;
+}
+
+/* Phase 62.B (item I): sidebar/main drag handle. Straddles the boundary
+   (inset-inline-start set inline to the live sidebar width). Works in
+   LTR + RTL via logical inset; the drag math is direction-aware. */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  margin-inline-start: -3px;
+  z-index: 50;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 80ms ease;
+}
+.sidebar-resizer:hover { background: rgba(122, 162, 247, 0.5); }
+
+/* Phase 62.B (item I): collapse / expand toggle in the sidebar header. */
+.sidebar-collapse-btn {
+  margin-inline-start: auto;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--w-border);
+  border-radius: 4px;
+  color: var(--w-text-secondary, #7d8590);
+  cursor: pointer;
+  font-size: 13px;
+}
+.sidebar-collapse-btn:hover {
+  color: var(--w-text);
+  background: var(--w-surface-hi);
+}
+
+/* Phase 62.B (item I): collapsed icon strip — hide text, center the
+   workspace dots/badges. Names show on hover via the row's title. */
+.sidebar.collapsed .sidebar-brand,
+.sidebar.collapsed .ws-name { display: none; }
+.sidebar.collapsed .sidebar-header { padding: 12px 6px; }
+.sidebar.collapsed .ws-item {
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
 }
 
 /* ─── Splash overlay (fades out shortly after first paint) ─── */
@@ -517,6 +568,14 @@ body {
   position: relative;
   overflow: hidden;
 }
+/* Phase 62.B (item H): workspace color = OUTER frame wrapping all panes.
+   Nests visually outside the per-pane borders (bigger radius), and sets
+   up the mental model for the upcoming separate-window work. */
+.layout-root[data-has-color="true"] {
+  border: 3px solid var(--ws-color);
+  border-radius: 10px;
+  margin: 6px;
+}
 
 .split {
   display: flex;
@@ -558,13 +617,29 @@ body {
   min-width: 0;
   min-height: 0;
   background: var(--w-bg);
-  border: 1px solid transparent;
+  /* Phase 62.B (item H): the pane color is now a full border around the
+     whole pane (it used to be just a 3px line beside the pane name).
+     2px transparent base so colored + uncolored panes keep the same
+     box size; colored panes fill it below. */
+  border: 2px solid transparent;
+  border-radius: 6px;
   overflow: hidden;
-  transition: border-color 100ms ease;
+  transition: border-color 100ms ease, box-shadow 100ms ease;
 }
+/* Phase 62.B (item H): pane color = inner frame. */
+.pane[data-has-color="true"] {
+  border-color: var(--pane-color);
+}
+/* Phase 62.B (item H): the active pane always gets a clear accent ring
+   (outset box-shadow) ON TOP of whatever border colour it has, so focus
+   reads even on a coloured pane. Uncoloured active panes also take an
+   accent border. */
 .pane.active {
+  box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.5),
+    inset 0 0 0 1px rgba(122, 162, 247, 0.15);
+}
+.pane.active:not([data-has-color="true"]) {
   border-color: rgba(122, 162, 247, 0.55);
-  box-shadow: inset 0 0 0 1px rgba(122, 162, 247, 0.18);
 }
 /* Phase 49-A: visible highlight while an OS drag hovers a pane. */
 .pane.drop-target {
@@ -3262,13 +3337,11 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: var(--w-surface-hover, #2a2a2a);
 }
 
-/* Phase 31: per-pane identity. Effective color (pane override or
-   workspace fallback) paints a 3px left strip on the pane header so
-   the user can tell at a glance which client this pane connects to.
-   The emoji prefix is rendered inline via .pane-emoji inside .pane-conn. */
-.pane[data-has-color="true"] .pane-header {
-  border-inline-start: 3px solid var(--pane-color);
-}
+/* Phase 31 → 62.B (item H): per-pane identity. The effective color
+   (pane override or workspace fallback) now frames the WHOLE pane (see
+   `.pane[data-has-color]` above), so the old 3px header strip is gone —
+   it was the "thin line beside the name" Yossi wanted replaced. The
+   emoji prefix is still rendered inline via .pane-emoji in .pane-conn. */
 .pane-emoji {
   font-size: 14px;
   vertical-align: middle;

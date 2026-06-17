@@ -1,5 +1,8 @@
 {
   "sidebar.title": "winmux",
+  "sidebar.collapse.tooltip": "כיווץ הסרגל",
+  "sidebar.expand.tooltip": "הרחבת הסרגל",
+  "sidebar.resize.tooltip": "גרור לשינוי רוחב הסרגל",
   "sidebar.new_workspace": "+ סביבת עבודה חדשה",
   "common.connect": "התחבר",
   "common.connect_tmux": "התחבר (tmux)",

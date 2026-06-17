@@ -58,6 +58,32 @@ import "./App.css";
 
 type PaneStatus = { msg: string; err: boolean };
 
+// Phase 62.B (item I): sidebar width + collapsed state persist
+// per-machine in localStorage — UI geometry, same home as the
+// floating-window rects (not settings.json; avoids Rule #7 churn).
+const SIDEBAR_MIN_W = 160;
+const SIDEBAR_MAX_W = 480;
+const SIDEBAR_DEFAULT_W = 224;
+const SIDEBAR_COLLAPSED_W = 52;
+const SIDEBAR_W_KEY = "winmux.sidebar-width";
+const SIDEBAR_COLLAPSED_KEY = "winmux.sidebar-collapsed";
+function loadSidebarWidth(): number {
+  try {
+    const n = Number(localStorage.getItem(SIDEBAR_W_KEY));
+    if (Number.isFinite(n) && n >= SIDEBAR_MIN_W && n <= SIDEBAR_MAX_W) return n;
+  } catch {
+    // ignore
+  }
+  return SIDEBAR_DEFAULT_W;
+}
+function loadSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function App() {
   const [file, setFile] = createSignal<WorkspacesFile>({
     version: 1,
@@ -137,6 +163,46 @@ function App() {
   // Phase 53 (rebased): workspace-level File Manager floating window.
   // Pure HTML — wraps the existing FileManagerPane component.
   const [showFilesWindow, setShowFilesWindow] = createSignal(false);
+  // Phase 62.B (item I): sidebar width + collapse.
+  const [sidebarWidth, setSidebarWidth] = createSignal(loadSidebarWidth());
+  const [sidebarCollapsed, setSidebarCollapsed] = createSignal(loadSidebarCollapsed());
+  const sidebarPx = () => (sidebarCollapsed() ? SIDEBAR_COLLAPSED_W : sidebarWidth());
+  createEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_W_KEY, String(sidebarWidth()));
+    } catch {
+      // ignore (quota / private mode)
+    }
+  });
+  createEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed() ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  });
+  const startSidebarResize = (e: MouseEvent) => {
+    e.preventDefault();
+    // Dragging the handle expands a collapsed sidebar.
+    if (sidebarCollapsed()) setSidebarCollapsed(false);
+    // Direction-aware: in RTL the sidebar sits on the right, so its
+    // width grows as the pointer moves LEFT — measure from the correct
+    // edge.
+    const rtl =
+      getComputedStyle(document.documentElement).direction === "rtl";
+    const onMove = (ev: MouseEvent) => {
+      const raw = rtl ? window.innerWidth - ev.clientX : ev.clientX;
+      setSidebarWidth(
+        Math.max(SIDEBAR_MIN_W, Math.min(SIDEBAR_MAX_W, Math.round(raw))),
+      );
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
   // Phase 58: push-to-talk voice input. Active recorder instance +
   // listening indicator. The recorder is created lazily on keydown
   // and reused for the lifetime of the press; release fires stop()
@@ -1649,7 +1715,10 @@ function App() {
   });
 
   return (
-    <div class="app">
+    <div
+      class="app"
+      style={{ "grid-template-columns": `${sidebarPx()}px 1fr` }}
+    >
       <ErrorBoundary
         fallback={(err) => (
           <div class="sidebar-error">
@@ -1691,8 +1760,19 @@ function App() {
             setShowPortsWindow(true);
           }}
           onOpenPortsGlobal={() => setShowPortsWindow(true)}
+          collapsed={sidebarCollapsed()}
+          onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
         />
       </ErrorBoundary>
+      {/* Phase 62.B (item I): drag handle on the sidebar/main boundary.
+          Positioned at the live sidebar width; dragging resizes (and
+          expands a collapsed sidebar). */}
+      <div
+        class="sidebar-resizer"
+        style={{ "inset-inline-start": `${sidebarPx()}px` }}
+        onMouseDown={startSidebarResize}
+        title={t("sidebar.resize.tooltip")}
+      />
       <div class="main">
         {/* Phase 30: per-workspace accent strip. Sets the CSS variable
             inline so the rule in App.css can paint it without needing a
@@ -1794,7 +1874,13 @@ function App() {
         </Show>
 
         <Show when={activeWs()?.layout}>
-          <div class="layout-root">
+          {/* Phase 62.B (item H): workspace color frames the whole pane
+              area (outer border). Pane colors frame each pane inside. */}
+          <div
+            class="layout-root"
+            data-has-color={activeWs()?.color ? "true" : "false"}
+            style={activeWs()?.color ? `--ws-color: ${activeWs()!.color}` : undefined}
+          >
             {/* Phase 8 fix v3: ErrorBoundary so a single corrupted workspace
                 layout (e.g. from the recent autosave-loop nesting) doesn't
                 blank the whole app. Falls back to a clear reset button. */}

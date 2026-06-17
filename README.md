@@ -108,6 +108,15 @@ with an always-visible close button on the inline-end corner.
 Destructive / packing actions (delete, zip, unzip-overwrite) confirm
 via an in-pane toast.
 
+### 🎨 Color hierarchy + adjustable sidebar
+
+Each workspace color frames its whole pane area; each pane's color
+frames that pane — a nested visual hierarchy, with the focused pane
+ringed in the accent color. The sidebar drags to resize and collapses
+to an icon strip (width + state remembered). Keyboard shortcuts are
+layout-independent (they match the physical key, so they work on a
+Hebrew/Arabic layout too).
+
 ### ⚙️ Settings, notes, localization
 
 Everything you'd expect: a settings panel with theme presets and a

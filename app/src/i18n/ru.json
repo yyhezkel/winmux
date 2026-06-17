@@ -1,5 +1,8 @@
 {
   "sidebar.title": "winmux",
+  "sidebar.collapse.tooltip": "Свернуть боковую панель",
+  "sidebar.expand.tooltip": "Развернуть боковую панель",
+  "sidebar.resize.tooltip": "Потяните, чтобы изменить ширину панели",
   "sidebar.new_workspace": "+ Новое рабочее пространство",
   "common.connect": "Подключить",
   "common.connect_tmux": "Подключить (tmux)",

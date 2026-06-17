@@ -1,5 +1,8 @@
 {
   "sidebar.title": "winmux",
+  "sidebar.collapse.tooltip": "طيّ الشريط الجانبي",
+  "sidebar.expand.tooltip": "توسيع الشريط الجانبي",
+  "sidebar.resize.tooltip": "اسحب لتغيير عرض الشريط الجانبي",
   "sidebar.new_workspace": "+ مساحة عمل جديدة",
   "common.connect": "اتصال",
   "common.connect_tmux": "اتصال (tmux)",

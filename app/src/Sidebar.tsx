@@ -45,13 +45,16 @@ interface Props {
   onOpenPortsGlobal: () => void;
   // Phase 60: onOpenBrowser / onOpenFiles props removed — the
   // buttons moved to the workspace header (App.tsx, next to + diff).
+  // Phase 62.B (item I): collapse to a narrow icon strip.
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 export function Sidebar(p: Props) {
   const [menuFor, setMenuFor] = createSignal<string | null>(null);
 
   return (
-    <div class="sidebar">
+    <div class={`sidebar ${p.collapsed ? "collapsed" : ""}`}>
       <div class="sidebar-header">
         <svg
           class="sidebar-logo"
@@ -92,6 +95,15 @@ export function Sidebar(p: Props) {
           <circle cx="848" cy="176" r="20" fill="#5cd87f" />
         </svg>
         <span class="sidebar-brand">{t("sidebar.title")}</span>
+        {/* Phase 62.B (item I): collapse / expand toggle. */}
+        <button
+          class="sidebar-collapse-btn"
+          onClick={p.onToggleCollapse}
+          title={p.collapsed ? t("sidebar.expand.tooltip") : t("sidebar.collapse.tooltip")}
+          aria-label={p.collapsed ? t("sidebar.expand.tooltip") : t("sidebar.collapse.tooltip")}
+        >
+          {p.collapsed ? "»" : "«"}
+        </button>
       </div>
       <div class="sidebar-list">
         <For each={p.workspaces}>
@@ -102,6 +114,7 @@ export function Sidebar(p: Props) {
               }`}
               data-has-color={w.color ? "true" : "false"}
               style={w.color ? `--ws-color: ${w.color}` : undefined}
+              title={p.collapsed ? w.name : undefined}
               onClick={() => p.onActivate(w.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -183,7 +196,10 @@ export function Sidebar(p: Props) {
       </div>
       {/* Phase 39: Notes + Settings paired row, then New workspace,
           then Provision server. Ports panel removed — reachable via the
-          per-workspace 🌐 badge → floating Ports window. */}
+          per-workspace 🌐 badge → floating Ports window.
+          Phase 62.B (item I): hidden in the collapsed icon strip (expand
+          to reach them — too wide to fit at 52px). */}
+      <Show when={!p.collapsed}>
       <div class="sidebar-actions-row">
         <button class="ws-action-half" onClick={p.onOpenNotes} title={t("sidebar.notes.tooltip")}>
           📝 {t("sidebar.notes.tooltip")}
@@ -204,6 +220,7 @@ export function Sidebar(p: Props) {
       <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
         {t("sidebar.provision_server")}
       </button>
+      </Show>
     </div>
   );
 }

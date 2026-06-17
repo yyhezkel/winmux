@@ -225,6 +225,13 @@ pub(crate) async fn workspace_browser_navigate(
         .get(&workspace_id)
         .cloned()
         .ok_or_else(|| format!("no browser webview for workspace {workspace_id}"))?;
+    // Phase 62.C (F.1): log the destination so a "browser isn't reaching
+    // the service" report can be checked against the actual URL (should
+    // be http://127.0.0.1:<port>, never localhost / an external IP).
+    dlog(&format!(
+        "[workspace_browser_navigate] ws={} url={}",
+        workspace_id, url
+    ));
     webview.navigate(parsed).map_err(|e| e.to_string())?;
     Ok(())
 }

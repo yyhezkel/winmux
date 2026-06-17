@@ -175,6 +175,11 @@ export function BrowserWindow(p: Props) {
   // One-shot guard so the persisted "last port" auto-opens only once per
   // open session (not every time detectedPorts updates).
   let autoTried = false;
+  // Phase 62.C (F.1): the URL last handed to the native webview. Lets the
+  // show effect tell a geometry change (same url → reposition only) from
+  // a real URL change (different port → must navigate; the backend
+  // fast-path only repositions, it doesn't navigate).
+  let lastShownUrl: string | null = null;
 
   // Track the workspace by ID (object identity churns on every file()
   // refresh). On a real workspace change: reload geometry + persisted
@@ -190,6 +195,7 @@ export function BrowserWindow(p: Props) {
     setCurrentUrl(null);
     setNavError(null);
     autoTried = false;
+    lastShownUrl = null;
     if (p.open) p.onEnsurePorts(id);
   });
 
@@ -231,6 +237,13 @@ export function BrowserWindow(p: Props) {
       return;
     }
     const s = slotRect(geom());
+    // Phase 62.C (F.1): workspace_browser_show spawns (loading `url`) on
+    // the first call, or repositions + shows an existing webview. Its
+    // fast path does NOT navigate, so when the URL changed (a different
+    // port) we navigate explicitly. A geometry change keeps the same url
+    // → reposition only.
+    const urlChanged = lastShownUrl !== null && lastShownUrl !== url;
+    lastShownUrl = url;
     void invoke("workspace_browser_show", {
       workspaceId: id,
       url,
@@ -238,7 +251,13 @@ export function BrowserWindow(p: Props) {
       y: s.y,
       w: s.w,
       h: s.h,
-    }).catch((err) => console.error("workspace_browser_show failed", err));
+    })
+      .then(() => {
+        if (urlChanged) {
+          return invoke("workspace_browser_navigate", { workspaceId: id, url });
+        }
+      })
+      .catch((err) => console.error("workspace_browser_show failed", err));
   });
 
   // Hide the Webview when the window CLOSES (not only on unmount — the

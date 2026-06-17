@@ -233,6 +233,11 @@ export class TerminalInstance {
   // from the right remote. null until connected (download needs a live
   // SSH session anyway).
   workspaceId: string | null = null;
+  // Phase 62.C (J.1): one-shot diagnostic flag — have we yet seen an
+  // OSC 8 hyperlink sequence arrive in this pane's stream? Logged once
+  // (metadata only, Rule #1) so we can tell "Claude isn't emitting OSC 8"
+  // apart from "our linkHandler isn't firing".
+  private oscHyperlinkLogged = false;
   /** The RTL mode active when this terminal was constructed. Changing
    * settings later only affects the data-write pipeline (and the
    * per-row dir attribute observer); the renderer choice is sticky. */
@@ -592,6 +597,18 @@ export class TerminalInstance {
     if (this.pendingChunks.length === 0) return;
     const merged = this.pendingChunks.join("");
     this.pendingChunks = [];
+    // Phase 62.C (J.1): record (once, metadata only — Rule #1) whether
+    // OSC 8 hyperlink sequences (ESC ] 8 ;) actually reach this pane. If
+    // the debug.log never shows this line while Claude prints file links,
+    // the sequences are being stripped upstream (or Claude isn't emitting
+    // them) — not a linkHandler bug.
+    if (!this.oscHyperlinkLogged && merged.includes("]8;")) {
+      this.oscHyperlinkLogged = true;
+      void invoke("diag_log", {
+        level: "info",
+        msg: `OSC8 hyperlink sequence detected in pane ${this.paneId}`,
+      }).catch(() => {});
+    }
     // The reorder pipeline keys off the LIVE rtl mode (g_rtlMode), so
     // a settings change takes effect on the very next flush — no
     // need to wait for a new pane.

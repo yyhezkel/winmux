@@ -186,9 +186,31 @@ export interface Settings {
   // Phase 62.B (item I): sidebar display mode. Backend defaults to
   // "full" via serde(default); always one of the three.
   sidebar_mode?: SidebarMode;
+  // Phase 63: per-kind floating-window state (Browser / FileManager).
+  floating_windows?: FloatingWindows;
 }
 
 export type SidebarMode = "full" | "icons" | "hidden";
+
+// Phase 63: 3-mode floating windows.
+export type FloatingWindowMode = "pane" | "float" | "popout";
+export interface FloatingRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+export interface FloatingWindowState {
+  mode?: FloatingWindowMode;
+  float_rect?: FloatingRect | null;
+  popout_rect?: FloatingRect | null;
+  popout_display?: number | null;
+  pane_width?: number | null;
+}
+export interface FloatingWindows {
+  browser?: FloatingWindowState;
+  filemanager?: FloatingWindowState;
+}
 
 export interface SummaryResult {
   text: string;

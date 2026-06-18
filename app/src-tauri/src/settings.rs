@@ -417,10 +417,73 @@ pub(crate) struct Settings {
     /// loading unchanged.
     #[serde(default = "default_sidebar_mode")]
     pub sidebar_mode: String,
+    /// Phase 63: per-kind (browser / filemanager) floating-window state —
+    /// which of the 3 modes each is in, plus the remembered geometry for
+    /// Float / Pop-out / Pane. `#[serde(default)]` so older settings.json
+    /// loads with both kinds defaulting to Float (current behavior).
+    #[serde(default)]
+    pub floating_windows: FloatingWindows,
 }
 
 fn default_sidebar_mode() -> String {
     "full".to_string()
+}
+
+/// Phase 63: display mode for a per-workspace Browser / File-Manager
+/// window. `Pane` = docked to the side; `Float` = the modal-style window
+/// over the workspace (the pre-63 behavior); `PopOut` = a standalone OS
+/// window. Lowercased in JSON → TS union "pane" | "float" | "popout".
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum FloatingWindowMode {
+    Pane,
+    #[default]
+    Float,
+    PopOut,
+}
+
+/// Phase 63: a window rectangle in logical pixels.
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Phase 63: persisted state for ONE floating-window kind, shared across
+/// workspaces (the window is per-workspace, but its mode + geometry
+/// preferences are global per kind — matches Yossi's spec).
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct FloatingWindowState {
+    #[serde(default)]
+    pub mode: FloatingWindowMode,
+    /// Last Float-mode rect (in-app, over the workspace).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub float_rect: Option<Rect>,
+    /// Last Pop-out OS-window rect (screen coordinates).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub popout_rect: Option<Rect>,
+    /// Monitor index the Pop-out last lived on; if that monitor is gone
+    /// next launch, fall back to the main window's display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub popout_display: Option<i32>,
+    /// Last Pane-mode width (px).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_width: Option<u32>,
+}
+
+/// Phase 63: both floating-window kinds.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct FloatingWindows {
+    #[serde(default)]
+    pub browser: FloatingWindowState,
+    #[serde(default)]
+    pub filemanager: FloatingWindowState,
 }
 
 /// Phase 58: speech-to-text settings.
@@ -601,6 +664,7 @@ impl Default for Settings {
             migrations: MigrationFlags::default(),
             stt: SttSettings::default(),
             sidebar_mode: default_sidebar_mode(),
+            floating_windows: FloatingWindows::default(),
         }
     }
 }

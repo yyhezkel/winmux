@@ -25,8 +25,10 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
-### 2026-06-14 — Phase 62 part 2: Browser/FileManager 3-mode window UX (Pane / Float / Pop-out)
-- **Context:** Yossi's Phase 60+61 smoke test produced a 6-item list, all about the floating Browser + File-Manager windows. Items 5 (hit-area), 3 (X button), 2 (resize), 6 (toasts+tooltips) shipped in Phase 62 (commit pending). The headline item (1+4) — make these windows true windows with three modes — is the large architectural piece, deliberately split out so it gets a focused pass instead of endangering the quick-win smoke build.
+### 2026-06-18 — Phase 63 (IN PROGRESS): Browser/FileManager 3-mode window UX (Pane / Float / Pop-out)
+- **Sub-task status:** **63.A DONE** (commit `ee6c8db`) — `FloatingWindowMode`/`Rect`/`FloatingWindowState`/`FloatingWindows` types + `Settings.floating_windows` (per-kind, atomic, Rule #7) + ts-rs bindings. Remaining: **63.B** mode buttons (📌/🪟/🗗 in window headers), **63.C** Pane dock, **63.D** Float-rect persistence to settings, **63.E** Pop-out (`WebviewWindow`; Browser then FileManager — the hard part), **63.F** drag-to-transition. Yossi OK'd shipping A–D + F first and splitting E if it delays.
+- **Persistence (revised):** state now lives in `settings.json` per-kind (Yossi's explicit spec), NOT localStorage — supersedes the earlier localStorage note below. Geometry written via the atomic settings save.
+- **Context:** Yossi's Phase 60+61 smoke test produced a 6-item list, all about the floating Browser + File-Manager windows. Items 5 (hit-area), 3 (X button), 2 (resize), 6 (toasts+tooltips) shipped in Phase 62. The headline item (1+4) — make these windows true windows with three modes — is this Phase 63.
 - **Spec (Yossi):** every window kind (Browser, FileManager) switches between:
   1. **Pane** — docked to the edge like a side panel. Side follows UI `dir`: RTL → left, LTR → right.
   2. **Float** — current modal-style div over the workspace; drag header + 8-way resize (already shipped in P62).

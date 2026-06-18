@@ -370,6 +370,7 @@
   "prov.error.stepFailed.title": "Шаг провалился: {step}",
   "prov.error.copy": "Скопировать",
   "prov.error.retry": "Повторить",
+  "prov.error.rawStderr": "сырой вывод stderr sudo",
   "sshKey.offer.title": "Настроить вход по SSH-ключу?",
   "sshKey.offer.body": "Сгенерируем ключ ed25519 и установим публичный ключ на сервер. Следующее подключение будет по ключу — без ввода пароля, быстрее и надёжнее.",
   "sshKey.offer.warning": "Внимание: это не даёт sudo. Для подготовки сервера всё ещё нужен sudo без пароля на удалённом узле.",

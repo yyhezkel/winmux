@@ -370,6 +370,7 @@
   "prov.error.stepFailed.title": "שלב נכשל: {step}",
   "prov.error.copy": "העתק ללוח",
   "prov.error.retry": "נסה שוב",
+  "prov.error.rawStderr": "פלט שגיאה גולמי של sudo",
   "sshKey.offer.title": "להגדיר התחברות SSH במפתח?",
   "sshKey.offer.body": "ניצור זוג מפתחות ed25519 ונתקין את המפתח הציבורי בשרת. החיבור הבא ישתמש במפתח — בלי הקלדת סיסמה, מהיר ואמין יותר.",
   "sshKey.offer.warning": "שים לב: זה לא נותן הרשאות sudo. כדי להריץ provisioning בשרת עדיין נדרש sudo בלי סיסמה.",

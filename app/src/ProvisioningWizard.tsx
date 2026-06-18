@@ -653,7 +653,7 @@ export function ProvisioningWizard(p: Props) {
                       </div>
                       <Show when={err.details.raw_stderr}>
                         <details class="prov-error-raw">
-                          <summary>raw sudo stderr</summary>
+                          <summary>{t("prov.error.rawStderr")}</summary>
                           <pre>{err.details.raw_stderr}</pre>
                         </details>
                       </Show>

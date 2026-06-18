@@ -362,6 +362,7 @@
   "prov.error.stepFailed.title": "Step failed: {step}",
   "prov.error.copy": "Copy to clipboard",
   "prov.error.retry": "Retry",
+  "prov.error.rawStderr": "raw sudo stderr",
   "sshKey.offer.title": "Set up SSH key authentication?",
   "sshKey.offer.body": "Generate an ed25519 keypair and install the public key on the server. Next connection will use the key — no password typing, faster, more reliable.",
   "sshKey.offer.warning": "Note: this does NOT grant the user sudo privileges. Server provisioning still requires passwordless sudo on the remote.",

@@ -15,7 +15,6 @@ import { CommandPalette, type Command } from "./CommandPalette";
 import { PortsWindow } from "./PortsWindow";
 import { BrowserWindow } from "./BrowserWindow";
 import { FileManagerWindow } from "./FileManagerWindow";
-import { ConnectExistingWizard } from "./ConnectExistingWizard";
 import {
   TerminalInstance,
   copyTerminalSelection,
@@ -137,15 +136,10 @@ function App() {
       setInstallingUpdate(false);
     }
   };
-  // Phase 14.A: server provisioning wizard.
+  // Phase 14.A: server provisioning wizard. Phase 65.R folded the
+  // "Connect to existing server" flow into this wizard's "existing"
+  // mode, so there's no separate connect-existing modal anymore.
   const [showProvision, setShowProvision] = createSignal(false);
-  // Phase 65.C: "Connect to existing server" wizard. null = closed; the
-  // object carries optional add-to-existing context (workspace id +
-  // prefill of the known host/user/port).
-  const [connectExisting, setConnectExisting] = createSignal<{
-    existingWorkspaceId?: string;
-    prefill?: { host?: string; port?: number; user?: string };
-  } | null>(null);
   // Phase 35 (#1.3): command palette (Ctrl+Shift+P).
   const [showPalette, setShowPalette] = createSignal(false);
   // Phase 36 (#2.2): live auto port-forwards (all workspaces).
@@ -1801,7 +1795,6 @@ function App() {
           onActivate={handleSetActive}
           onCreate={() => setShowCreate(true)}
           onProvision={() => setShowProvision(true)}
-          onConnectExisting={() => setConnectExisting({})}
           onOpenSettings={() => setShowSettings(true)}
           onOpenNotes={() => setShowNotes(true)}
           onAction={(id, action) => {
@@ -2148,28 +2141,9 @@ function App() {
         />
       </Show>
 
-      {/* Phase 65.C: Connect-to-existing-server wizard. onCreated mirrors
-          the provisioning flow — activate the workspace + connect its
-          first pane. */}
-      <ConnectExistingWizard
-        open={connectExisting() !== null}
-        existingWorkspaceId={connectExisting()?.existingWorkspaceId}
-        prefill={connectExisting()?.prefill}
-        onClose={() => setConnectExisting(null)}
-        onCreated={async (wsId) => {
-          try {
-            await handleSetActive(wsId);
-            const ws = file().workspaces.find((w) => w.id === wsId);
-            const firstPane = ws?.layout ? collectPanes(ws.layout)[0] : null;
-            if (firstPane) {
-              setActivePaneId(firstPane);
-              connectPane(firstPane, { persistent: true });
-            }
-          } catch (e) {
-            console.error("open connect-existing workspace failed", e);
-          }
-        }}
-      />
+      {/* Phase 65.R: the Connect-to-existing-server flow now lives inside
+          the Provisioning wizard's "existing" mode (above); no separate
+          modal mount here. */}
 
       <Show when={settings()}>
         <SettingsModal

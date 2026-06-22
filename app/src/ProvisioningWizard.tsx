@@ -2,6 +2,7 @@ import { createSignal, For, Show, onMount, onCleanup, createMemo } from "solid-j
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { t } from "./i18n";
+import { ConnectExistingFlow } from "./ConnectExistingFlow";
 
 // Phase 14.A type mirrors — see src-tauri/src/provisioning.rs.
 interface InspectResult {
@@ -76,16 +77,17 @@ export function ProvisioningWizard(p: Props) {
   type WizardStep = "connect" | "configure" | "execute" | "done";
   const [wizStep, setWizStep] = createSignal<WizardStep>("connect");
 
-  // Phase 56-B: mode picker at step 1.
+  // Phase 56-B / 65.R: mode picker at step 1.
   //   "new"      → full provisioning flow (existing 4-step wizard).
-  //   "existing" → minimal flow for an already-set-up server: install
-  //                an SSH key + create a workspace, no user creation,
-  //                no sudo, no agent install. One backend command
-  //                (provision_existing_install_key) does steps 2-5.
+  //   "existing" → connect to an already-running server. Phase 65.R
+  //                replaced the minimal 56-B install-key form with the
+  //                richer multi-machine discovery flow (ConnectExistingFlow:
+  //                auth → discover → choose/create key-only user →
+  //                execute → result). The old standalone "Connect to
+  //                existing" sidebar button is gone; this is the single
+  //                entry point.
   type WizardMode = "new" | "existing";
   const [mode, setMode] = createSignal<WizardMode>("new");
-  const [existingBusy, setExistingBusy] = createSignal(false);
-  const [existingError, setExistingError] = createSignal<string | null>(null);
 
   // Connect-step inputs.
   const [host, setHost] = createSignal("");
@@ -215,39 +217,6 @@ export function ProvisioningWizard(p: Props) {
     }
   };
 
-  // Phase 56-B: existing-server mode. One backend call does cred-test
-  // + keygen + remote install + verify-with-key + persist-workspace.
-  // On success, we synthesize a `result()` payload that drives the
-  // existing Done step UI (with the "Open it now" button).
-  const runExistingInstallKey = async () => {
-    setExistingBusy(true);
-    setExistingError(null);
-    try {
-      const newWorkspaceId = await invoke<string>(
-        "provision_existing_install_key",
-        {
-          host: host().trim(),
-          port: port(),
-          sshUser: user().trim(),
-          password: password(),
-          workspaceName: workspaceName().trim(),
-        }
-      );
-      setResult({
-        run_id: "existing-install",
-        workspace_id: newWorkspaceId,
-        workspace_name: workspaceName().trim() || host().trim(),
-        claude_installed: false,
-        host: host().trim(),
-      });
-      setWizStep("done");
-    } catch (e) {
-      setExistingError(String(e));
-    } finally {
-      setExistingBusy(false);
-    }
-  };
-
   const startRun = async () => {
     setWizStep("execute");
     setLogLines([]);
@@ -362,46 +331,53 @@ export function ProvisioningWizard(p: Props) {
                   </span>
                 </label>
               </div>
-              <p class="settings-hint">{t("provisioning.hint.connect")}</p>
-              <label>
-                <span>{t("provisioning.field.host")}</span>
-                <input
-                  value={host()}
-                  onInput={(e) => setHost(e.currentTarget.value)}
-                  placeholder="1.2.3.4"
+              {/* Phase 65.R: "new" runs the legacy 4-step provisioning;
+                  "existing" hands off to the multi-machine connect flow
+                  (its own auth/discover/choose/result steps + fields). */}
+              <Show when={mode() === "existing"}>
+                <ConnectExistingFlow
+                  onCreated={(wsId) => {
+                    p.onOpenWorkspace?.(wsId, "default");
+                    p.onClose();
+                  }}
+                  onClose={p.onClose}
                 />
-              </label>
-              <label>
-                <span>{t("provisioning.field.port")}</span>
-                <input
-                  type="number"
-                  value={port()}
-                  onInput={(e) => setPort(parseInt(e.currentTarget.value) || 22)}
-                />
-              </label>
-              <label>
-                <span>{t("provisioning.field.initial_user")}</span>
-                <input
-                  value={user()}
-                  onInput={(e) => setUser(e.currentTarget.value)}
-                />
-              </label>
-              <label>
-                <span>{t("provisioning.field.password")}</span>
-                <input
-                  type="password"
-                  value={password()}
-                  onInput={(e) => setPassword(e.currentTarget.value)}
-                  placeholder={t("provisioning.field.password.placeholder")}
-                />
-              </label>
-              {/* Phase 56-B: key_path / key_passphrase inputs are
-                  new-mode only. Existing mode generates a fresh
-                  ed25519 keypair itself — accepting a user-provided
-                  one in that flow would conflict with the install
-                  step's "write a brand-new pubkey to authorized_keys"
-                  guarantee. */}
+              </Show>
+
               <Show when={mode() === "new"}>
+                <p class="settings-hint">{t("provisioning.hint.connect")}</p>
+                <label>
+                  <span>{t("provisioning.field.host")}</span>
+                  <input
+                    value={host()}
+                    onInput={(e) => setHost(e.currentTarget.value)}
+                    placeholder="1.2.3.4"
+                  />
+                </label>
+                <label>
+                  <span>{t("provisioning.field.port")}</span>
+                  <input
+                    type="number"
+                    value={port()}
+                    onInput={(e) => setPort(parseInt(e.currentTarget.value) || 22)}
+                  />
+                </label>
+                <label>
+                  <span>{t("provisioning.field.initial_user")}</span>
+                  <input
+                    value={user()}
+                    onInput={(e) => setUser(e.currentTarget.value)}
+                  />
+                </label>
+                <label>
+                  <span>{t("provisioning.field.password")}</span>
+                  <input
+                    type="password"
+                    value={password()}
+                    onInput={(e) => setPassword(e.currentTarget.value)}
+                    placeholder={t("provisioning.field.password.placeholder")}
+                  />
+                </label>
                 <label>
                   <span>{t("provisioning.field.key_path")}</span>
                   <input
@@ -420,81 +396,35 @@ export function ProvisioningWizard(p: Props) {
                     />
                   </label>
                 </Show>
-              </Show>
 
-              {/* Phase 56-B: workspace name lives on step 1 in existing
-                  mode (no configure step to host it). Auto-derived
-                  from host() via the same memo as new-mode. */}
-              <Show when={mode() === "existing"}>
-                <label>
-                  <span>{t("provisioning.field.workspace_name")}</span>
-                  <input
-                    value={workspaceName()}
-                    placeholder={t("provisioning.field.workspace_name.placeholder")}
-                    onInput={(e) => {
-                      setWorkspaceName(e.currentTarget.value);
-                      setWorkspaceNameTouched(true);
-                    }}
-                  />
-                </label>
-              </Show>
-
-              <Show when={inspect()}>
-                <div
-                  class={`wizard-test-result ${inspect()!.ok ? "ok" : "err"}`}
-                >
-                  <Show when={inspect()!.ok}>
-                    <div class="wizard-test-line">
-                      ✓ {inspect()!.os_pretty_name ?? t("provisioning.inspect.os_detected")}
-                    </div>
-                    <div class="wizard-test-meta">
-                      {t("provisioning.inspect.meta", {
-                        pm: inspect()!.package_manager ?? "?",
-                        who: inspect()!.whoami?.trim() ?? "?",
-                      })}
-                    </div>
-                    <Show when={inspect()!.df_h}>
-                      <div class="wizard-test-meta">
-                        {t("provisioning.inspect.disk", { df: inspect()!.df_h!.trim() })}
+                <Show when={inspect()}>
+                  <div
+                    class={`wizard-test-result ${inspect()!.ok ? "ok" : "err"}`}
+                  >
+                    <Show when={inspect()!.ok}>
+                      <div class="wizard-test-line">
+                        ✓ {inspect()!.os_pretty_name ?? t("provisioning.inspect.os_detected")}
                       </div>
+                      <div class="wizard-test-meta">
+                        {t("provisioning.inspect.meta", {
+                          pm: inspect()!.package_manager ?? "?",
+                          who: inspect()!.whoami?.trim() ?? "?",
+                        })}
+                      </div>
+                      <Show when={inspect()!.df_h}>
+                        <div class="wizard-test-meta">
+                          {t("provisioning.inspect.disk", { df: inspect()!.df_h!.trim() })}
+                        </div>
+                      </Show>
                     </Show>
-                  </Show>
-                  <Show when={!inspect()!.ok}>
-                    <div class="wizard-test-line">✗ {inspect()!.message}</div>
-                  </Show>
-                </div>
-              </Show>
+                    <Show when={!inspect()!.ok}>
+                      <div class="wizard-test-line">✗ {inspect()!.message}</div>
+                    </Show>
+                  </div>
+                </Show>
 
-              {/* Phase 56-B: existing-mode error banner. Surfaces
-                  ssh-keygen / connect / install / verify failures
-                  inline; the next click retries with the same form. */}
-              <Show when={mode() === "existing" && existingError()}>
-                <div class="wizard-test-result err">
-                  <div class="wizard-test-line">✗ {existingError()}</div>
-                </div>
-              </Show>
-
-              <div class="modal-buttons">
-                <button onClick={p.onClose}>{t("common.cancel")}</button>
-                <Show
-                  when={mode() === "new"}
-                  fallback={
-                    <button
-                      class="primary"
-                      disabled={
-                        existingBusy() ||
-                        !host() ||
-                        !user() ||
-                        !password()
-                      }
-                      onClick={() => void runExistingInstallKey()}
-                    >
-                      {existingBusy()
-                        ? t("provisioning.existing.step.install")
-                        : t("provisioning.btn.existing_install_key")}
-                    </button>
-                  }
-                >
+                <div class="modal-buttons">
+                  <button onClick={p.onClose}>{t("common.cancel")}</button>
                   <button
                     class="primary"
                     disabled={inspecting() || !host() || !user()}
@@ -504,8 +434,8 @@ export function ProvisioningWizard(p: Props) {
                       ? t("provisioning.inspecting")
                       : t("provisioning.btn.connect_inspect")}
                   </button>
-                </Show>
-              </div>
+                </div>
+              </Show>
             </Show>
 
             {/* Step 2: configure */}

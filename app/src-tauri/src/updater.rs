@@ -159,9 +159,14 @@ async fn fetch_manifest(url: &str) -> Result<Manifest, String> {
 /// Used both by the startup task and the manual `check_for_updates_now`
 /// Tauri command.
 pub(crate) async fn check(state: &AppState, app: &AppHandle) -> UpdateInfo {
-    let (url, last_seen) = {
+    let (url, last_seen, skipped, remind_after) = {
         let s = state.settings.lock().unwrap();
-        (s.updates.manifest_url.clone(), s.updates.last_seen_version.clone())
+        (
+            s.updates.manifest_url.clone(),
+            s.updates.last_seen_version.clone(),
+            s.updates.skipped_versions.clone(),
+            s.updates.remind_after_iso.clone(),
+        )
     };
     let now = iso_now();
 
@@ -225,15 +230,63 @@ pub(crate) async fn check(state: &AppState, app: &AppHandle) -> UpdateInfo {
         let _ = crate::settings::save_to_disk_pub(&s);
     }
 
-    if info.available && info.latest_version != last_seen {
+    // Phase 65 (U): respect the user's "skip this version" + "remind me
+    // later" choices for the auto-banner. (The manual Settings check
+    // still returns `info` directly, so an explicit check always shows
+    // the result regardless of snooze/skip.)
+    let snoozed = remind_after
+        .as_deref()
+        .and_then(|iso| chrono::DateTime::parse_from_rfc3339(iso).ok())
+        .map(|t| chrono::Utc::now() < t.with_timezone(&chrono::Utc))
+        .unwrap_or(false);
+    let skipped_this = info
+        .latest_version
+        .as_ref()
+        .map(|v| skipped.iter().any(|s| s == v))
+        .unwrap_or(false);
+    if info.available && info.latest_version != last_seen && !snoozed && !skipped_this {
         dlog(&format!(
             "updater: new version {} available (current {})",
             info.latest_version.clone().unwrap_or_default(),
             APP_VERSION
         ));
         let _ = app.emit("update:available", &info);
+    } else if info.available && (snoozed || skipped_this) {
+        dlog(&format!(
+            "updater: {} available but suppressed (snoozed={snoozed} skipped={skipped_this})",
+            info.latest_version.clone().unwrap_or_default()
+        ));
     }
     info
+}
+
+/// Phase 65 (U): mark a version as skipped — the auto-banner won't show
+/// for it again until a newer version is published. Idempotent.
+#[tauri::command]
+pub(crate) async fn updater_skip_version(
+    state: State<'_, AppState>,
+    version: String,
+) -> Result<(), String> {
+    let mut s = state.settings.lock().map_err(|e| e.to_string())?;
+    if !s.updates.skipped_versions.contains(&version) {
+        s.updates.skipped_versions.push(version);
+    }
+    crate::settings::save_to_disk_pub(&s).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Phase 65 (U): snooze the update banner for `hours` hours.
+#[tauri::command]
+pub(crate) async fn updater_remind_later(
+    state: State<'_, AppState>,
+    hours: u32,
+) -> Result<(), String> {
+    let until = chrono::Utc::now() + chrono::Duration::hours(hours.max(1) as i64);
+    let iso = until.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let mut s = state.settings.lock().map_err(|e| e.to_string())?;
+    s.updates.remind_after_iso = Some(iso);
+    crate::settings::save_to_disk_pub(&s).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

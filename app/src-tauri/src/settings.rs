@@ -238,6 +238,16 @@ pub(crate) struct Updates {
     pub last_check_iso: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seen_version: Option<String>,
+    /// Phase 65 (U): versions the user chose to skip — the
+    /// `update:available` banner stays suppressed for these until a
+    /// newer version appears. Older settings.json without this field
+    /// load with an empty list.
+    #[serde(default)]
+    pub skipped_versions: Vec<String>,
+    /// Phase 65 (U): "remind me later" — suppress the banner until this
+    /// ISO timestamp passes. None = no active snooze.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remind_after_iso: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
@@ -642,6 +652,8 @@ impl Default for Updates {
             ),
             last_check_iso: None,
             last_seen_version: None,
+            skipped_versions: Vec::new(),
+            remind_after_iso: None,
         }
     }
 }

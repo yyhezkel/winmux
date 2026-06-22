@@ -2980,6 +2980,23 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   border-radius: 3px;
 }
 .update-banner-x:hover { background: var(--w-surface-hi); color: var(--w-text); }
+/* Phase 65 (U): low-emphasis defer actions (remind / skip). */
+.update-banner-secondary {
+  background: transparent;
+  color: var(--w-text-dim);
+  border: 1px solid var(--w-border);
+  padding: 4px 10px;
+  border-radius: var(--w-r-sm);
+  cursor: pointer;
+  font-size: var(--w-fs-md);
+}
+.update-banner-secondary:hover:not(:disabled) {
+  background: var(--w-surface-hi);
+  color: var(--w-text);
+}
+.update-banner-secondary:disabled { opacity: 0.5; cursor: default; }
+/* Phase 65 (U): install-failed hint inline in the banner body. */
+.update-banner-err { color: var(--w-error); font-weight: 600; }
 
 /* ─── Phase 11.A: tmux persistence ─── */
 

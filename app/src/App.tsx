@@ -122,9 +122,14 @@ function App() {
   const [updateBanner, setUpdateBanner] = createSignal<UpdateInfo | null>(null);
   // Phase 27: in-flight state for the one-click installer download.
   const [installingUpdate, setInstallingUpdate] = createSignal(false);
+  // Phase 65 (U): set when the one-click install fails, so the banner
+  // surfaces the manual "Download from GitHub" escape hatch — users are
+  // never stuck on an old version even if auto-install can't proceed.
+  const [installError, setInstallError] = createSignal(false);
   const installUpdate = async () => {
     if (installingUpdate()) return;
     setInstallingUpdate(true);
+    setInstallError(false);
     try {
       // Backend will exit() the app ~800ms after this returns; the
       // invoke promise resolves before exit so we can show "downloading"
@@ -135,7 +140,30 @@ function App() {
     } catch (e) {
       flashSummaryToast("err", t("update_banner.install_failed", { msg: String(e) }));
       setInstallingUpdate(false);
+      setInstallError(true);
     }
+  };
+  // Phase 65 (U): snooze the banner for a day.
+  const remindUpdateLater = async () => {
+    try {
+      await invoke("updater_remind_later", { hours: 24 });
+    } catch (e) {
+      console.warn("updater_remind_later failed", e);
+    }
+    setUpdateBanner(null);
+  };
+  // Phase 65 (U): skip this version — banner stays hidden until a newer
+  // one is published.
+  const skipUpdateVersion = async () => {
+    const v = updateBanner()?.latest_version;
+    if (v) {
+      try {
+        await invoke("updater_skip_version", { version: v });
+      } catch (e) {
+        console.warn("updater_skip_version failed", e);
+      }
+    }
+    setUpdateBanner(null);
   };
   // Phase 14.A: server provisioning wizard. Phase 65.R folded the
   // "Connect to existing server" flow into this wizard's "existing"
@@ -2314,18 +2342,14 @@ function App() {
           <div class="update-banner-body">
             <strong>winmux {updateBanner()!.latest_version}</strong>{" "}
             is available — current {updateBanner()!.current_version}.
+            {/* Phase 65 (U): when auto-install fails, tell the user they
+                can still get the update manually so they're never stuck. */}
+            <Show when={installError()}>
+              {" "}
+              <span class="update-banner-err">{t("update_banner.install_error_hint")}</span>
+            </Show>
           </div>
           <div class="update-banner-actions">
-            <Show when={updateBanner()!.notes_url}>
-              <a
-                class="update-banner-link"
-                href={updateBanner()!.notes_url ?? "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {t("update_banner.notes")}
-              </a>
-            </Show>
             {/* Phase 27: one-click auto-install. The backend downloads
                 the NSIS installer, verifies its sha256 against the
                 manifest, runs it, and exits the app. */}
@@ -2337,6 +2361,36 @@ function App() {
               {installingUpdate()
                 ? t("update_banner.installing")
                 : t("update_banner.install")}
+            </button>
+            {/* Phase 65 (U): manual GitHub fallback — always available
+                as the release-notes/download link, and the primary
+                escape hatch after an install error. */}
+            <Show when={updateBanner()!.notes_url}>
+              <a
+                class="update-banner-link"
+                href={updateBanner()!.notes_url ?? "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {installError()
+                  ? t("update_banner.manual_download")
+                  : t("update_banner.notes")}
+              </a>
+            </Show>
+            {/* Phase 65 (U): defer options. */}
+            <button
+              class="update-banner-secondary"
+              disabled={installingUpdate()}
+              onClick={() => void remindUpdateLater()}
+            >
+              {t("update_banner.remind_later")}
+            </button>
+            <button
+              class="update-banner-secondary"
+              disabled={installingUpdate()}
+              onClick={() => void skipUpdateVersion()}
+            >
+              {t("update_banner.skip")}
             </button>
             <button class="update-banner-x" onClick={() => setUpdateBanner(null)}>×</button>
           </div>

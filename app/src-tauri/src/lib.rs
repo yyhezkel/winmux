@@ -1354,6 +1354,17 @@ fn spawn_local_pty(
             cmd.cwd(d);
         }
     }
+    // Phase 65 (J experiment): nudge CLIs (Claude Code) to emit OSC 8
+    // hyperlinks so the terminal's linkHandler can make file links
+    // clickable. CommandBuilder inherits the parent env, so these only
+    // add/override. Engineer-only log (Rule #9). If this doesn't make
+    // Claude emit OSC 8, J falls back to plan B (regex on visible text).
+    cmd.env("FORCE_HYPERLINK", "1");
+    cmd.env("FORCE_HYPERLINKS", "1");
+    cmd.env("CLAUDE_CODE_FORCE_HYPERLINKS", "1");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("TERM", "xterm-256color");
+    tracing::debug!("spawn_local_pty[{pane_id}]: injected hyperlink env vars");
     let mut child = pair
         .slave
         .spawn_command(cmd)
@@ -2130,6 +2141,20 @@ async fn spawn_ssh(
             .set_env(false, "WINMUX_PANE_ID", pane_id.clone())
             .await;
     }
+
+    // Phase 65 (J experiment): try to make remote CLIs (Claude Code)
+    // emit OSC 8 hyperlinks. Best-effort — sshd's AcceptEnv may filter
+    // these out, in which case J falls back to plan B (regex on the
+    // visible `[file] …` text). Engineer-only log (Rule #9).
+    for (k, v) in [
+        ("FORCE_HYPERLINK", "1"),
+        ("FORCE_HYPERLINKS", "1"),
+        ("CLAUDE_CODE_FORCE_HYPERLINKS", "1"),
+        ("COLORTERM", "truecolor"),
+    ] {
+        let _ = channel.set_env(false, k, v.to_string()).await;
+    }
+    tracing::debug!("spawn_ssh[{pane_id}]: requested hyperlink env vars (best-effort)");
 
     channel
         .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])

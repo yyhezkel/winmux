@@ -53,6 +53,10 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Decided
 
+### 2026-06-18 — Phase 65.B-prep / J experiment: inject hyperlink env at pane spawn
+- **J (Track A experiment):** both pane-spawn paths now inject `FORCE_HYPERLINK=1`, `FORCE_HYPERLINKS=1`, `CLAUDE_CODE_FORCE_HYPERLINKS=1`, `COLORTERM=truecolor` (+ `TERM=xterm-256color` locally) — local PTY via `CommandBuilder.env` (reliable), SSH via `channel.set_env` (best-effort). Engineer-only `tracing::debug` logs the injection (Rule #9). **Caveat:** default OpenSSH `AcceptEnv LANG LC_*` will likely DROP these on SSH — so the SSH result may be inconclusive. To disambiguate, run `export FORCE_HYPERLINK=1; claude` manually in the pane (reliable): if the `OSC8 … detected` diagnostic then fires → forcing works and we wire a reliable path (claude-launcher prefix / remote rc); if not even then → Claude doesn't support it → Track B (regex). The local-PTY path is conclusive on its own.
+
+
 ### 2026-06-18 — Phase 64 (N, part 1): small-screen scroll/overflow hardening
 - **Context:** Yossi — on small screens (small laptop, half-screen, ~1024×600) content gets cut off because there are almost no scroll-bars; you can't reach content below the fold.
 - **Done (the highest-value, lowest-risk core):**

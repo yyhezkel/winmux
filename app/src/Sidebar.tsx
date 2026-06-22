@@ -31,11 +31,16 @@ interface Props {
   onCreate: () => void;
   /** Phase 14.A — open the server provisioning wizard. */
   onProvision: () => void;
+  /** Phase 65.C — open the "connect to existing server" wizard (new ws). */
+  onConnectExisting: () => void;
   /** Phase 38 — open the settings modal from the sidebar gear. */
   onOpenSettings: () => void;
   /** Phase 39 — open the notes window from the sidebar. */
   onOpenNotes: () => void;
-  onAction: (id: string, action: "rename" | "edit" | "delete" | "disconnect") => void;
+  onAction: (
+    id: string,
+    action: "rename" | "edit" | "delete" | "disconnect" | "add_machine",
+  ) => void;
   // Phase 36.A / 39: all forwards across workspaces, for the per-
   // workspace inline 🌐 badge. Clicking the badge opens the Ports
   // window scoped to that workspace.
@@ -185,6 +190,11 @@ export function Sidebar(p: Props) {
                   <button onClick={() => p.onAction(w.id, "edit")}>
                     {t("ws.context.edit")}
                   </button>
+                  {/* Phase 65.C: add another local machine's key to this
+                      workspace's server. */}
+                  <button onClick={() => p.onAction(w.id, "add_machine")}>
+                    {t("ws.context.add_machine")}
+                  </button>
                   <Show when={p.connectedIds.has(w.id)}>
                     <button onClick={() => p.onAction(w.id, "disconnect")}>
                       {t("ws.context.disconnect")}
@@ -232,6 +242,12 @@ export function Sidebar(p: Props) {
       <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
         <span class="ws-action-emoji">☁</span>
         <span class="ws-action-label">{t("sidebar.provision_server")}</span>
+      </button>
+      {/* Phase 65.C: connect to an already-running server (this machine
+          joins it with its own SSH key). */}
+      <button class="ws-provision" onClick={p.onConnectExisting} title={t("sidebar.connect_existing_tooltip")}>
+        <span class="ws-action-emoji">🔗</span>
+        <span class="ws-action-label">{t("sidebar.connect_existing")}</span>
       </button>
     </div>
   );

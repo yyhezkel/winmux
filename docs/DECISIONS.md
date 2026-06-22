@@ -25,6 +25,15 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-22 — Phase 65.O (REGRESSION): tmux scrollback no longer works
+- **Finding (Yossi, v0.2.8 live test):** "מבחינת ה-TMUX - נראה כאילו הגלילה חזרה לא לעבוד - העתקה והדבקה כן עובדים". So copy/paste (fixed in Phase 62.B item E via the custom right-click menu) work, but scrolling back through tmux history is broken. Regression — scroll worked before the 62.B terminal-input changes.
+- **Suspect:** the 62.B (E) work that replaced the default Windows context-menu / reworked terminal mouse+key handling likely also swallowed the events that drove tmux scrollback. Three candidate mechanisms to bisect:
+  1. **Mouse wheel** — xterm.js should forward wheel as mouse-protocol sequences (`\e[<…M`) when the app (tmux, `mouse on`) enables mouse reporting. Check whether our handler now `preventDefault`s/eats wheel before xterm sees it, or whether mouse mode isn't being negotiated.
+  2. **Shift+PgUp / Shift+PgDn** — should reach tmux to page copy-mode. A global `handleKey` (the Ctrl+B sidebar-cycle / `keyEq` additions from P62) may be capturing PgUp/PgDn even when a terminal is focused.
+  3. **copy-mode entry** — confirm `Prefix+[` still enters tmux copy-mode at all (rules out a deeper PTY-input break vs. a scroll-only break).
+- **Diagnosis plan:** reproduce in a tmux pane; first try `Prefix+[` then arrows/PgUp (isolates copy-mode vs. wheel); then wheel-scroll with `mouse on`; check `handleKey` guards (it's supposed to no-op when a terminal owns focus — verify PgUp/wheel aren't exceptions). Likely fix is narrow (stop eating the event / let xterm forward it).
+- **Priority (Yossi):** bad regression, daily-use pain. After v0.2.8 (shipped) and Phase 65 (done, awaiting smoke test) — **before** 63 / K / L / DIFF / B1 / J. New order: **65 smoke → O → 63.B+C+D+F → K → 63.E → L → DIFF → B1 → per-file unzip → N part 2 → J.**
+
 ### 2026-06-18 — Phase 64 (J follow-up): Claude prints `[file]` as PLAIN TEXT, not OSC 8
 - **Finding (Yossi, live Claude test):** the `OSC8 hyperlink sequence detected` diagnostic NEVER fired, and `[file] <name> (<size>)` shows as plain text with no escape sequences. So the Phase 62.B/C `linkHandler` (correct for OSC 8) has nothing to bind — Claude isn't emitting OSC 8 in winmux (TERM/capability/env, or SSH/tmux stripping). The diagnostic dlog stays in as the litmus test.
 - **Two-track plan (for the dedicated J round — NOT implemented blind, both need live-Claude iteration):**

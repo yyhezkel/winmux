@@ -1815,20 +1815,8 @@ function App() {
             } else if (action === "delete") void handleDelete(id);
             else if (action === "disconnect")
               void handleDisconnectWorkspace(id);
-            else if (action === "add_machine") {
-              // Phase 65.C: open the connect-existing wizard in
-              // add-to-existing mode, prefilled from the workspace's SSH
-              // connection so the user only types the password.
-              const ws = file().workspaces.find((w) => w.id === id);
-              const c = ws?.connection;
-              setConnectExisting({
-                existingWorkspaceId: id,
-                prefill:
-                  c?.type === "ssh"
-                    ? { host: c.host, port: c.port, user: c.user }
-                    : undefined,
-              });
-            }
+            // Phase 65.Q removed the "add_machine" action — joining an
+            // existing server is handled by the main wizard (R).
           }}
           allForwards={portForwards()}
           onOpenPorts={(workspaceId) => {

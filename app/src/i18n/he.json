@@ -26,7 +26,6 @@
   "common.passphrase": "סיסמה למפתח",
   "ws.context.rename": "שנה שם",
   "ws.context.edit": "ערוך…",
-  "ws.context.add_machine": "הוסף את המחשב הזה…",
   "ws.context.disconnect": "התנתק",
   "ws.context.delete": "מחק",
   "ws.empty.none": "אין עדיין סביבת עבודה.",

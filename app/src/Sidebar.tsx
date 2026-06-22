@@ -39,7 +39,7 @@ interface Props {
   onOpenNotes: () => void;
   onAction: (
     id: string,
-    action: "rename" | "edit" | "delete" | "disconnect" | "add_machine",
+    action: "rename" | "edit" | "delete" | "disconnect",
   ) => void;
   // Phase 36.A / 39: all forwards across workspaces, for the per-
   // workspace inline 🌐 badge. Clicking the badge opens the Ports
@@ -189,11 +189,8 @@ export function Sidebar(p: Props) {
                   <button onClick={() => p.onAction(w.id, "edit")}>
                     {t("ws.context.edit")}
                   </button>
-                  {/* Phase 65.C: add another local machine's key to this
-                      workspace's server. */}
-                  <button onClick={() => p.onAction(w.id, "add_machine")}>
-                    {t("ws.context.add_machine")}
-                  </button>
+                  {/* Phase 65.Q removed "Add this machine…" — joining an
+                      existing server now goes through the main wizard. */}
                   <Show when={p.connectedIds.has(w.id)}>
                     <button onClick={() => p.onAction(w.id, "disconnect")}>
                       {t("ws.context.disconnect")}

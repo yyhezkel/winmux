@@ -26,7 +26,6 @@
   "common.passphrase": "key passphrase",
   "ws.context.rename": "Rename",
   "ws.context.edit": "Edit…",
-  "ws.context.add_machine": "Add this machine…",
   "ws.context.disconnect": "Disconnect",
   "ws.context.delete": "Delete",
   "ws.empty.none": "No workspace yet.",

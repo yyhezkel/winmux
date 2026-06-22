@@ -26,7 +26,6 @@
   "common.passphrase": "пароль ключа",
   "ws.context.rename": "Переименовать",
   "ws.context.edit": "Изменить…",
-  "ws.context.add_machine": "Добавить этот компьютер…",
   "ws.context.disconnect": "Отключить",
   "ws.context.delete": "Удалить",
   "ws.empty.none": "Нет рабочих пространств.",

@@ -26,7 +26,6 @@
   "common.passphrase": "عبارة مرور المفتاح",
   "ws.context.rename": "إعادة تسمية",
   "ws.context.edit": "تحرير…",
-  "ws.context.add_machine": "إضافة هذا الجهاز…",
   "ws.context.disconnect": "قطع الاتصال",
   "ws.context.delete": "حذف",
   "ws.empty.none": "لا توجد مساحة عمل بعد.",

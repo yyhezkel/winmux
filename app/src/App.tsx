@@ -1283,11 +1283,13 @@ function App() {
       toggleMaximize();
       return;
     }
-    // Phase 65.T: Ctrl+Shift+M is the explicit Focus/Zoom hotkey
-    // (alongside Ctrl+Enter / double-click / the pane-header ⛶ button).
-    // Works even with a terminal focused — like Ctrl+Enter, it's a
-    // winmux gesture, and Ctrl+Shift+M isn't a common shell binding.
-    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && keyEq(e, "m")) {
+    // Phase 65.T / V: Ctrl+Shift+Z is the explicit Focus/Zoom hotkey
+    // (alongside Ctrl+Enter / double-click / the pane-header ⛶ button) —
+    // mnemonic matches tmux's Prefix+z zoom. NOTE: this was Ctrl+Shift+M
+    // until bug V — that collides with STT push-to-talk (default
+    // Ctrl+Shift+M), so it moved to Z. Works even with a terminal
+    // focused; Ctrl+Shift+Z isn't a common shell binding.
+    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && keyEq(e, "z")) {
       e.preventDefault();
       toggleMaximize();
       return;
@@ -1304,10 +1306,20 @@ function App() {
       setShowPalette((v) => !v);
       return;
     }
-    // Phase 62.B (item I) / 65.P: Ctrl+B toggles the sidebar mode
-    // (full ↔ icons), VS Code-style. Crucially, do NOT steal it when a
-    // terminal is focused — Ctrl+b is tmux's prefix and must reach the
-    // PTY. Only act when focus is outside an xterm container.
+    // Phase 65.W: Ctrl+Shift+B is the GLOBAL sidebar toggle — works
+    // everywhere, including when an xterm pane or the FileManager has
+    // focus. We can't make plain Ctrl+B global because Ctrl+b is tmux's
+    // prefix and must reach the PTY inside a terminal (stealing it would
+    // break every tmux keybinding); Ctrl+Shift+B sidesteps that.
+    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && keyEq(e, "b")) {
+      e.preventDefault();
+      cycleSidebarMode();
+      return;
+    }
+    // Phase 62.B (item I) / 65.P: plain Ctrl+B also toggles the sidebar,
+    // but ONLY when focus is outside a terminal — inside an xterm pane
+    // Ctrl+b is tmux's prefix and must reach the PTY. (Ctrl+Shift+B above
+    // is the focus-independent global toggle.)
     if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && keyEq(e, "b")) {
       const inTerminal = (e.target as HTMLElement | null)?.closest?.(
         ".terminal-container",

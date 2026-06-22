@@ -442,37 +442,55 @@ export class TerminalInstance {
     // vim with no tmux to translate the proxy) keep xterm's default; and
     // on the normal buffer we don't touch the wheel at all (real xterm
     // scrollback handles it).
+    //
+    // CAPTURE PHASE (bug O round 2): xterm.js attaches its own wheel
+    // handler to the `.xterm-viewport` child, which fires on the bubble
+    // path BEFORE this container-level handler would in bubble phase —
+    // so the alt-scroll arrows were already sent and our preventDefault
+    // came too late. Registering in the capture phase + stopPropagation
+    // means we intercept the wheel before xterm's handler ever sees it.
     this.container.addEventListener(
       "wheel",
       (e) => {
-        if (!g_winmuxTmuxWheelScroll || !this.tmuxScrollProxy) return;
-        if (!this.sessionId) return;
-        let onAlt = false;
-        try {
-          onAlt = this.term.buffer.active.type === "alternate";
-        } catch {
-          onAlt = false;
-        }
-        if (!onAlt) return;
-        e.preventDefault();
-        e.stopPropagation();
-        // CSI 1 ; 3 A/B = Alt+Up / Alt+Down (xterm modifier encoding,
-        // which tmux parses as M-Up / M-Down).
-        const seq = e.deltaY < 0 ? "\x1b[1;3A" : "\x1b[1;3B";
-        // Scale to the wheel delta so a fast flick scrolls further.
-        // deltaMode 1 = lines, 0 = pixels; normalize both to a small
-        // tick count (each proxy key scrolls ~3 lines via the conf).
-        const magnitude =
-          e.deltaMode === 1 ? Math.abs(e.deltaY) : Math.abs(e.deltaY) / 40;
-        const ticks = Math.max(1, Math.min(5, Math.round(magnitude)));
-        for (let i = 0; i < ticks; i++) {
-          void invoke("pty_write", {
-            sessionId: this.sessionId,
-            data: seq,
-          }).catch((err) => console.error("pty_write (wheel) failed", err));
+        // Phase 65.O diagnostics (visible in the debug build's devtools):
+        // metadata only, never PTY content (Rule #1).
+        const onAlt = (() => {
+          try {
+            return this.term.buffer.active.type === "alternate";
+          } catch {
+            return false;
+          }
+        })();
+        if (g_winmuxTmuxWheelScroll && this.tmuxScrollProxy && this.sessionId && onAlt) {
+          e.preventDefault();
+          e.stopPropagation();
+          // CSI 1 ; 3 A/B = Alt+Up / Alt+Down (xterm modifier encoding,
+          // which tmux parses as M-Up / M-Down).
+          const seq = e.deltaY < 0 ? "\x1b[1;3A" : "\x1b[1;3B";
+          // Scale to the wheel delta so a fast flick scrolls further.
+          // deltaMode 1 = lines, 0 = pixels; normalize both to a small
+          // tick count (each proxy key scrolls ~3 lines via the conf).
+          const magnitude =
+            e.deltaMode === 1 ? Math.abs(e.deltaY) : Math.abs(e.deltaY) / 40;
+          const ticks = Math.max(1, Math.min(5, Math.round(magnitude)));
+          console.debug(
+            `[winmux O] wheel→proxy pane=${this.paneId} deltaY=${e.deltaY} ticks=${ticks} dir=${e.deltaY < 0 ? "up" : "down"}`,
+          );
+          for (let i = 0; i < ticks; i++) {
+            void invoke("pty_write", {
+              sessionId: this.sessionId,
+              data: seq,
+            }).catch((err) => console.error("pty_write (wheel) failed", err));
+          }
+        } else {
+          // Bailed — log WHY so the wheel regression is diagnosable from
+          // the devtools console without a rebuild.
+          console.debug(
+            `[winmux O] wheel passthrough pane=${this.paneId} confEnabled=${g_winmuxTmuxWheelScroll} tmuxProxy=${this.tmuxScrollProxy} hasSession=${!!this.sessionId} onAlt=${onAlt}`,
+          );
         }
       },
-      { passive: false },
+      { capture: true, passive: false },
     );
 
     // Phase 15.A: only load the WebGL addon for the non-auto modes.

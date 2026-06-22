@@ -25,6 +25,16 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-22 — Phase 65.U (CRITICAL): Updater "shows but can't install"
+- **Report (Yossi, users):** "כשיש עדכון חדש — זה רק מציג ולא מאפשר התקנה או הורדה." Critical: if users can't self-update, none of our fixes reach them.
+- **Diagnosis (2026-06-22, VERIFIED end-to-end):** the one-click path is already complete and correct. `download_and_install_update` (Phase 27) downloads the NSIS installer → verifies sha256 → spawns → exits; the frontend already had a wired Install button. The published `manifest.json` (repo root, served via raw.githubusercontent main) has valid `nsis_url` + `nsis_sha256`; `gh release view v0.2.8` confirms the asset `winmux_0.2.8_x64-setup.exe` exists, and its sha256 **matches the manifest** (`52392c0…`). So current-version users CAN install. **The affected users are on PRE-Phase-27 builds** (notify-only banner, no install button) — their installed binary can't be patched retroactively; **they need one manual update from GitHub**, after which it's one-click forever.
+  - **➡️ Action for Yossi:** tell the cohort on old builds to manually download the latest installer once from the GitHub Releases page (the banner's "Release notes" link goes there). After that, in-app update works.
+- **DONE (2026-06-22): `f7d921c`** — hardened the banner for v0.2.9 WITHOUT touching the verified-working install core (can't be live-tested safely):
+  - **Manual "Download from GitHub" fallback** — always present (notes link), and the prominent escape hatch + error hint after an auto-install failure → users are never stuck.
+  - **"Remind me later" (24h) + "Skip this version"** → new `updater_remind_later` / `updater_skip_version` commands; `check()` suppresses the auto-banner while snoozed / for skipped versions (manual Settings check still always shows). Settings `Updates` gains `skipped_versions` + `remind_after_iso` (serde defaults, round-trip-safe).
+  - i18n +4 (601, parity); CSS for the new chips. tsc + cargo check clean.
+  - **DEFERRED:** real byte-level download progress — would mean refactoring the verified-working download loop, which can't be live-tested here. The indeterminate "downloading…" state stays for now.
+
 ### 2026-06-22 — Phase 65.O (REGRESSION): tmux scrollback no longer works
 - **Finding (Yossi, v0.2.8 live test):** "מבחינת ה-TMUX - נראה כאילו הגלילה חזרה לא לעבוד - העתקה והדבקה כן עובדים". So copy/paste (fixed in Phase 62.B item E via the custom right-click menu) work, but scrolling back through tmux history is broken. Regression — scroll worked before the 62.B terminal-input changes.
 - **Refined finding (Yossi, 2026-06-22, = bug 3.2):** "זה עושה בעצם 'למעלה ולמטה' בשורת ה-CLI - מביא לי בתוך קלוד את ההודעות האחרונות ששלחתי". So wheel / PgUp / PgDn are reaching the **shell as Up/Down arrow keys** (shell history navigation) instead of scrolling. That's the smoking gun: the event is being translated to an arrow keypress, not forwarded as scroll/mouse-protocol nor handled by xterm.js scrollback. **Desired behavior:** wheel → if tmux mouse mode active, forward to tmux; else scroll the xterm.js buffer. Shift+PgUp/PgDn → ALWAYS xterm.js scrollback. Bare Up/Down (no modifier) → shell history (the only case that should send arrows).
@@ -89,19 +99,20 @@ Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, wi
 - **(2.6 / K) Download chooser — always-ask confirmed.** Default for K: ALWAYS ask where to save. An optional default-folder setting may come later, but on install → always prompt.
 - **(6.2) New-workspace wizard placement — WAIT FOR IMAGES.** Yossi sees two SEPARATE buttons ("סביבת עבודה חדשה" + "הקם שרת") and finds it wrong. Desired: ONE "+ סביבת עבודה חדשה" button → modal with 2 mode selectors: "Provision new server" / "Connect to existing server" (the 65.C wizard folds in here). **Do NOT change until Yossi sends the screenshots.**
 
-- **Master priority order (Yossi, 2026-06-22 post-compact, supersedes earlier — v0.2.9 = option B, full):**
-  1. **Phase 65 (done in code) → P → Q → R** (IA consolidation, see entry above) — finish first; Yossi to smoke-test 65 (4 paths) before relying on it.
-  2. **T** — Focus/Zoom mode (fast, high value, no side effects, independent of 65).
-  3. **O** — tmux scroll (= 3.2).
-  4. **3.3** — Ctrl+Shift+C / DevTools block (critical).
-  5. **2.2 / 2.5 / 4.4 / 2.6** — FileManager + download bugs (4.1 dropped — superseded by P).
-  6. **K** — download chooser always-ask (depends on tauri-plugin-dialog).
-  7. **S = 63.B+C+D+F** — Pane + Float modes + drag-to-transition.
-  8. **63.E** — Pop-out to real OS `WebviewWindow` (hardest; may slip to v0.2.10 if it delays the cut — decide during impl).
-  9. **Cut v0.2.9.**
-  - **v0.2.9 scope** = Phase 65 + P + Q + R + T + O + 3.3 + (2.2 / 2.5 / 4.4 / 2.6-K) + S (63.B+C+D+F) + (63.E if it lands in time).
+- **Master priority order (Yossi, 2026-06-22, updated through the session — v0.2.9 = option B, full):**
+  1. ✅ **Phase 65 (code) → P (`53482fe`) → Q (`6edd4dd`) → R (`1fea3dd`)** — IA consolidation. *Yossi still to smoke-test 65 (4 paths) live.*
+  2. ✅ **T** — Focus/Zoom mode (`d030b53`).
+  3. ✅ **U** — Updater hardening (`f7d921c`); core was already working (see entry above).
+  4. ✅ **O** — tmux scroll wheel proxy (`90febca`) — *needs live test.*
+  5. ✅ **3.3** — DevTools block in prod (`cc95bf9`) — *needs prod-build verify.*
+  6. ✅ **4.4** (`7a1b3cd`) · ✅ **2.5** (`071e870`) · ⏳ **2.2** (investigated, needs live repro — not fixed).
+  7. ⏳ **2.6 / K** — download chooser always-ask (depends on tauri-plugin-dialog). NEXT.
+  8. ⏳ **S = 63.B+C+D+F** — Pane + Float modes + drag-to-transition.
+  9. ⏳ **63.E** — Pop-out to real OS `WebviewWindow` (may slip to v0.2.10).
+  10. **Cut v0.2.9.**
+  - **v0.2.9 scope** = Phase 65 + P + Q + R + T + U + O + 3.3 + (2.5 / 4.4 done; 2.2 pending; 2.6-K next) + S (63.B+C+D+F) + (63.E if it lands).
   - **After v0.2.9:** **L** → **DIFF** → **B1** → **per-file unzip** → **N part 2** → **J** (+ 63.E if deferred).
-  - **Scope note:** v0.2.9 is now a substantial release (multi-machine + IA cleanup + focus mode + 3-mode windows + bug round), not the original "cut fast right after 65." Yossi explicitly chose this (option B) 2026-06-22.
+  - **⚠️ Build/test debt:** a large batch (P/Q/R/T/U/O/3.3/4.4/2.5) is committed but UNVERIFIED live. A debug+prod build smoke-test round is overdue — several items (R+65, O, 3.3, 2.2 diagnosis, U) need it.
 
 ### 2026-06-18 — Phase 64 (J follow-up): Claude prints `[file]` as PLAIN TEXT, not OSC 8
 - **Finding (Yossi, live Claude test):** the `OSC8 hyperlink sequence detected` diagnostic NEVER fired, and `[file] <name> (<size>)` shows as plain text with no escape sequences. So the Phase 62.B/C `linkHandler` (correct for OSC 8) has nothing to bind — Claude isn't emitting OSC 8 in winmux (TERM/capability/env, or SSH/tmux stripping). The diagnostic dlog stays in as the litmus test.

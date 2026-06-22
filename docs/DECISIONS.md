@@ -58,6 +58,7 @@ After the v0.2.9 scope decision, Yossi chose **option B (full v0.2.9)** and adde
   - Restore = same icon (toggled state) or same hotkey again → back to the normal layout.
   - **Edge case — new pane opened while focused:** either auto-restore + show the new pane alongside, OR stay focused with a "X panes in background" indicator badge. **Decide during implementation** (Yossi left it open; lean to staying focused with the badge — less layout jank).
   - Independent of Phase 65 / IA work; Yossi flags it "מהיר, value גבוה, אין side effects" → placed early in the order.
+  - **DONE (2026-06-22): `d030b53`.** Turned out T's core already shipped as **Phase 55-A "maximize"** (Ctrl+Enter / double-click / Esc; swaps LayoutView to the lone leaf; other panes' `TerminalInstance`s survive in the registry so their PTYs keep running — exactly the "run in background, not paused" requirement). T added the three missing affordances Yossi asked for: pane-header ⛶ button (⤡ when focused), the **Ctrl+Shift+M** hotkey, and the "⛶ N panes in background" header badge. The split-while-focused edge case resolves naturally to "stay focused + badge updates" (Yossi's preferred behavior). i18n parity held (594 keys).
 
 ### 2026-06-22 — v0.2.8 thorough-test bug sweep (Yossi) — round after Phase 65
 Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, with the agreed priority order. **O (tmux scroll, = 3.2) is logged separately above; this entry covers the rest + the master order.**

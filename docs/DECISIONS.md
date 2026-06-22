@@ -44,6 +44,17 @@ Three UX decisions that finish Phase 65's information architecture. **These are 
 - **Net effect:** one button to create/connect a workspace (wizard, 2 modes), one way to toggle the sidebar (Ctrl+B / collapse btn, 2 modes), no duplicate paths, no dead-ends.
 - **NOTE — code already built that P/Q/R unwind:** 65.C added (a) the standalone sidebar "connect existing" button [delete in R], (b) the ws-menu "Add this machine…" item + `add_machine` plumbing [delete in Q]. The `ConnectExistingWizard.tsx` component + its two backend commands STAY — they get re-hosted inside the Provision wizard's "connect existing" branch (R).
 
+### 2026-06-22 — Phase 65 S/T: window features pulled into v0.2.9 (Yossi, post-compact)
+After the v0.2.9 scope decision, Yossi chose **option B (full v0.2.9)** and added two window features.
+
+- **(S) Floating-window edge-dock + pop-out to OS window.** Yossi: "האפשרות להצמיד חלון צף לקצה של סביבת העבודה ולהוציא אותו החוצה." This is exactly **Phase 63 B+C+D+F (+E)** (Pane / Float / Pop-out) already in progress (63.A done, commit `ee6c8db`). Decision: **pull 63 into v0.2.9** instead of deferring it. Ship B+C+D+F; **63.E (pop-out to real `WebviewWindow`) may slip to v0.2.10** if it delays the cut (Yossi: "אם 63.E מתעכב יותר מדי — אפשר לחתוך v0.2.9 בלעדיו").
+- **(T) Focus / Zoom mode — one pane fills the workspace, others run in background.** Yossi: "להתמקד בPANE ספציפי שיהיה על כל המסך בזמן שהאחרים רצים ברקע." Like tmux `Prefix+z` zoom. Spec:
+  - Maximize/Focus button in the pane header (icon ⛶ / fullscreen); hotkey **Ctrl+Shift+M** (verify no clash — Ctrl+Shift+C/I/J are DevTools, handled in 3.3).
+  - When focus active: the pane takes **100%** of the workspace area; other panes are **hidden but NOT paused** (their PTYs keep running — no SIGSTOP, no detach).
+  - Restore = same icon (toggled state) or same hotkey again → back to the normal layout.
+  - **Edge case — new pane opened while focused:** either auto-restore + show the new pane alongside, OR stay focused with a "X panes in background" indicator badge. **Decide during implementation** (Yossi left it open; lean to staying focused with the badge — less layout jank).
+  - Independent of Phase 65 / IA work; Yossi flags it "מהיר, value גבוה, אין side effects" → placed early in the order.
+
 ### 2026-06-22 — v0.2.8 thorough-test bug sweep (Yossi) — round after Phase 65
 Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, with the agreed priority order. **O (tmux scroll, = 3.2) is logged separately above; this entry covers the rest + the master order.**
 
@@ -62,12 +73,19 @@ Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, wi
 - **(2.6 / K) Download chooser — always-ask confirmed.** Default for K: ALWAYS ask where to save. An optional default-folder setting may come later, but on install → always prompt.
 - **(6.2) New-workspace wizard placement — WAIT FOR IMAGES.** Yossi sees two SEPARATE buttons ("סביבת עבודה חדשה" + "הקם שרת") and finds it wrong. Desired: ONE "+ סביבת עבודה חדשה" button → modal with 2 mode selectors: "Provision new server" / "Connect to existing server" (the 65.C wizard folds in here). **Do NOT change until Yossi sends the screenshots.**
 
-- **Master priority order (Yossi, 2026-06-22, supersedes earlier):**
-  - **Phase 65 (done in code) → P → Q → R** (IA consolidation, see entry above) — finish before cutting v0.2.9.
-  - Then the v0.2.9 bug round: **O** (tmux scroll = 3.2) → **3.3** (Ctrl+Shift+C / DevTools, critical) → **2.5** (zip toast + dlog + tar fallback) → **2.2** (FileManager drag-header) → **4.4** (icons-menu z-index; 4.1 dropped — superseded by P) → **2.6 / K** (download chooser, always-ask).
-  - **Cut v0.2.9** = Phase 65 + P + Q + R + O + 3.3 + (2.5 / 2.2 / 4.4 / 2.6-K as they land).
-  - **After v0.2.9:** **63** (B+C+D+F, then E) → **L** → **DIFF** → **B1** → **per-file unzip** → **N part 2** → **J**.
-  - **Scope note:** v0.2.9 is now a substantially bigger release than the original "cut fast right after 65 is green." Surfaced to Yossi 2026-06-22.
+- **Master priority order (Yossi, 2026-06-22 post-compact, supersedes earlier — v0.2.9 = option B, full):**
+  1. **Phase 65 (done in code) → P → Q → R** (IA consolidation, see entry above) — finish first; Yossi to smoke-test 65 (4 paths) before relying on it.
+  2. **T** — Focus/Zoom mode (fast, high value, no side effects, independent of 65).
+  3. **O** — tmux scroll (= 3.2).
+  4. **3.3** — Ctrl+Shift+C / DevTools block (critical).
+  5. **2.2 / 2.5 / 4.4 / 2.6** — FileManager + download bugs (4.1 dropped — superseded by P).
+  6. **K** — download chooser always-ask (depends on tauri-plugin-dialog).
+  7. **S = 63.B+C+D+F** — Pane + Float modes + drag-to-transition.
+  8. **63.E** — Pop-out to real OS `WebviewWindow` (hardest; may slip to v0.2.10 if it delays the cut — decide during impl).
+  9. **Cut v0.2.9.**
+  - **v0.2.9 scope** = Phase 65 + P + Q + R + T + O + 3.3 + (2.2 / 2.5 / 4.4 / 2.6-K) + S (63.B+C+D+F) + (63.E if it lands in time).
+  - **After v0.2.9:** **L** → **DIFF** → **B1** → **per-file unzip** → **N part 2** → **J** (+ 63.E if deferred).
+  - **Scope note:** v0.2.9 is now a substantial release (multi-machine + IA cleanup + focus mode + 3-mode windows + bug round), not the original "cut fast right after 65." Yossi explicitly chose this (option B) 2026-06-22.
 
 ### 2026-06-18 — Phase 64 (J follow-up): Claude prints `[file]` as PLAIN TEXT, not OSC 8
 - **Finding (Yossi, live Claude test):** the `OSC8 hyperlink sequence detected` diagnostic NEVER fired, and `[file] <name> (<size>)` shows as plain text with no escape sequences. So the Phase 62.B/C `linkHandler` (correct for OSC 8) has nothing to bind — Claude isn't emitting OSC 8 in winmux (TERM/capability/env, or SSH/tmux stripping). The diagnostic dlog stays in as the litmus test.

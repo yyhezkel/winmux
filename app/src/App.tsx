@@ -1243,6 +1243,15 @@ function App() {
       toggleMaximize();
       return;
     }
+    // Phase 65.T: Ctrl+Shift+M is the explicit Focus/Zoom hotkey
+    // (alongside Ctrl+Enter / double-click / the pane-header ⛶ button).
+    // Works even with a terminal focused — like Ctrl+Enter, it's a
+    // winmux gesture, and Ctrl+Shift+M isn't a common shell binding.
+    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && keyEq(e, "m")) {
+      e.preventDefault();
+      toggleMaximize();
+      return;
+    }
     // Phase 16: configurable shortcuts. The static Ctrl+Shift+D / E /
     // W bindings (split right / split down / close pane) remain
     // hardcoded for now — they're pane-relative and bound to the
@@ -1255,8 +1264,8 @@ function App() {
       setShowPalette((v) => !v);
       return;
     }
-    // Phase 62.B (item I): Ctrl+B cycles the sidebar mode (full → icons
-    // → hidden → full), VS Code-style. Crucially, do NOT steal it when a
+    // Phase 62.B (item I) / 65.P: Ctrl+B toggles the sidebar mode
+    // (full ↔ icons), VS Code-style. Crucially, do NOT steal it when a
     // terminal is focused — Ctrl+b is tmux's prefix and must reach the
     // PTY. Only act when focus is outside an xterm container.
     if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && keyEq(e, "b")) {
@@ -1996,6 +2005,11 @@ function App() {
                     workspaceName={activeWs()?.name}
                     workspaceColor={activeWs()?.color ?? undefined}
                     workspaceEmoji={activeWs()?.emoji ?? undefined}
+                    maximizedPaneId={maximizedPaneId()}
+                    workspacePaneCount={(() => {
+                      const l = activeWs()?.layout;
+                      return l ? collectPanes(l).length : 0;
+                    })()}
                     workspaceIsSsh={
                       // Phase 16: walk the active workspace's layout looking for
                       // any pane with an SSH connection. We pre-compute this

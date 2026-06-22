@@ -77,6 +77,12 @@ interface Props {
   // to the workspace's value).
   workspaceColor?: string;
   workspaceEmoji?: string;
+  // Phase 65.T: focus/zoom mode. `maximizedPaneId` = the pane currently
+  // filling the workspace area (null = normal split layout);
+  // `workspacePaneCount` = total panes in the workspace, so the
+  // maximized pane's header can show how many run in the background.
+  maximizedPaneId: string | null;
+  workspacePaneCount: number;
   // Phase 24.D: onWorkspacesFileUpdate removed — its only consumers
   // were the (now-gone) ChatPane / ClaudeLogPane Match arms.
 }
@@ -119,6 +125,8 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           workspaceColor={props.all.workspaceColor}
           workspaceEmoji={props.all.workspaceEmoji}
           isActive={isActive()}
+          isMaximized={props.all.maximizedPaneId === props.pane.pane_id}
+          backgroundPaneCount={Math.max(0, props.all.workspacePaneCount - 1)}
           isWaiting={props.all.waitingPaneIds.has(props.pane.pane_id)}
           isConnected={props.all.connectedPaneIds.has(props.pane.pane_id)}
           pendingPasswordFor={props.all.pendingPasswordFor}

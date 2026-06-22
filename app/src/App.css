@@ -3001,6 +3001,26 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   user-select: none;
 }
 
+/* Phase 65.T: "N panes in background" badge, shown in the focused
+   pane's header while zoom/focus mode is active. */
+.pane-bg-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  margin-left: 4px;
+  background: rgba(122, 162, 247, 0.18);
+  color: var(--w-accent, #7aa2f7);
+  border-radius: 3px;
+  font-family: var(--w-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  user-select: none;
+}
+
 .pane-disc-wrap {
   position: relative;
   display: inline-flex;

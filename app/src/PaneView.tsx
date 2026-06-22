@@ -132,6 +132,12 @@ interface Props {
   workspaceColor?: string;
   workspaceEmoji?: string;
   isActive: boolean;
+  // Phase 65.T: focus/zoom mode. `isMaximized` = this pane currently
+  // fills the workspace area (others run hidden in the background);
+  // `backgroundPaneCount` = how many other panes are running while
+  // focused (drives the "N in background" header badge).
+  isMaximized?: boolean;
+  backgroundPaneCount?: number;
   // Phase 26: pane is waiting on a blocking agent permission request
   // (a pending blocking feed item bound to this pane_id). Drives the
   // cmux-style pulsing notification ring around the pane.
@@ -646,6 +652,34 @@ export function PaneView(p: Props) {
           }}
         >
           ⇆
+        </button>
+        {/* Phase 65.T: focus/zoom badge + toggle. The badge shows how
+            many panes keep running in the background while this one is
+            focused. The button dispatches the same winmux:pane-maximize
+            event as double-click / Ctrl+Shift+M. */}
+        <Show when={p.isMaximized && (p.backgroundPaneCount ?? 0) > 0}>
+          <span
+            class="pane-bg-badge"
+            title={t("pane.tooltip.background_panes", {
+              count: String(p.backgroundPaneCount ?? 0),
+            })}
+          >
+            ⛶ {p.backgroundPaneCount}
+          </span>
+        </Show>
+        <button
+          class={`pane-btn ${p.isMaximized ? "active" : ""}`}
+          title={p.isMaximized ? t("pane.tooltip.restore") : t("pane.tooltip.focus")}
+          onClick={(e) => {
+            e.stopPropagation();
+            window.dispatchEvent(
+              new CustomEvent("winmux:pane-maximize", {
+                detail: { paneId: p.pane.pane_id },
+              }),
+            );
+          }}
+        >
+          {p.isMaximized ? "⤡" : "⛶"}
         </button>
         <button class="pane-btn" title="Split right (Ctrl+Shift+D)" onClick={() => p.onSplit(p.pane.pane_id, "horizontal")}>↔</button>
         <button class="pane-btn" title="Split down (Ctrl+Shift+E)" onClick={() => p.onSplit(p.pane.pane_id, "vertical")}>↕</button>

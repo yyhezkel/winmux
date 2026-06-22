@@ -414,7 +414,9 @@ pub(crate) struct Settings {
     /// matcher_mode pattern and keep the TS binding a plain union.
     /// Persisted here (atomic settings write, Rule #7) so the choice
     /// survives restarts. `default = "full"` keeps older settings.json
-    /// loading unchanged.
+    /// loading unchanged. Phase 65.P: only "full" / "icons" are written
+    /// now; a legacy "hidden" value is migrated to "icons" on the
+    /// frontend at read time (App.tsx sidebarMode()).
     #[serde(default = "default_sidebar_mode")]
     pub sidebar_mode: String,
     /// Phase 63: per-kind (browser / filemanager) floating-window state —

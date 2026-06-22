@@ -184,13 +184,16 @@ export interface Settings {
   // load with stt: { enabled: false, backend: "webspeech", ... }.
   stt?: SttSettings;
   // Phase 62.B (item I): sidebar display mode. Backend defaults to
-  // "full" via serde(default); always one of the three.
+  // "full" via serde(default). Phase 65.P: two modes only (full /
+  // icons) — the old "hidden" value migrates to "icons" on read.
   sidebar_mode?: SidebarMode;
   // Phase 63: per-kind floating-window state (Browser / FileManager).
   floating_windows?: FloatingWindows;
 }
 
-export type SidebarMode = "full" | "icons" | "hidden";
+// Phase 65.P: dropped "hidden" — only full / icons. Old persisted
+// "hidden" values are migrated to "icons" at read time (App.tsx).
+export type SidebarMode = "full" | "icons";
 
 // Phase 63: 3-mode floating windows.
 export type FloatingWindowMode = "pane" | "float" | "popout";

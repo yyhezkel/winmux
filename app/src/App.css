@@ -225,32 +225,8 @@ body {
   border-color: var(--w-border);
 }
 
-/* HIDDEN mode — the sidebar is gone; App.tsx renders a thin reopen tab
-   at the sidebar's own (inline-start) edge. */
-.sidebar.hidden { display: none; }
-.sidebar-reopen {
-  position: absolute;
-  inset-inline-start: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 60;
-  width: 16px;
-  height: 52px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--w-surface);
-  color: var(--w-text-secondary, #7d8590);
-  border: 1px solid var(--w-border);
-  border-inline-start: none;
-  border-start-end-radius: 6px;
-  border-end-end-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-}
-.sidebar-reopen:hover { color: var(--w-text); background: var(--w-surface-hi); }
-/* The reopen chevron points "inward" — flip it in RTL. */
-[dir="rtl"] .sidebar-reopen { transform: translateY(-50%) scaleX(-1); }
+/* Phase 65.P removed the "hidden" sidebar mode and its reopen tab
+   (.sidebar.hidden / .sidebar-reopen). Only full / icons remain. */
 
 /* ─── Splash overlay (fades out shortly after first paint) ─── */
 

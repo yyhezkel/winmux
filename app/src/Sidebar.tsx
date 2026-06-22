@@ -51,7 +51,7 @@ interface Props {
   onOpenPortsGlobal: () => void;
   // Phase 60: onOpenBrowser / onOpenFiles props removed — the
   // buttons moved to the workspace header (App.tsx, next to + diff).
-  // Phase 62.B (item I): 3-state sidebar — full / icons / hidden.
+  // Phase 62.B (item I) / 65.P: two-mode sidebar — full / icons.
   mode: SidebarMode;
   onSetMode: (mode: SidebarMode) => void;
 }
@@ -105,10 +105,9 @@ export function Sidebar(p: Props) {
         </svg>
         <span class="sidebar-brand">{t("sidebar.title")}</span>
         </div>
-        {/* Phase 62.B (item I): header toggle flips full ↔ icons (per
-            Yossi's spec). Hidden is reached via Ctrl+B / the cycle; the
-            reopen tab (App.tsx) brings it back. Phase 62.C: now on its
-            own line below the logo. */}
+        {/* Phase 62.B (item I) / 65.P: header toggle flips full ↔ icons
+            — the only two modes. Same as Ctrl+B. Phase 62.C: on its own
+            line below the logo. */}
         <button
           class="sidebar-collapse-btn"
           onClick={() => p.onSetMode(p.mode === "full" ? "icons" : "full")}

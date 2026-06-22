@@ -166,14 +166,19 @@ function App() {
   // Phase 53 (rebased): workspace-level File Manager floating window.
   // Pure HTML — wraps the existing FileManagerPane component.
   const [showFilesWindow, setShowFilesWindow] = createSignal(false);
-  // Phase 62.B (item I): sidebar mode (full / icons / hidden) lives in
-  // settings.json; full-mode width lives in localStorage.
+  // Phase 62.B (item I): sidebar mode lives in settings.json; full-mode
+  // width lives in localStorage. Phase 65.P: two modes only (full /
+  // icons). Any legacy "hidden" value migrates to "icons" on read so
+  // older settings.json files don't strand the sidebar off-screen.
   const [sidebarWidth, setSidebarWidth] = createSignal(loadSidebarWidth());
-  const sidebarMode = (): SidebarMode =>
-    (settings()?.sidebar_mode as SidebarMode | undefined) ?? "full";
+  const sidebarMode = (): SidebarMode => {
+    // Read as a plain string: a legacy settings.json may still hold the
+    // dropped "hidden" value, which is outside the SidebarMode union.
+    const raw = settings()?.sidebar_mode as string | undefined;
+    return raw === "icons" || raw === "hidden" ? "icons" : "full";
+  };
   const sidebarPx = () => {
     const m = sidebarMode();
-    if (m === "hidden") return 0;
     if (m === "icons") return SIDEBAR_ICONS_W;
     return sidebarWidth();
   };
@@ -186,11 +191,10 @@ function App() {
       console.warn("saveSettings (sidebar_mode) failed", e),
     );
   };
-  // Ctrl+B cycles full → icons → hidden → full (all three reachable by
-  // keyboard); the header button toggles full ↔ icons (per Yossi's spec).
+  // Phase 65.P: Ctrl+B toggles full ↔ icons (two modes only); the
+  // header button does the same. No "hidden" state anymore.
   const cycleSidebarMode = () => {
-    const order: SidebarMode[] = ["full", "icons", "hidden"];
-    setSidebarMode(order[(order.indexOf(sidebarMode()) + 1) % order.length]);
+    setSidebarMode(sidebarMode() === "full" ? "icons" : "full");
   };
   createEffect(() => {
     try {
@@ -1839,7 +1843,8 @@ function App() {
         />
       </ErrorBoundary>
       {/* Phase 62.B (item I): drag handle on the sidebar/main boundary —
-          only in full mode (icons/hidden are fixed widths). */}
+          only in full mode (icons is a fixed width). Phase 65.P removed
+          the "hidden" mode and its edge reopen-tab. */}
       <Show when={sidebarMode() === "full"}>
         <div
           class="sidebar-resizer"
@@ -1847,20 +1852,6 @@ function App() {
           onMouseDown={startSidebarResize}
           title={t("sidebar.resize.tooltip")}
         />
-      </Show>
-      {/* Phase 62.B (item I): when hidden, the only affordance is a thin
-          reopen tab at the sidebar's own (inline-start) edge → full. No
-          hover auto-expand anywhere — state changes only on explicit
-          click / Ctrl+B (Yossi's call: avoids accidental edge-bumps). */}
-      <Show when={sidebarMode() === "hidden"}>
-        <button
-          class="sidebar-reopen"
-          onClick={() => setSidebarMode("full")}
-          title={t("sidebar.expand.tooltip")}
-          aria-label={t("sidebar.expand.tooltip")}
-        >
-          ›
-        </button>
       </Show>
       <div class="main">
         {/* Phase 30: per-workspace accent strip. Sets the CSS variable

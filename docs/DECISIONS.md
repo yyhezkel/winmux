@@ -46,6 +46,15 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Decided
 
+### 2026-06-18 — Phase 64 (N, part 1): small-screen scroll/overflow hardening
+- **Context:** Yossi — on small screens (small laptop, half-screen, ~1024×600) content gets cut off because there are almost no scroll-bars; you can't reach content below the fold.
+- **Done (the highest-value, lowest-risk core):**
+  - **Base `.modal`** had NO max-height / overflow — every plain modal (host-trust, passphrase, smart-prompt, claude/tmux pickers, SSH-key offer) bled off small screens. Added `max-height: calc(100vh - 32px); overflow-y: auto;` + `min-width: min(420px, calc(100vw - 32px))`. The big modals (ws-create / settings / notes / provisioning) already cap to `vh` with header-pinned inner scroll — untouched.
+  - **Floating windows** (Browser + FileManager): new shared `clampToViewport()` in floatingWindow.tsx; `loadGeometry` now clamps BOTH stored and default geometry into the viewport so a 1100×700 default can't open off a 1024×600 screen — the header + resize grips stay reachable. No-op on large screens.
+  - Sidebar list already scrolls (`overflow-y:auto`); FM list + toolbar already scroll.
+- **Deferred (the manual sweep):** per-screen 1024×600 walk-through of every panel; `media-query` to hide header-button labels (icon-only) below ~1280px (needs label spans first). Queued for the dedicated N round.
+
+
 ### 2026-06-14 — Phase 62.A: X-direction, bootstrap embed, Browser→server-ports
 - **Context:** Yossi's review of the Phase 62 part-1 debug build — 5/3/2/6 all worked. Three follow-ups, done in order A→B→C.
 - **(A) Close-button direction flipped** — part 1 put the X on the inline-START corner (LTR left / RTL right); Yossi wants inline-END (LTR right / RTL left, the Windows/macOS convention). Reverted the header child order in both windows so the X is the last child (dir-aware flex → inline-end). 5-min fix.

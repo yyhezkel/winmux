@@ -1165,6 +1165,15 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   max-width: 520px;
   box-shadow: 0 20px 56px rgba(0, 0, 0, 0.55);
   animation: modal-in 140ms ease-out;
+  /* Phase 64 (N): small-screen safety — never taller than the viewport;
+     scroll the content instead of bleeding off-screen. The larger modals
+     (ws-create / settings / notes / provisioning) override max-height and
+     run their own header-pinned inner scroll; this is the safety net for
+     every plain .modal (host-trust, passphrase, smart-prompt, pickers,
+     SSH-key offer). min-width also yields on narrow viewports. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  min-width: min(420px, calc(100vw - 32px));
 }
 @keyframes modal-in {
   from { transform: translateY(8px) scale(0.98); opacity: 0; }

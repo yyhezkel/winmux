@@ -26,6 +26,21 @@ export const ALL_EDGES: ResizeEdge[] = [
   "sw",
 ];
 
+/** Phase 64 (N): clamp a window rect into the current viewport so it can
+ *  never open larger than (or off the edge of) a small screen — the user
+ *  must always be able to reach the header + resize grips. Width/height
+ *  are capped to the viewport (but never below the min), then the origin
+ *  is pulled in so the whole window stays on-screen. */
+export function clampToViewport(g: Geometry, minW: number, minH: number): Geometry {
+  const maxW = Math.max(minW, window.innerWidth - 16);
+  const maxH = Math.max(minH, window.innerHeight - 16);
+  const w = Math.min(Math.max(minW, g.w), maxW);
+  const h = Math.min(Math.max(minH, g.h), maxH);
+  const x = Math.max(0, Math.min(g.x, window.innerWidth - w - 8));
+  const y = Math.max(0, Math.min(g.y, window.innerHeight - h - 8));
+  return { x, y, w, h };
+}
+
 /** Pure resize math — given the original rect, a pointer delta, and the
  *  edge being dragged, return the new rect. East/south grow with the
  *  delta directly; west/north move the origin AND shrink, clamped so the

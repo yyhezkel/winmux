@@ -7,6 +7,7 @@ import type { Workspace } from "./types";
 import { FileManagerPane } from "./FileManagerPane";
 import { t } from "./i18n";
 import {
+  clampToViewport,
   makeWindowControls,
   ResizeHandles,
   type Geometry,
@@ -35,30 +36,27 @@ const STORAGE_KEY = (workspaceId: string) =>
   `winmux.workspace-files-geometry.${workspaceId}`;
 
 function loadGeometry(workspaceId: string): Geometry {
+  // Phase 64 (N): always clamp to the viewport (stored OR default) so the
+  // window can't open off a small screen.
   try {
     const raw = localStorage.getItem(STORAGE_KEY(workspaceId));
-    if (!raw) return DEFAULT_GEOMETRY;
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      typeof (parsed as Geometry).x === "number" &&
-      typeof (parsed as Geometry).y === "number" &&
-      typeof (parsed as Geometry).w === "number" &&
-      typeof (parsed as Geometry).h === "number"
-    ) {
-      const g = parsed as Geometry;
-      return {
-        x: Math.max(0, g.x),
-        y: Math.max(0, g.y),
-        w: Math.max(MIN_W, g.w),
-        h: Math.max(MIN_H, g.h),
-      };
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        typeof (parsed as Geometry).x === "number" &&
+        typeof (parsed as Geometry).y === "number" &&
+        typeof (parsed as Geometry).w === "number" &&
+        typeof (parsed as Geometry).h === "number"
+      ) {
+        return clampToViewport(parsed as Geometry, MIN_W, MIN_H);
+      }
     }
   } catch {
     // Corrupt entry — fall through to default.
   }
-  return DEFAULT_GEOMETRY;
+  return clampToViewport(DEFAULT_GEOMETRY, MIN_W, MIN_H);
 }
 
 function saveGeometry(workspaceId: string, g: Geometry): void {

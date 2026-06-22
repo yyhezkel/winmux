@@ -57,6 +57,15 @@ interface Props {
 
 export function Sidebar(p: Props) {
   const [menuFor, setMenuFor] = createSignal<string | null>(null);
+  // Phase 65 (bug 4.4): the context menu must escape the sidebar's
+  // scroll container. `.sidebar-list` has `overflow-y:auto`, which CSS
+  // coerces `overflow-x` to non-visible too, so an absolutely-positioned
+  // menu gets clipped at the (narrow, in icons mode) sidebar edge. We
+  // render it `position:fixed` at the cursor instead, anchored here.
+  const [menuPos, setMenuPos] = createSignal<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
 
   return (
     <div class={`sidebar ${p.mode}`}>
@@ -129,7 +138,16 @@ export function Sidebar(p: Props) {
               onClick={() => p.onActivate(w.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setMenuFor(menuFor() === w.id ? null : w.id);
+                if (menuFor() === w.id) {
+                  setMenuFor(null);
+                  return;
+                }
+                // Clamp so the fixed menu stays on-screen (≈160×190px).
+                setMenuPos({
+                  x: Math.min(e.clientX, window.innerWidth - 160),
+                  y: Math.min(e.clientY, window.innerHeight - 190),
+                });
+                setMenuFor(w.id);
               }}
             >
               <span
@@ -176,7 +194,16 @@ export function Sidebar(p: Props) {
               </Show>
               <Show when={menuFor() === w.id}>
                 <div
-                  class="ws-menu"
+                  class="ws-menu ws-menu-fixed"
+                  style={{
+                    position: "fixed",
+                    top: `${menuPos().y}px`,
+                    left: `${menuPos().x}px`,
+                    // Neutralize the RTL `.ws-menu { right: 12px }` rule —
+                    // we anchor by left at the cursor in both directions.
+                    right: "auto",
+                    "z-index": "1000",
+                  }}
                   onClick={(e) => {
                     e.stopPropagation();
                     setMenuFor(null);

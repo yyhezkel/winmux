@@ -187,6 +187,7 @@ dependencies = [
  "winmux-ssh",
  "winmux-tunnel",
  "winmux-types",
+ "zeroize",
  "zip",
 ]
 

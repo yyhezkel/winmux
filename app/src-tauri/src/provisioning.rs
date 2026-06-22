@@ -1370,6 +1370,108 @@ async fn preflight_sudo(
     }
 }
 
+// ─── Phase 65: connect-to-existing-server discovery ────────────────────────
+
+/// Phase 65: what a one-shot password probe learned about a server, used
+/// to drive the "Connect to existing server" wizard's choice step.
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct ServerDiscovery {
+    /// The login user is uid 0.
+    pub is_root: bool,
+    /// Login user is root OR has passwordless sudo (i.e. can create a
+    /// new user + grant sudo). Drives whether "create new user" is
+    /// offered.
+    pub can_sudo: bool,
+    /// Admin group to add a new user to for sudo — "sudo" on
+    /// Debian/Ubuntu, "wheel" on RHEL/Fedora. Defaults to "sudo".
+    pub sudo_group: String,
+    /// Real interactive accounts (uid 0 or 1000..65000, with a login
+    /// shell — not nologin/false/sync), sorted + deduped.
+    pub users: Vec<String>,
+}
+
+async fn connect_existing_discover_inner(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &Option<String>,
+) -> Result<ServerDiscovery, String> {
+    let mut handle = open_ssh(host, port, user, password, &None, &None).await?;
+
+    let is_root = matches!(
+        exec_status(&mut handle, "id -u").await,
+        Ok((0, ref o)) if o.trim() == "0"
+    );
+    let can_sudo = is_root
+        || matches!(exec_status(&mut handle, "sudo -n true 2>&1").await, Ok((0, _)));
+
+    // Pick the admin group that exists on this distro.
+    let sudo_group = if matches!(exec_status(&mut handle, "getent group sudo").await, Ok((0, _))) {
+        "sudo".to_string()
+    } else if matches!(exec_status(&mut handle, "getent group wheel").await, Ok((0, _))) {
+        "wheel".to_string()
+    } else {
+        "sudo".to_string()
+    };
+
+    // Read-only account enumeration. Static command — no user input in
+    // the shell string (Rule #3).
+    let passwd = exec_capture(&mut handle, "getent passwd")
+        .await
+        .unwrap_or_default();
+    let mut users: Vec<String> = Vec::new();
+    for line in passwd.lines() {
+        let f: Vec<&str> = line.split(':').collect();
+        if f.len() < 7 {
+            continue;
+        }
+        let uid: u32 = f[2].parse().unwrap_or(u32::MAX);
+        let shell = f[6];
+        let bad_shell = shell.ends_with("nologin")
+            || shell.ends_with("false")
+            || shell.ends_with("/sync");
+        let real = uid == 0 || (uid >= 1000 && uid < 65000);
+        if real && !bad_shell && !f[0].is_empty() {
+            users.push(f[0].to_string());
+        }
+    }
+    users.sort();
+    users.dedup();
+
+    dlog(&format!(
+        "connect_existing_discover: host={host} user={user} is_root={is_root} can_sudo={can_sudo} group={sudo_group} accounts={}",
+        users.len()
+    ));
+    Ok(ServerDiscovery {
+        is_root,
+        can_sudo,
+        sudo_group,
+        users,
+    })
+}
+
+/// Phase 65: connect once with a password and discover what we can do on
+/// the server (create users? which accounts exist?). The password is
+/// used ONLY for this probe connection and is zeroized before returning;
+/// it is NEVER written to disk (Rule #2). Every probe command is
+/// read-only.
+#[tauri::command]
+pub(crate) async fn connect_existing_discover(
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+) -> Result<ServerDiscovery, String> {
+    use zeroize::Zeroize;
+    let pw_opt = Some(password);
+    let result = connect_existing_discover_inner(&host, port, &user, &pw_opt).await;
+    if let Some(mut s) = pw_opt {
+        s.zeroize();
+    }
+    result
+}
+
 // ─── Tauri profile management ─────────────────────────────────────────────
 
 #[tauri::command]

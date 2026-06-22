@@ -5459,6 +5459,7 @@ pub fn run() {
             connect_wizard::test_ssh_connect,
             provisioning::provisioning_inspect,
             provisioning::provisioning_start,
+            provisioning::connect_existing_discover,
             provisioning::provisioning_profiles_list,
             provisioning::provisioning_profile_save,
             provisioning::provisioning_profile_delete,

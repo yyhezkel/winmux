@@ -1737,6 +1737,30 @@ function App() {
     );
 
     window.addEventListener("keydown", handleKey);
+    // Phase 65 (bug 3.3): in production builds, block the WebView2
+    // DevTools accelerators (F12, Ctrl+Shift+I, Ctrl+Shift+J) so they
+    // can't corrupt an xterm.js pane. Release builds already compile
+    // without the `devtools` Cargo feature (DevTools is disabled), so
+    // this is belt-and-suspenders + documents intent; dev builds keep
+    // DevTools fully available. Capture phase so it beats the bubble
+    // handlers. Ctrl+Shift+C is intentionally NOT blocked — it's the
+    // copy-selection shortcut (handleKey), and with DevTools off it
+    // can't open the inspector anyway.
+    const blockDevtoolsKeys = (e: KeyboardEvent) => {
+      if (!import.meta.env.PROD) return;
+      const isF12 = e.key === "F12";
+      const isInspect =
+        e.ctrlKey &&
+        e.shiftKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        (keyEq(e, "i") || keyEq(e, "j"));
+      if (isF12 || isInspect) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", blockDevtoolsKeys, true);
     // Phase 58: keyup half of push-to-talk. We register a generic
     // keyup that stops the active recorder regardless of which
     // modifier was released — typical PTT UX is "any release ends
@@ -1787,6 +1811,7 @@ function App() {
     onCleanup(() => {
       for (const u of unlistens) u();
       window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("keydown", blockDevtoolsKeys, true);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("winmux:pane-maximize", handlePaneMaximize);
       window.removeEventListener("winmux:osc-file-link", handleOscFileLink);

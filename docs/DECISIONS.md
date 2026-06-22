@@ -27,12 +27,41 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ### 2026-06-22 — Phase 65.O (REGRESSION): tmux scrollback no longer works
 - **Finding (Yossi, v0.2.8 live test):** "מבחינת ה-TMUX - נראה כאילו הגלילה חזרה לא לעבוד - העתקה והדבקה כן עובדים". So copy/paste (fixed in Phase 62.B item E via the custom right-click menu) work, but scrolling back through tmux history is broken. Regression — scroll worked before the 62.B terminal-input changes.
+- **Refined finding (Yossi, 2026-06-22, = bug 3.2):** "זה עושה בעצם 'למעלה ולמטה' בשורת ה-CLI - מביא לי בתוך קלוד את ההודעות האחרונות ששלחתי". So wheel / PgUp / PgDn are reaching the **shell as Up/Down arrow keys** (shell history navigation) instead of scrolling. That's the smoking gun: the event is being translated to an arrow keypress, not forwarded as scroll/mouse-protocol nor handled by xterm.js scrollback. **Desired behavior:** wheel → if tmux mouse mode active, forward to tmux; else scroll the xterm.js buffer. Shift+PgUp/PgDn → ALWAYS xterm.js scrollback. Bare Up/Down (no modifier) → shell history (the only case that should send arrows).
 - **Suspect:** the 62.B (E) work that replaced the default Windows context-menu / reworked terminal mouse+key handling likely also swallowed the events that drove tmux scrollback. Three candidate mechanisms to bisect:
   1. **Mouse wheel** — xterm.js should forward wheel as mouse-protocol sequences (`\e[<…M`) when the app (tmux, `mouse on`) enables mouse reporting. Check whether our handler now `preventDefault`s/eats wheel before xterm sees it, or whether mouse mode isn't being negotiated.
   2. **Shift+PgUp / Shift+PgDn** — should reach tmux to page copy-mode. A global `handleKey` (the Ctrl+B sidebar-cycle / `keyEq` additions from P62) may be capturing PgUp/PgDn even when a terminal is focused.
   3. **copy-mode entry** — confirm `Prefix+[` still enters tmux copy-mode at all (rules out a deeper PTY-input break vs. a scroll-only break).
 - **Diagnosis plan:** reproduce in a tmux pane; first try `Prefix+[` then arrows/PgUp (isolates copy-mode vs. wheel); then wheel-scroll with `mouse on`; check `handleKey` guards (it's supposed to no-op when a terminal owns focus — verify PgUp/wheel aren't exceptions). Likely fix is narrow (stop eating the event / let xterm forward it).
-- **Priority (Yossi):** bad regression, daily-use pain. After v0.2.8 (shipped) and Phase 65 (done, awaiting smoke test) — **before** 63 / K / L / DIFF / B1 / J. New order: **65 smoke → O → 63.B+C+D+F → K → 63.E → L → DIFF → B1 → per-file unzip → N part 2 → J.**
+- **Priority (Yossi):** bad regression, daily-use pain. See the master order in the v0.2.8 test-sweep entry below (O is #1 of the bug round).
+
+### 2026-06-22 — v0.2.8 thorough-test bug sweep (Yossi) — round after Phase 65
+Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, with the agreed priority order. **O (tmux scroll, = 3.2) is logged separately above; this entry covers the rest + the master order.**
+
+- **(3.3) 🔥 CRITICAL — Ctrl+Shift+C opens WebView2 DevTools.** Tauri/WebView2 default. In an xterm.js pane this is UX corruption (and Ctrl+Shift+C should = copy selection). Fix:
+  - `tauri.conf.json`: keep `withGlobalTauri: false`; don't expose the API.
+  - Block DevTools shortcuts in **prod** builds (F12, Ctrl+Shift+I, Ctrl+Shift+C, Ctrl+Shift+J); allow in **dev**. Prefer disabling devtools in the prod Tauri config + a key guard as belt-and-suspenders.
+  - Ensure Ctrl+Shift+C inside an xterm.js pane copies the selection (ties into P62.B E copy/paste). Rule #5/#6 (no `any`, typed).
+- **(2.5) Zip error UX.** `⚠ zip … remote zip failed (exit 127): bash: line 1: zip: command not found` shows as a TOP BAR, not a toast, and is NOT in debug.log. Fix:
+  1. Convert to an error toast (red variant, auto-dismiss ~5s).
+  2. Add `dlog!` capturing the failure + source (workspace_id, target file, exit code, stderr).
+  3. **Better:** before zip, probe `command -v zip` on the server. If missing → toast offers an action button **"Use tar instead? (.tar.gz)"** → run the tar fallback.
+  4. If declined → toast includes install hint per distro ("On the server run: apt-get install zip").
+- **(2.2) FileManager drag-header broken (REGRESSION).** Resize works, dragging the window does not. Check the header drag handler — another fix may have swallowed the `mousedown`, or the `cursor: move` CSS isn't bound to the handler. (Sister bug to O — both are P62 input-handling regressions.)
+- **(4.1) Sidebar Hidden mode missing.** Yossi sees only Full + Icons (2 states); code planned 3 (Full/Icons/Hidden, P62.B item I). Either Ctrl+B skips Hidden (Icons→Full), Hidden is unimplemented, or Hidden has no exit affordance (edge dock to reopen). Verify the Ctrl+B cycle + that Hidden works with an edge re-open tab.
+- **(4.4) Sidebar Icons-only — context menu hidden under the pane (z-index).** Left-click menu in icons mode renders BEHIND pane content. The icons-mode context menu needs a higher z-index than pane content. Quick CSS fix.
+- **(2.6 / K) Download chooser — always-ask confirmed.** Default for K: ALWAYS ask where to save. An optional default-folder setting may come later, but on install → always prompt.
+- **(6.2) New-workspace wizard placement — WAIT FOR IMAGES.** Yossi sees two SEPARATE buttons ("סביבת עבודה חדשה" + "הקם שרת") and finds it wrong. Desired: ONE "+ סביבת עבודה חדשה" button → modal with 2 mode selectors: "Provision new server" / "Connect to existing server" (the 65.C wizard folds in here). **Do NOT change until Yossi sends the screenshots.**
+
+- **Master priority order (Yossi, supersedes earlier):**
+  1. **O** — tmux scroll (= 3.2)
+  2. **3.3** — Ctrl+Shift+C / DevTools override (critical, UX corruption)
+  3. **2.5** — zip toast + dlog + tar fallback
+  4. **2.2** — FileManager drag-header
+  5. **4.1 + 4.4** — sidebar Hidden mode + icons-menu z-index
+  6. **2.6 / K** — download chooser (always-ask)
+  7. **6.2** — new-wizard placement (BLOCKED on Yossi's images)
+  8. then **63** (B+C+D+F, then E) → **L** → **DIFF** → **B1** → **per-file unzip** → **N part 2** → **J**
 
 ### 2026-06-18 — Phase 64 (J follow-up): Claude prints `[file]` as PLAIN TEXT, not OSC 8
 - **Finding (Yossi, live Claude test):** the `OSC8 hyperlink sequence detected` diagnostic NEVER fired, and `[file] <name> (<size>)` shows as plain text with no escape sequences. So the Phase 62.B/C `linkHandler` (correct for OSC 8) has nothing to bind — Claude isn't emitting OSC 8 in winmux (TERM/capability/env, or SSH/tmux stripping). The diagnostic dlog stays in as the litmus test.

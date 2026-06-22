@@ -5485,6 +5485,7 @@ pub fn run() {
             provisioning::provisioning_inspect,
             provisioning::provisioning_start,
             provisioning::connect_existing_discover,
+            provisioning::connect_existing_execute,
             provisioning::provisioning_profiles_list,
             provisioning::provisioning_profile_save,
             provisioning::provisioning_profile_delete,

@@ -1472,6 +1472,246 @@ pub(crate) async fn connect_existing_discover(
     result
 }
 
+// ─── Phase 65.B: connect-to-existing-server execute ────────────────────────
+
+/// Phase 65.B: the local machine's name — used in the per-machine key
+/// filename and the `authorized_keys` comment so multiple devices joining
+/// the same account on the same server never collide.
+fn local_hostname() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "winmux".to_string())
+}
+
+/// Phase 65.B: filesystem-safe token (keeps alnum / `-` / `_` / `.`).
+fn sanitize_path_token(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+/// Phase 65.B: 8 hex chars of uniqueness for the key filename (no rand
+/// dep — low 32 bits of the wall clock; collisions across machines/times
+/// are vanishingly unlikely for this use).
+fn short_uuid() -> String {
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{:08x}", (n as u64) & 0xffff_ffff)
+}
+
+/// Phase 65.B: local path for the freshly-generated keypair —
+/// `~/.ssh/winmux-<user>@<host>-<localhost>-<uuid>`. Ensures `~/.ssh`
+/// exists (ssh-keygen won't create it).
+fn build_connect_key_path(user: &str, host: &str) -> Result<String, String> {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "cannot resolve local home directory".to_string())?;
+    let ssh_dir = std::path::Path::new(&home).join(".ssh");
+    std::fs::create_dir_all(&ssh_dir).map_err(|e| format!("mkdir ~/.ssh: {e}"))?;
+    let name = format!(
+        "winmux-{}@{}-{}-{}",
+        sanitize_path_token(user),
+        sanitize_path_token(host),
+        sanitize_path_token(&local_hostname()),
+        short_uuid()
+    );
+    Ok(ssh_dir.join(name).to_string_lossy().to_string())
+}
+
+/// Phase 65.B: inputs for the "Connect to existing server" execute step.
+#[derive(Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct ConnectExistingInput {
+    pub host: String,
+    pub port: u16,
+    /// The account we connect AS with the password to do the setup work.
+    pub auth_user: String,
+    /// One-shot password — used only for the setup connection, zeroized
+    /// after, never written to disk (Rule #2).
+    pub password: String,
+    /// The account we set up key-only access FOR (existing or new).
+    pub target_user: String,
+    /// true → create `target_user` (requires can_sudo); false → install
+    /// the key for an existing account.
+    pub create_new_user: bool,
+    /// New-user only: add to the admin group for sudo.
+    #[serde(default)]
+    pub grant_sudo: bool,
+    /// Admin group from discovery ("sudo" / "wheel").
+    #[serde(default)]
+    pub sudo_group: String,
+    /// New workspace name (Branch 2), or None.
+    #[serde(default)]
+    pub workspace_name: Option<String>,
+    /// When set, add this machine to an existing workspace instead of
+    /// creating one (Branch 1).
+    #[serde(default)]
+    pub existing_workspace_id: Option<String>,
+}
+
+/// Phase 65.B: result of a successful connect-existing run.
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct ConnectExistingResult {
+    pub workspace_id: String,
+    pub workspace_name: String,
+    pub key_path: String,
+}
+
+async fn connect_existing_execute_inner(
+    state: &AppState,
+    app: &AppHandle,
+    input: &ConnectExistingInput,
+    auth_pw: &Option<String>,
+) -> Result<ConnectExistingResult, String> {
+    let host = &input.host;
+    let port = input.port;
+    let target = input.target_user.trim();
+    if target.is_empty() {
+        return Err("target user is empty".to_string());
+    }
+
+    // 1. Connect as the auth user with the password.
+    let mut handle = open_ssh(host, port, &input.auth_user, auth_pw, &None, &None).await?;
+
+    // Privilege prefix: nothing if we're already root, else `sudo `.
+    let is_root = matches!(
+        exec_status(&mut handle, "id -u").await,
+        Ok((0, ref o)) if o.trim() == "0"
+    );
+    let sp = if is_root { "" } else { "sudo " };
+
+    // 2. Create the user if requested (key-only: useradd + passwd -l;
+    //    optional admin-group membership). Idempotent on an existing name.
+    if input.create_new_user {
+        let u = shell_escape(target);
+        let grant = if input.grant_sudo {
+            let grp = shell_escape(if input.sudo_group.is_empty() {
+                "sudo"
+            } else {
+                &input.sudo_group
+            });
+            format!("{sp}usermod -aG {grp} {u}")
+        } else {
+            "true".to_string()
+        };
+        let cmd = format!(
+            "if id -u {u} >/dev/null 2>&1; then echo 'user exists, reusing'; \
+             else {sp}useradd -m -s /bin/bash {u} && {sp}passwd -l {u} >/dev/null; fi && {grant}"
+        );
+        exec_capture(&mut handle, &cmd)
+            .await
+            .map_err(|e| format!("create user '{target}': {e}"))?;
+        dlog(&format!(
+            "connect_existing: ensured user '{target}' (grant_sudo={}) on {host}",
+            input.grant_sudo
+        ));
+    }
+
+    // 3. Generate the per-machine keypair locally.
+    let local_key_path = build_connect_key_path(target, host)?;
+    local_step_generate_keypair(&local_key_path, &format!("winmux {}", local_hostname()))
+        .await
+        .map_err(|e| format!("generate keypair: {e}"))?;
+
+    // 4. Install the public key into the target's authorized_keys. Resolve
+    //    the real home dir + primary group on the remote so this works for
+    //    ANY account (incl. root / non-UPG users). DATE comes from the
+    //    remote `date` so we don't need a local date formatter. Every
+    //    interpolated value is shell-escaped (Rule #3).
+    let pub_path = format!("{local_key_path}.pub");
+    let pub_text =
+        std::fs::read_to_string(&pub_path).map_err(|e| format!("read {pub_path}: {e}"))?;
+    let key_esc = shell_escape(pub_text.trim());
+    let lhost_esc = shell_escape(&local_hostname());
+    let u = shell_escape(target);
+    let install = format!(
+        "U={u}; \
+         HOME_DIR=$(getent passwd \"$U\" | cut -d: -f6); \
+         GRP=$(id -gn \"$U\"); \
+         DATE=$(date +%F 2>/dev/null || echo unknown); \
+         [ -n \"$HOME_DIR\" ] || {{ echo 'could not resolve home dir'; exit 1; }}; \
+         {sp}install -d -m 700 -o \"$U\" -g \"$GRP\" \"$HOME_DIR/.ssh\" && \
+         printf '# winmux: added by %s on %s\\n%s\\n' {lhost_esc} \"$DATE\" {key_esc} \
+           | {sp}tee -a \"$HOME_DIR/.ssh/authorized_keys\" >/dev/null && \
+         {sp}chown \"$U:$GRP\" \"$HOME_DIR/.ssh/authorized_keys\" && \
+         {sp}chmod 600 \"$HOME_DIR/.ssh/authorized_keys\""
+    );
+    exec_capture(&mut handle, &install)
+        .await
+        .map_err(|e| format!("install key for '{target}': {e}"))?;
+    drop(handle);
+
+    // 5. Validate: reconnect KEY-ONLY (no password) as the target user.
+    let mut h2 = open_ssh(host, port, target, &None, &Some(local_key_path.clone()), &None)
+        .await
+        .map_err(|e| {
+            format!("the key was installed but key-only login as '{target}' failed: {e}")
+        })?;
+    let _ = exec_capture(&mut h2, "true").await;
+    drop(h2);
+    dlog(&format!(
+        "connect_existing: key-only validation OK for '{target}'@{host}"
+    ));
+
+    // 6. Create / update the workspace via the shared finalizer.
+    let prov_input = ProvisionInput {
+        workspace_id: String::new(),
+        host: host.clone(),
+        port,
+        initial_user: input.auth_user.clone(),
+        initial_password: None,
+        initial_key_path: None,
+        initial_key_passphrase: None,
+        new_user: target.to_string(),
+        local_key_path: Some(local_key_path.clone()),
+        profile_id: String::new(),
+        workspace_name: input.workspace_name.clone(),
+        existing_workspace_id: input.existing_workspace_id.clone(),
+    };
+    let (workspace_id, workspace_name) =
+        finalize_workspace(state, app, &prov_input, &local_key_path)?;
+    dlog(&format!(
+        "connect_existing: workspace '{workspace_name}' ({workspace_id}) ready for '{target}'@{host}"
+    ));
+    Ok(ConnectExistingResult {
+        workspace_id,
+        workspace_name,
+        key_path: local_key_path,
+    })
+}
+
+/// Phase 65.B: run the connect-to-existing-server flow — optionally create
+/// a key-only user, generate + install a per-machine SSH key, validate it,
+/// and create/update the workspace. The password is zeroized after use and
+/// never persisted (Rule #2).
+#[tauri::command]
+pub(crate) async fn connect_existing_execute(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    mut input: ConnectExistingInput,
+) -> Result<ConnectExistingResult, String> {
+    use zeroize::Zeroize;
+    // Move the password out so `input` can be borrowed immutably by the
+    // inner fn, and zeroize it regardless of outcome.
+    let mut auth_pw = Some(std::mem::take(&mut input.password));
+    let result = connect_existing_execute_inner(&state, &app, &input, &auth_pw).await;
+    if let Some(s) = auth_pw.as_mut() {
+        s.zeroize();
+    }
+    result
+}
+
 // ─── Tauri profile management ─────────────────────────────────────────────
 
 #[tauri::command]

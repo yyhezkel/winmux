@@ -496,18 +496,69 @@ export function FileManagerPane(p: Props) {
         await refreshLocal();
       }
     } else {
-      const out = await wrap(`zip ${name}`, () =>
-        invoke<string>("file_manager_zip_remote", {
+      // Phase 65 (bug 2.5): don't use wrap() here — we need to inspect
+      // the error so a missing `zip` on the server becomes a tar offer
+      // (with an install hint) instead of a raw top-bar error.
+      setBusy(true);
+      setStatus(`zip ${name}`);
+      setErr(null);
+      try {
+        await invoke<string>("file_manager_zip_remote", {
           workspaceId: p.workspaceId,
           cwd: remotePath(),
           paths: [name],
           outputName,
-        })
-      );
-      if (out != null) {
+        });
         setStatus(t("fm.zip.done", { out: outputName }));
         await refreshRemote();
+      } catch (e) {
+        const msg = String(e);
+        if (isZipMissing(msg)) {
+          // `zip` isn't installed on the server — offer the tar.gz
+          // fallback + an install hint (the toast detail).
+          setStatus("");
+          askConfirm({
+            title: t("fm.zip.notInstalled.title"),
+            detail: t("fm.zip.notInstalled.detail"),
+            confirmLabel: t("fm.zip.useTar"),
+            danger: false,
+            onConfirm: () => void performTarGzRemote(s),
+          });
+        } else {
+          setErr(`zip ${name}: ${msg}`);
+          setStatus("");
+        }
+      } finally {
+        setBusy(false);
       }
+    }
+  };
+  // Phase 65 (bug 2.5): true when a remote zip failed because `zip` is
+  // not installed (exit 127 / "command not found"), as opposed to a real
+  // packing error. Drives the tar.gz fallback offer.
+  const isZipMissing = (msg: string): boolean => {
+    const low = msg.toLowerCase();
+    return (
+      low.includes("exit 127") ||
+      low.includes("command not found") ||
+      low.includes("zip: not found")
+    );
+  };
+  // Phase 65 (bug 2.5): tar.gz fallback for servers without `zip`.
+  const performTarGzRemote = async (s: { side: Side; entry: FileEntry }) => {
+    const name = s.entry.name;
+    const outputName = `${name}.tar.gz`;
+    const out = await wrap(`tar ${name}`, () =>
+      invoke<string>("file_manager_targz_remote", {
+        workspaceId: p.workspaceId,
+        cwd: remotePath(),
+        paths: [name],
+        outputName,
+      })
+    );
+    if (out != null) {
+      setStatus(t("fm.zip.done", { out: outputName }));
+      await refreshRemote();
     }
   };
   const zipSel = () => {

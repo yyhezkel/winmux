@@ -1180,9 +1180,59 @@ pub(crate) async fn file_manager_zip_remote(
     let cmd = parts.join(" ");
     let (out, code) = remote_exec(&handle, &cmd).await?;
     if code != 0 {
+        // Phase 65 (bug 2.5): the failure was previously invisible in
+        // debug.log. Log metadata (workspace, output, exit code, stderr)
+        // so "zip: command not found" (exit 127) is diagnosable. The
+        // frontend turns 127 into a tar-fallback offer.
+        crate::dlog(&format!(
+            "file_manager_zip_remote FAILED ws={workspace_id} out={output_name} exit={code}: {out}"
+        ));
         return Err(format!("remote zip failed (exit {code}): {out}"));
     }
     // The produced archive lives at cwd/output_name on the remote.
+    Ok(format!("{}/{}", cwd.trim_end_matches('/'), output_name))
+}
+
+/// Phase 65 (bug 2.5): tar.gz fallback for servers without `zip`. Mirrors
+/// `file_manager_zip_remote` but runs `cd <cwd> && tar -czf <out> <items>`.
+/// `tar` is part of coreutils/busybox and is present on essentially every
+/// Linux box, so this is the graceful path when the zip offer is declined
+/// or zip is missing. Every string is shell-quoted (Absolute Rule #3).
+#[tauri::command]
+pub(crate) async fn file_manager_targz_remote(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    cwd: String,
+    paths: Vec<String>,
+    output_name: String,
+) -> Result<String, String> {
+    if paths.is_empty() {
+        return Err("tar: no items selected".into());
+    }
+    if output_name.contains('/') || output_name.contains('\\') {
+        return Err("tar: output_name must be a basename, not a path".into());
+    }
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| {
+            "no active SSH session for this workspace — connect a terminal pane first"
+                .to_string()
+        })?;
+    let mut parts: Vec<String> = Vec::with_capacity(paths.len() + 4);
+    parts.push("cd".into());
+    parts.push(winmux_core::shell_quote(&cwd));
+    parts.push("&& tar -czf".into());
+    parts.push(winmux_core::shell_quote(&output_name));
+    for p in &paths {
+        parts.push(winmux_core::shell_quote(p));
+    }
+    let cmd = parts.join(" ");
+    let (out, code) = remote_exec(&handle, &cmd).await?;
+    if code != 0 {
+        crate::dlog(&format!(
+            "file_manager_targz_remote FAILED ws={workspace_id} out={output_name} exit={code}: {out}"
+        ));
+        return Err(format!("remote tar failed (exit {code}): {out}"));
+    }
     Ok(format!("{}/{}", cwd.trim_end_matches('/'), output_name))
 }
 

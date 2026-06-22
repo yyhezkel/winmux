@@ -58,6 +58,14 @@ let g_rtlMode: RtlMode = "auto_per_line";
  *  selection to clipboard instead of sending SIGINT. Mirrors Windows
  *  Terminal / VS Code's behavior. Settings → Shortcuts toggles it. */
 let g_ctrlCCopyOnSelect = true;
+/** Phase 65.O: when true (and the pane is a tmux session — see
+ *  `TerminalInstance.tmuxScrollProxy`), the mouse wheel over the
+ *  alternate screen is intercepted and re-sent as Alt+Up/Down instead
+ *  of letting xterm.js's alt-scroll emit bare arrows. The bundled
+ *  winmux tmux.conf binds Alt+Up/Down to copy-mode scroll at a shell
+ *  prompt. Mirrors `use_winmux_tmux_config` (the two are a matched
+ *  pair: our interception only makes sense with our conf's bindings). */
+let g_winmuxTmuxWheelScroll = true;
 const g_terminals: Set<TerminalInstance> = new Set();
 
 /**
@@ -109,6 +117,12 @@ export function getRtlMode(): RtlMode {
 /** Phase 16: flip the Ctrl+C-copies-on-selection behavior at runtime. */
 export function setCtrlCCopyOnSelect(enabled: boolean): void {
   g_ctrlCCopyOnSelect = enabled;
+}
+
+/** Phase 65.O: flip the tmux wheel→copy-mode proxy at runtime. Wired to
+ *  the `terminal.use_winmux_tmux_config` setting from App.tsx. */
+export function setWinmuxTmuxWheelScroll(enabled: boolean): void {
+  g_winmuxTmuxWheelScroll = enabled;
 }
 
 /** Paste arbitrary text into the active terminal. xterm.js will wrap
@@ -233,6 +247,12 @@ export class TerminalInstance {
   // from the right remote. null until connected (download needs a live
   // SSH session anyway).
   workspaceId: string | null = null;
+  // Phase 65.O: true when this pane is attached to a tmux session, so
+  // the wheel→Alt+Up/Down copy-mode proxy should run. Set by App.tsx
+  // from the pane-persistence map. Stays false for plain (non-tmux)
+  // panes — a local `vim` owns its own alt-screen with no tmux to
+  // translate the proxy keys, so those keep xterm's default alt-scroll.
+  tmuxScrollProxy = false;
   // Phase 62.C (J.1): one-shot diagnostic flag — have we yet seen an
   // OSC 8 hyperlink sequence arrive in this pane's stream? Logged once
   // (metadata only, Rule #1) so we can tell "Claude isn't emitting OSC 8"
@@ -409,6 +429,51 @@ export class TerminalInstance {
       e.stopPropagation();
       showTerminalContextMenu(this, e.clientX, e.clientY);
     });
+
+    // Phase 65.O: tmux scrollback via the mouse wheel while keeping
+    // tmux `mouse off` (so native left-drag selection still works).
+    // Because tmux owns the alternate screen the whole time it runs,
+    // xterm.js's built-in alternate-scroll would turn each wheel tick
+    // into a bare Up/Down arrow — at a shell prompt that's history
+    // navigation, the v0.2.8 regression. Instead we send Alt+Up/Down,
+    // which the bundled winmux tmux.conf binds to copy-mode scroll at a
+    // shell prompt (and to plain arrows inside an alt-screen app like
+    // vim/less). Gated on `tmuxScrollProxy` so non-tmux panes (a local
+    // vim with no tmux to translate the proxy) keep xterm's default; and
+    // on the normal buffer we don't touch the wheel at all (real xterm
+    // scrollback handles it).
+    this.container.addEventListener(
+      "wheel",
+      (e) => {
+        if (!g_winmuxTmuxWheelScroll || !this.tmuxScrollProxy) return;
+        if (!this.sessionId) return;
+        let onAlt = false;
+        try {
+          onAlt = this.term.buffer.active.type === "alternate";
+        } catch {
+          onAlt = false;
+        }
+        if (!onAlt) return;
+        e.preventDefault();
+        e.stopPropagation();
+        // CSI 1 ; 3 A/B = Alt+Up / Alt+Down (xterm modifier encoding,
+        // which tmux parses as M-Up / M-Down).
+        const seq = e.deltaY < 0 ? "\x1b[1;3A" : "\x1b[1;3B";
+        // Scale to the wheel delta so a fast flick scrolls further.
+        // deltaMode 1 = lines, 0 = pixels; normalize both to a small
+        // tick count (each proxy key scrolls ~3 lines via the conf).
+        const magnitude =
+          e.deltaMode === 1 ? Math.abs(e.deltaY) : Math.abs(e.deltaY) / 40;
+        const ticks = Math.max(1, Math.min(5, Math.round(magnitude)));
+        for (let i = 0; i < ticks; i++) {
+          void invoke("pty_write", {
+            sessionId: this.sessionId,
+            data: seq,
+          }).catch((err) => console.error("pty_write (wheel) failed", err));
+        }
+      },
+      { passive: false },
+    );
 
     // Phase 15.A: only load the WebGL addon for the non-auto modes.
     // `auto_per_line` needs the DOM renderer so we can attach

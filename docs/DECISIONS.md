@@ -35,6 +35,15 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 - **Diagnosis plan:** reproduce in a tmux pane; first try `Prefix+[` then arrows/PgUp (isolates copy-mode vs. wheel); then wheel-scroll with `mouse on`; check `handleKey` guards (it's supposed to no-op when a terminal owns focus — verify PgUp/wheel aren't exceptions). Likely fix is narrow (stop eating the event / let xterm forward it).
 - **Priority (Yossi):** bad regression, daily-use pain. See the master order in the v0.2.8 test-sweep entry below (O is #1 of the bug round).
 
+### 2026-06-22 — Phase 65 P/Q/R: IA consolidation (single create/connect path, 2-mode sidebar)
+Three UX decisions that finish Phase 65's information architecture. **These are PART of Phase 65** — do them right after 65.B/C, before cutting v0.2.9. They partly restructure the 65.C UI that was just built.
+
+- **(P) Sidebar — drop Hidden mode entirely.** Yossi: "לא צריך סגור לחלוטין." Only **Full + Icons-only**; Ctrl+B cycles between the two (Full ↔ Icons). Delete the Hidden state + its code + the planned edge-strip re-open tab. `settings.json` `sidebar_mode` becomes a 2-value field; **migrate** any old `Hidden` value → `Icons` gracefully on load. **Supersedes bug 4.1** (no longer "fix Hidden" — we remove it; 4.4 z-index fix still stands).
+- **(Q) Workspace context menu — remove "Add this machine…".** Yossi: "אני גם בעד א' זה מיותר - תוריד." Delete the `add_machine` menu item (Sidebar.tsx ws-menu + the `add_machine` action in the `onAction` union + its App.tsx handler). The "new machine joins an existing server" use case goes through the main wizard (R). If a key breaks → delete the workspace and re-run the wizard.
+- **(R) Consolidate "Provision Server" + "Connect to existing server" into ONE wizard.** Yossi: "הקם שרת - ושם כבר יש וויזארד שמאפשר להתחבר לשרת קיים." The Provision wizard already has a radio toggle ("install new server" / "connect to existing"). Wire Phase 65's discovery + user-selection flow behind the **"connect to existing"** branch of that toggle, and **delete the separate sidebar "🔗 connect to existing server" button** added in 65.C. Keep the "install new server" branch as-is. **Resolves bug 6.2** (the "one button → modal with 2 mode selectors" Yossi asked for) — together with Q. The 6.2 "wait for screenshots" note is now moot; R is the concrete spec.
+- **Net effect:** one button to create/connect a workspace (wizard, 2 modes), one way to toggle the sidebar (Ctrl+B / collapse btn, 2 modes), no duplicate paths, no dead-ends.
+- **NOTE — code already built that P/Q/R unwind:** 65.C added (a) the standalone sidebar "connect existing" button [delete in R], (b) the ws-menu "Add this machine…" item + `add_machine` plumbing [delete in Q]. The `ConnectExistingWizard.tsx` component + its two backend commands STAY — they get re-hosted inside the Provision wizard's "connect existing" branch (R).
+
 ### 2026-06-22 — v0.2.8 thorough-test bug sweep (Yossi) — round after Phase 65
 Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, with the agreed priority order. **O (tmux scroll, = 3.2) is logged separately above; this entry covers the rest + the master order.**
 
@@ -53,15 +62,12 @@ Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, wi
 - **(2.6 / K) Download chooser — always-ask confirmed.** Default for K: ALWAYS ask where to save. An optional default-folder setting may come later, but on install → always prompt.
 - **(6.2) New-workspace wizard placement — WAIT FOR IMAGES.** Yossi sees two SEPARATE buttons ("סביבת עבודה חדשה" + "הקם שרת") and finds it wrong. Desired: ONE "+ סביבת עבודה חדשה" button → modal with 2 mode selectors: "Provision new server" / "Connect to existing server" (the 65.C wizard folds in here). **Do NOT change until Yossi sends the screenshots.**
 
-- **Master priority order (Yossi, supersedes earlier):**
-  1. **O** — tmux scroll (= 3.2)
-  2. **3.3** — Ctrl+Shift+C / DevTools override (critical, UX corruption)
-  3. **2.5** — zip toast + dlog + tar fallback
-  4. **2.2** — FileManager drag-header
-  5. **4.1 + 4.4** — sidebar Hidden mode + icons-menu z-index
-  6. **2.6 / K** — download chooser (always-ask)
-  7. **6.2** — new-wizard placement (BLOCKED on Yossi's images)
-  8. then **63** (B+C+D+F, then E) → **L** → **DIFF** → **B1** → **per-file unzip** → **N part 2** → **J**
+- **Master priority order (Yossi, 2026-06-22, supersedes earlier):**
+  - **Phase 65 (done in code) → P → Q → R** (IA consolidation, see entry above) — finish before cutting v0.2.9.
+  - Then the v0.2.9 bug round: **O** (tmux scroll = 3.2) → **3.3** (Ctrl+Shift+C / DevTools, critical) → **2.5** (zip toast + dlog + tar fallback) → **2.2** (FileManager drag-header) → **4.4** (icons-menu z-index; 4.1 dropped — superseded by P) → **2.6 / K** (download chooser, always-ask).
+  - **Cut v0.2.9** = Phase 65 + P + Q + R + O + 3.3 + (2.5 / 2.2 / 4.4 / 2.6-K as they land).
+  - **After v0.2.9:** **63** (B+C+D+F, then E) → **L** → **DIFF** → **B1** → **per-file unzip** → **N part 2** → **J**.
+  - **Scope note:** v0.2.9 is now a substantially bigger release than the original "cut fast right after 65 is green." Surfaced to Yossi 2026-06-22.
 
 ### 2026-06-18 — Phase 64 (J follow-up): Claude prints `[file]` as PLAIN TEXT, not OSC 8
 - **Finding (Yossi, live Claude test):** the `OSC8 hyperlink sequence detected` diagnostic NEVER fired, and `[file] <name> (<size>)` shows as plain text with no escape sequences. So the Phase 62.B/C `linkHandler` (correct for OSC 8) has nothing to bind — Claude isn't emitting OSC 8 in winmux (TERM/capability/env, or SSH/tmux stripping). The diagnostic dlog stays in as the litmus test.

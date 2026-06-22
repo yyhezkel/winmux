@@ -25,6 +25,12 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-22 — Phase 65 V/W/O (build-2 smoke-test fixes)
+From Yossi's test of the first embedded debug build:
+- **(V) Hotkey clash — `e5381a2`.** T's Focus/Zoom was bound to **Ctrl+Shift+M**, which is **STT push-to-talk**'s default (bindings/SttSettings.ts) — voice input broke. Moved Focus/Zoom to **Ctrl+Shift+Z** (mnemonic = tmux Prefix+z); STT keeps Ctrl+Shift+M. ⛶ tooltips updated (en/he/ar/ru).
+- **(W) Global sidebar toggle — `e5381a2`.** Yossi: "Ctrl+B works only when the sidebar has focus." Plain Ctrl+B is window-scoped but guarded (skips when an xterm pane is focused, because **Ctrl+b is tmux's prefix** and must reach the PTY — stealing it would break every tmux keybinding). **Decision:** keep plain Ctrl+B for tmux + add **Ctrl+Shift+B** as a focus-independent GLOBAL toggle that works inside panes / FileManager too. *(If Yossi insists on literal Ctrl+B everywhere, the cost is losing tmux prefix — flag before doing it.)*
+- **(O) tmux wheel — round 2, `e5381a2`.** Round-1 was a no-op. **Root cause:** the wheel listener was bubble-phase, so xterm.js's own `.xterm-viewport` wheel handler fired FIRST and already emitted the alt-scroll arrows; our `preventDefault` was too late. Fix: re-registered the listener in **capture phase** (+ `stopPropagation`) so we intercept before xterm. Added `console.debug` diagnostics (metadata only) on every wheel — logs proxy-fired vs why-it-bailed (confEnabled / tmuxProxy / hasSession / onAlt) so it's diagnosable from the debug build's devtools (F12) without another rebuild. **STILL REQUIRES** the updated tmux.conf live on the server: Yossi must `tmux kill-server` (or fully disconnect + reconnect the pane) so the new M-Up/M-Down bindings load. If diagnostics show `wheel→proxy` firing but still no scroll → the escape form (CSI 1;3 A/B) isn't parsed by that tmux; try `\e\e[A` next.
+
 ### 2026-06-22 — BUILD TRAP: debug build must embed the frontend (not Vite devUrl)
 - **Symptom (Yossi):** a hand-rolled `cargo build` debug binary showed **"localhost refused"** as the main page — it tried to load the frontend from the Vite dev server (`http://localhost:1420`, `build.devUrl`) instead of the embedded bundle. Plain `cargo build` does NOT run `beforeBuildCommand` and resolves to dev-mode frontend loading.
 - **Rule of thumb — three build modes:**

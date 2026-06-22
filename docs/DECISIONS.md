@@ -25,6 +25,15 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-22 — BUILD TRAP: debug build must embed the frontend (not Vite devUrl)
+- **Symptom (Yossi):** a hand-rolled `cargo build` debug binary showed **"localhost refused"** as the main page — it tried to load the frontend from the Vite dev server (`http://localhost:1420`, `build.devUrl`) instead of the embedded bundle. Plain `cargo build` does NOT run `beforeBuildCommand` and resolves to dev-mode frontend loading.
+- **Rule of thumb — three build modes:**
+  - **`npm run dev` / `tauri dev`** → live Vite devUrl. For active development only.
+  - **Debug build to hand to Yossi for smoke-testing** → **`npm run tauri build -- --debug --no-bundle`**. This runs `beforeBuildCommand` (`npm run build` → vite build into `../dist`), compiles in the debug profile (devtools ON), and **embeds `frontendDist`** so the exe loads its own bundled UI with no Vite needed. Output: `app/src-tauri/target/debug/app.exe` (+ `resources/` staged alongside). Copy → `winmux-DEBUG-test.exe`.
+  - **v0.2.9 release final** → `npm run tauri build` (production profile, devtools OFF, full NSIS/MSI bundle) per RELEASING.md.
+  - **NEVER** ship a bare `cargo build` binary to a tester — it'll point at localhost.
+  - Lock note: a running `target/debug/app.exe` blocks the rebuild ("failed to remove app.exe"). Windows allows *renaming* a running exe — `Move-Item app.exe app.exe.locked-old` frees the slot without killing the tester's session; delete the `.locked-old` once they close it.
+
 ### 2026-06-22 — Phase 65.U (CRITICAL): Updater "shows but can't install"
 - **Report (Yossi, users):** "כשיש עדכון חדש — זה רק מציג ולא מאפשר התקנה או הורדה." Critical: if users can't self-update, none of our fixes reach them.
 - **Diagnosis (2026-06-22, VERIFIED end-to-end):** the one-click path is already complete and correct. `download_and_install_update` (Phase 27) downloads the NSIS installer → verifies sha256 → spawns → exits; the frontend already had a wired Install button. The published `manifest.json` (repo root, served via raw.githubusercontent main) has valid `nsis_url` + `nsis_sha256`; `gh release view v0.2.8` confirms the asset `winmux_0.2.8_x64-setup.exe` exists, and its sha256 **matches the manifest** (`52392c0…`). So current-version users CAN install. **The affected users are on PRE-Phase-27 builds** (notify-only banner, no install button) — their installed binary can't be patched retroactively; **they need one manual update from GitHub**, after which it's one-click forever.

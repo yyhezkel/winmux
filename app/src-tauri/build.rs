@@ -1,5 +1,12 @@
 fn main() {
     emit_build_metadata();
+    // Phase 65 (build reliability): re-run the build script — and thus
+    // re-embed the frontend via generate_context! — whenever the built
+    // `dist/` changes. Without this, a pure-frontend change (no .rs edit)
+    // could leave the OLD frontend embedded in the binary: the symptom
+    // was build #5 shipping stale JS (the new wheel diagnostics never
+    // appeared). Belt-and-suspenders over tauri_build's own watching.
+    println!("cargo:rerun-if-changed=../dist");
     tauri_build::build()
 }
 

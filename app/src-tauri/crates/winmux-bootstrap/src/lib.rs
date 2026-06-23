@@ -375,7 +375,23 @@ async fn ensure_tmux_conf(
         return;
     }
     let _ = ssh_exec(handle, &format!("chmod 0644 {remote_conf}")).await;
-    dlog(&format!("bootstrap: tmux-conf uploaded ({} bytes)", bytes.len()));
+    // Phase 65.O: apply the refreshed conf to any ALREADY-RUNNING tmux
+    // server so new key bindings (e.g. the wheel→copy-mode M-Up) take
+    // effect on the user's existing sessions WITHOUT a `tmux kill-server`.
+    // `bind -n` bindings are server-global, so a single source-file
+    // updates every session. Best-effort: no tmux server / not installed
+    // → the `|| true` keeps it silent.
+    let _ = ssh_exec(
+        handle,
+        &format!(
+            "command -v tmux >/dev/null 2>&1 && tmux source-file {remote_conf} 2>/dev/null || true"
+        ),
+    )
+    .await;
+    dlog(&format!(
+        "bootstrap: tmux-conf uploaded ({} bytes) + sourced into live server",
+        bytes.len()
+    ));
 }
 
 /// Shell snippet that idempotently appends `~/.winmux/bin` to the

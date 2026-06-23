@@ -25,6 +25,14 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-22 — Phase 65 X/Y/Z/AA (build-3, queued for v0.2.9) — `08c4fcb`
+Non-critical polish from Yossi, all done:
+- **(X) Paste focus jump.** After paste (Ctrl+Shift+V or right-click→Paste) focus left the pane. Fix: re-assert `term.focus()` after paste in both `pasteIntoActiveTerminal` and the context-menu paste.
+- **(Z) Connect menu i18n.** Connect-dropdown + smart-modal labels were hardcoded English → routed through `t()` (Plain shell / Open in directory… / Run command… / Run Claude Code: / Resume from list… + 3 modal titles); literal `claude`/`--continue`/`--resume` kept verbatim. 13 keys × en/he/ar/ru.
+- **(Y) Resume-from-list wrong cwd.** Claude session picker now threads the session's `project_path` → resume connects with `cwdOverride`, so the backend runs `cd <dir> && exec claude --resume <id>` (was resuming from $HOME). Verified the backend already does `cd … && exec` for claude mode + cwd_override.
+- **(AA) "Open in directory" folder picker.** Replaced the text input with a browsable remote picker (option C): SFTP dir-list via existing `file_list_remote`, drill-down (.. + sub-folders), "Open here", + per-workspace Recent (localStorage, 8). Starts at `file_home_remote`. Local panes keep the text-input fallback (SFTP needs a session).
+- i18n parity 614; tsc clean. Order Yossi set: X → Z → Y → AA (all shipped together).
+
 ### 2026-06-22 — Phase 65 V/W/O (build-2 smoke-test fixes)
 From Yossi's test of the first embedded debug build:
 - **(V) Hotkey clash — `e5381a2`.** T's Focus/Zoom was bound to **Ctrl+Shift+M**, which is **STT push-to-talk**'s default (bindings/SttSettings.ts) — voice input broke. Moved Focus/Zoom to **Ctrl+Shift+Z** (mnemonic = tmux Prefix+z); STT keeps Ctrl+Shift+M. ⛶ tooltips updated (en/he/ar/ru).

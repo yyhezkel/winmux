@@ -469,6 +469,26 @@ export class TerminalInstance {
             return false;
           }
         })();
+        // Phase 65.O round 5 (Yossi's breakthrough diag): if the running
+        // app requested mouse reporting (tmux with `mouse on`, vim/htop
+        // with mouse, etc.), xterm.js ALREADY sends native SGR mouse
+        // events for the wheel — and THAT is what scrolls. Our Alt+arrow
+        // proxy was preempting it (capture + preventDefault), so the app
+        // got arrows instead of mouse events and never scrolled. When
+        // mouse mode is on, step aside entirely and let xterm.js do its
+        // native thing. Our proxy is only for the mouse-OFF case.
+        let mouseMode = "none";
+        try {
+          mouseMode = this.term.modes.mouseTrackingMode ?? "none";
+        } catch {
+          mouseMode = "none";
+        }
+        if (mouseMode !== "none") {
+          console.log(
+            `[winmux O] wheel passthrough (app mouse mode=${mouseMode}) pane=${this.paneId} — xterm sends native SGR mouse events`,
+          );
+          return; // do NOT preventDefault — let xterm.js handle it
+        }
         if (g_winmuxTmuxWheelScroll && this.tmuxScrollProxy && this.sessionId && onAlt) {
           e.preventDefault();
           e.stopPropagation();
@@ -503,7 +523,7 @@ export class TerminalInstance {
           // Bailed — log WHY so the wheel regression is diagnosable from
           // the devtools console without a rebuild.
           console.log(
-            `[winmux O] wheel passthrough pane=${this.paneId} confEnabled=${g_winmuxTmuxWheelScroll} tmuxProxy=${this.tmuxScrollProxy} hasSession=${!!this.sessionId} onAlt=${onAlt}`,
+            `[winmux O] wheel passthrough pane=${this.paneId} confEnabled=${g_winmuxTmuxWheelScroll} tmuxProxy=${this.tmuxScrollProxy} hasSession=${!!this.sessionId} onAlt=${onAlt} mouseMode=${mouseMode}`,
           );
         }
       },

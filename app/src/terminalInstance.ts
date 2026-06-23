@@ -481,7 +481,7 @@ export class TerminalInstance {
           const magnitude =
             e.deltaMode === 1 ? Math.abs(e.deltaY) : Math.abs(e.deltaY) / 40;
           const ticks = Math.max(1, Math.min(5, Math.round(magnitude)));
-          console.debug(
+          console.log(
             `[winmux O] wheel→proxy pane=${this.paneId} deltaY=${e.deltaY} ticks=${ticks} dir=${e.deltaY < 0 ? "up" : "down"}`,
           );
           for (let i = 0; i < ticks; i++) {
@@ -493,7 +493,7 @@ export class TerminalInstance {
         } else {
           // Bailed — log WHY so the wheel regression is diagnosable from
           // the devtools console without a rebuild.
-          console.debug(
+          console.log(
             `[winmux O] wheel passthrough pane=${this.paneId} confEnabled=${g_winmuxTmuxWheelScroll} tmuxProxy=${this.tmuxScrollProxy} hasSession=${!!this.sessionId} onAlt=${onAlt}`,
           );
         }

@@ -1181,10 +1181,14 @@ export function PaneView(p: Props) {
             // Phase 65 (bug Y): cd to the session's original project dir
             // first (backend turns cwdOverride into `cd <dir> && exec
             // claude …`), so resume runs where the session was created.
+            // Only honour an ABSOLUTE path — the backend falls back to
+            // Claude's encoded dir name ("-home-runner-tax") when the
+            // JSONL has no cwd, and `cd '-home…'` is a broken command.
+            const useCwd = cwd.startsWith("/");
             p.onConnect(p.pane.pane_id, {
               mode: "claude",
               claudeArgs: `--resume ${sessionId}`,
-              ...(cwd ? { cwdOverride: cwd } : {}),
+              ...(useCwd ? { cwdOverride: cwd } : {}),
             });
           }}
         />

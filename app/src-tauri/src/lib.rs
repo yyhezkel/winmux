@@ -1063,50 +1063,62 @@ fn build_smart_connect_script(
     cmd: Option<&str>,
     claude_args: Option<&str>,
 ) -> String {
-    let run = match mode {
+    // The command to exec. `None` for a plain connect (mode neither cmd
+    // nor claude) — Phase 65 (bug AA): in that case we may still need to
+    // `cd` (the "Open in directory" folder picker passes only cwd_override
+    // with no mode; previously that produced an empty script → no cd was
+    // ever sent and the pane stayed in $HOME).
+    let run: Option<String> = match mode {
         "cmd" => match cmd {
-            Some(c) if !c.trim().is_empty() => c.trim().to_string(),
+            Some(c) if !c.trim().is_empty() => Some(c.trim().to_string()),
             _ => return String::new(),
         },
         "claude" => {
             let args = claude_args.unwrap_or("").trim();
-            if args.is_empty() {
+            Some(if args.is_empty() {
                 "claude".to_string()
             } else {
                 format!("claude {args}")
-            }
+            })
         }
-        _ => return String::new(),
+        _ => None,
     };
-    let cwd = cwd_override.filter(|s| !s.is_empty());
+    let cwd = cwd_override.map(|s| s.trim()).filter(|s| !s.is_empty());
+    if run.is_none() && cwd.is_none() {
+        return String::new();
+    }
     match kind {
-        ShellKind::Posix => {
-            let mut s = String::new();
-            if let Some(d) = cwd {
-                s.push_str(&format!("cd {} && ", shell_quote(d)));
-            }
-            format!("{s}exec {run}\r\n")
-        }
+        ShellKind::Posix => match (run.as_deref(), cwd) {
+            (Some(r), Some(d)) => format!("cd {} && exec {r}\r\n", shell_quote(d)),
+            (Some(r), None) => format!("exec {r}\r\n"),
+            (None, Some(d)) => format!("cd {}\r\n", shell_quote(d)),
+            (None, None) => String::new(),
+        },
         ShellKind::PowerShell => {
-            let mut s = String::new();
-            if let Some(d) = cwd {
-                // -LiteralPath: no wildcard expansion on [brackets] in paths.
-                s.push_str(&format!(
-                    "Set-Location -LiteralPath '{}'; ",
-                    d.replace('\'', "''")
-                ));
+            // -LiteralPath: no wildcard expansion on [brackets] in paths.
+            let setloc = |d: &str| {
+                format!("Set-Location -LiteralPath '{}'", d.replace('\'', "''"))
+            };
+            match (run.as_deref(), cwd) {
+                (Some(r), Some(d)) => format!("{}; {r}\r\n", setloc(d)),
+                (Some(r), None) => format!("{r}\r\n"),
+                (None, Some(d)) => format!("{}\r\n", setloc(d)),
+                (None, None) => String::new(),
             }
-            format!("{s}{run}\r\n")
         }
         ShellKind::Cmd => {
-            let mut s = String::new();
-            if let Some(d) = cwd {
-                // `/d` switches drive too. cmd can't escape `"` inside a
-                // quoted arg — strip quotes/newlines instead.
+            // `/d` switches drive too. cmd can't escape `"` inside a quoted
+            // arg — strip quotes/newlines instead.
+            let cd = |d: &str| {
                 let clean = d.replace(['"', '\n', '\r'], "");
-                s.push_str(&format!("cd /d \"{clean}\" && "));
+                format!("cd /d \"{clean}\"")
+            };
+            match (run.as_deref(), cwd) {
+                (Some(r), Some(d)) => format!("{} && {r}\r\n", cd(d)),
+                (Some(r), None) => format!("{r}\r\n"),
+                (None, Some(d)) => format!("{}\r\n", cd(d)),
+                (None, None) => String::new(),
             }
-            format!("{s}{run}\r\n")
         }
     }
 }
@@ -4269,7 +4281,14 @@ async fn pane_connect(
     // Phase 61: the script is shaped per shell_kind, so local PowerShell /
     // Cmd panes get working syntax too (POSIX `exec` form unchanged).
     let smart_mode = mode.clone();
-    if matches!(smart_mode.as_deref(), Some("cmd") | Some("claude")) {
+    // Phase 65 (bug AA): also fire for a plain connect that carries a
+    // cwd_override (the folder picker) — build_smart_connect_script then
+    // emits a `cd <dir>` so "Open in directory" actually changes dir.
+    let has_cwd = cwd_override
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    if matches!(smart_mode.as_deref(), Some("cmd") | Some("claude")) || has_cwd {
         let script = build_smart_connect_script(
             shell_kind,
             smart_mode.as_deref().unwrap_or_default(),
@@ -4577,11 +4596,14 @@ async fn pane_list_claude_sessions(
         "find \"$HOME/.claude/projects\" -maxdepth 4 -name '*.jsonl' \
          -printf '%T@\\t%p\\n' 2>/dev/null | sort -rn | head -{} | \
          while IFS=$'\\t' read -r mt path; do \
+           cwd=$(head -50 \"$path\" 2>/dev/null | \
+             grep -m1 -oE '\"cwd\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | \
+             sed -E 's/.*:[[:space:]]*\"([^\"]*)\".*/\\1/'); \
            first_user=$(head -100 \"$path\" 2>/dev/null | \
              grep -m1 -E '\"role\"\\s*:\\s*\"user\"' | head -c 600); \
            last_asst=$(tail -200 \"$path\" 2>/dev/null | \
              grep -E '\"role\"\\s*:\\s*\"assistant\"' | tail -1 | head -c 600); \
-           printf '%s\\t%s\\t%s\\t%s\\n' \"$mt\" \"$path\" \"$first_user\" \"$last_asst\"; \
+           printf '%s\\t%s\\t%s\\t%s\\t%s\\n' \"$mt\" \"$path\" \"$cwd\" \"$first_user\" \"$last_asst\"; \
          done",
         limit
     );
@@ -4619,7 +4641,13 @@ async fn pane_list_claude_sessions(
 
     let mut out = Vec::new();
     for line in raw.lines() {
-        let parts: Vec<&str> = line.splitn(4, '\t').collect();
+        // Phase 65 (bug Y): fields are now mt \t path \t cwd \t first_user
+        // \t last_asst. cwd is the REAL project dir read from inside the
+        // JSONL (`"cwd":"…"`) — the source of truth. The old code derived
+        // project_path from the on-disk dir name, which Claude encodes by
+        // replacing `/` with `-` (`-home-runner-tax`); resuming with that
+        // produced `cd '-home-runner-tax'` → `cd: -h: invalid option`.
+        let parts: Vec<&str> = line.splitn(5, '\t').collect();
         if parts.len() < 2 {
             continue;
         }
@@ -4629,21 +4657,25 @@ async fn pane_list_claude_sessions(
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(0);
         let path = parts[1].to_string();
-        let last_user = parts.get(2).map(|s| extract_text_field(s));
-        let last_asst = parts.get(3).map(|s| extract_text_field(s));
+        let cwd_field = parts.get(2).map(|s| s.trim()).filter(|s| !s.is_empty());
+        let last_user = parts.get(3).map(|s| extract_text_field(s));
+        let last_asst = parts.get(4).map(|s| extract_text_field(s));
         let session_id = std::path::Path::new(&path)
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("?")
             .to_string();
-        let project_path = std::path::Path::new(&path)
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|s| s.to_str())
-            // Claude Code encodes paths with `-` for `/`. We surface the raw
-            // dirname; a future polish can decode it back to a real path.
-            .unwrap_or("?")
-            .to_string();
+        let project_path = cwd_field.map(|s| s.to_string()).unwrap_or_else(|| {
+            // Fallback (no cwd in the JSONL): the encoded dir name. Only
+            // used for display — the frontend won't `cd` to a path that
+            // doesn't start with `/`.
+            std::path::Path::new(&path)
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string()
+        });
         out.push(ClaudeSessionInfo {
             session_id,
             project_path,

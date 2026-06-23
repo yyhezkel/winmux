@@ -2382,7 +2382,15 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   color: var(--w-accent);
   font-family: var(--w-font-mono);
   font-size: var(--w-fs-sm);
-  max-width: 200px;
+  /* Phase 65 (bug BB): FIXED width (not max-width). The label grows
+     from "—" (~10px) to the filename (up to 200px) on selection; that
+     width swing was toggling the toolbar's horizontal overflow
+     scrollbar, whose height pushed the file list down a few px — so a
+     double-click's second click landed on the neighbouring row. A
+     constant width keeps the toolbar layout identical with or without a
+     selection. */
+  width: 180px;
+  flex: 0 0 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

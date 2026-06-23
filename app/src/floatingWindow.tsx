@@ -116,7 +116,18 @@ export function makeWindowControls(opts: {
     ) {
       return;
     }
+    // Phase 65 (bug 2.2): diagnostic — confirm the header mousedown
+    // reaches us (visible in the debug build's devtools).
+    console.log(
+      "[winmux drag] onDragStart",
+      (e.target as HTMLElement)?.className,
+    );
     e.preventDefault();
+    // Phase 65 (bug 2.2): stopPropagation to match onResizeStart (which
+    // works). The only code difference between resize (works) and drag
+    // (didn't) was this call — a bubble-phase ancestor mousedown handler
+    // was apparently interfering with the header drag.
+    e.stopPropagation();
     const g = geom();
     dragState = { startX: e.clientX, startY: e.clientY, origX: g.x, origY: g.y };
     window.addEventListener("mousemove", onDragMove);

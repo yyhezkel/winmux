@@ -25,6 +25,11 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-23 — Phase 65 BB: FileManager toolbar layout-shift on select — `6eeb406`
+- **Report (Yossi):** selecting a file makes the button row "jump," then a double-click opens the folder one row above the intended one. Regressed during 62.A–C.
+- **Root cause:** the action toolbar was already always-rendered/disabled (Yossi's option 1 was in place), BUT `.fm-selected-label` was `max-width:200px` — it grew from "—" (~10px) to the filename on selection. That ~190px width swing toggled the toolbar's `overflow-x:auto` horizontal scrollbar; with the toolbar's `min-height` (auto height), the scrollbar's height grew the toolbar a few px and pushed the file list down → the double-click's 2nd click hit the neighbouring row.
+- **Fix:** pin `.fm-selected-label` to a FIXED 180px (`width` + `flex:0 0 180px`) so the toolbar's total width — and the scrollbar state — never changes on selection. Layout is now identical with/without a selection. CSS-only; will ride the next build.
+
 ### 2026-06-22 — Phase 65 X/Y/Z/AA (build-3, queued for v0.2.9) — `08c4fcb`
 Non-critical polish from Yossi, all done:
 - **(X) Paste focus jump.** After paste (Ctrl+Shift+V or right-click→Paste) focus left the pane. Fix: re-assert `term.focus()` after paste in both `pasteIntoActiveTerminal` and the context-menu paste.

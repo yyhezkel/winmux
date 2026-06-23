@@ -25,6 +25,12 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-24 — Phase 65 O round 6 (build-8) — `da6c4f7` — RESOLVED (proxy deleted)
+**The real diagnosis:** Yossi ran `echo "TMUX=$TMUX"` → empty, `tmux display-message -p '#{mouse}'` → 0. He was in a **plain bash shell, not tmux at all** — yet the proxy still fired and sent Alt+Up, which bash read as history navigation ("scrolling the CLI line"). The proxy was never helping; it was breaking the common case.
+- **Fix: deleted the entire custom wheel handler** + all plumbing (`g_winmuxTmuxWheelScroll`/setter, `tmuxScrollProxy` field, the App.tsx pane-persistence sync effect + setter calls; −128 lines). xterm.js's native wheel handling is correct everywhere: plain shell → xterm scrollback; tmux+`mouse on` → SGR mouse → tmux native scroll; tmux+`mouse off` → xterm scrollback.
+- Kept tmux.conf `mouse on` (helps native tmux scroll, no harm). One-time console note on mount. **Lesson:** rounds 1-5 chased a fix for a non-problem — should have checked `$TMUX`/`#{mouse}` first. O is closed pending Yossi's confirm in build-8.
+- **Build note:** frontend-only change, so touched lib.rs before building to force the `generate_context!` re-embed (the build.rs `rerun-if-changed=../dist` from round 4 is the standing safeguard).
+
 ### 2026-06-23 — Phase 65 O round 5 (build-7) — `1724fbe` — THE fix
 **Yossi's breakthrough:** with `tmux set -g mouse on` confirmed (`tmux show -g | grep mouse` → on), the wheel STILL didn't scroll and `[winmux O] wheel→proxy` kept firing. Root cause at last: **our proxy competes with xterm.js's native mouse handling.** When an app requests mouse reporting, xterm.js sends native SGR mouse events for the wheel (= the scroll); our capture-phase Alt+arrow proxy preempted that with `preventDefault`, so tmux got arrows, not mouse events.
 - **Fix 1 (terminalInstance.ts):** the wheel proxy checks `term.modes.mouseTrackingMode`; if it's not `"none"` (mouse on), it STEPS ASIDE (no preventDefault) → xterm.js sends native SGR mouse events → tmux scrolls. The proxy is now strictly the mouse-OFF fallback.

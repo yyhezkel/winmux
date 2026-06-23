@@ -4,6 +4,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { t } from "./i18n";
 import { FileEditor } from "./FileEditor";
 import { TechText } from "./TechText";
+import { saveRemoteFileAs } from "./download";
 
 // Phase 15.B: dual-column file manager (local + remote SFTP).
 //
@@ -459,17 +460,25 @@ export function FileManagerPane(p: Props) {
     const name = remoteSel();
     if (!name) return;
     const remote = fullRemote(name);
-    const local = fullLocal(name);
-    const n = await wrap(`download ${name}`, () =>
-      invoke<number>("file_download", {
-        workspaceId: p.workspaceId,
-        remotePath: remote,
-        localPath: local,
-      })
-    );
-    if (n != null) {
-      setStatus(`downloaded ${name} (${fmtSize(n)}) ✓`);
-      await refreshLocal();
+    // Phase 65 (bug K): always ask where to save (native dialog),
+    // pre-filling the local column's current folder. Was silently
+    // dropping into the local column path with no prompt.
+    setBusy(true);
+    setStatus(`download ${name}`);
+    setErr(null);
+    try {
+      const dest = await saveRemoteFileAs(p.workspaceId, remote, name, localPath());
+      if (dest) {
+        setStatus(`↧ ${name} ✓`);
+        await refreshLocal();
+      } else {
+        setStatus("");
+      }
+    } catch (e) {
+      setErr(`download ${name}: ${String(e)}`);
+      setStatus("");
+    } finally {
+      setBusy(false);
     }
   };
   // Phase 57: zip + unzip the currently selected item. Single-item v1

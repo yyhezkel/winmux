@@ -22,6 +22,7 @@ import {
   setCtrlCCopyOnSelect,
   setWinmuxTmuxWheelScroll,
 } from "./terminalInstance";
+import { saveRemoteFileAs } from "./download";
 import {
   applyTheme,
   loadSettings,
@@ -1836,12 +1837,13 @@ function App() {
         flashSummaryToast("err", t("osc.download.noRemote"));
         return;
       }
-      flashSummaryToast("ok", t("osc.download.started", { name }));
-      invoke<string>("download_remote_file_via_osc", {
-        workspaceId: detail.workspaceId,
-        remotePath: detail.path,
-      })
-        .then((local) => flashSummaryToast("ok", t("osc.download.done", { path: local })))
+      // Phase 65 (bug K): always ask where to save (native Save dialog)
+      // instead of silently dropping into ~/Downloads.
+      void saveRemoteFileAs(detail.workspaceId, detail.path, name)
+        .then((local) => {
+          if (local) flashSummaryToast("ok", t("osc.download.done", { path: local }));
+          // null = user cancelled the dialog → no toast.
+        })
         .catch((err) =>
           flashSummaryToast("err", t("osc.download.failed", { msg: String(err) })),
         );

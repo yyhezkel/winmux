@@ -36,6 +36,7 @@ tauri-build = { version = "2", features = [] }
 # signature can change between minors.
 tauri = { version = "=2.10.3", features = ["unstable"] }
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Phase 65: zero sensitive bytes (initial SSH password) in memory after

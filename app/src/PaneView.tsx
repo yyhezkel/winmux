@@ -43,7 +43,11 @@ export type HostTrustPending = {
 interface ClaudePickerProps {
   workspaceId: string;
   onClose: () => void;
-  onPick: (sessionId: string) => void;
+  // Phase 65 (bug Y): pass the session's original project path so the
+  // caller can `cd` there before `claude --resume` — otherwise resume
+  // runs from the current cwd (usually $HOME) and Claude can't find the
+  // project. Empty string when the session has no recorded path.
+  onPick: (sessionId: string, cwd: string) => void;
 }
 
 function ClaudeSessionPicker(p: ClaudePickerProps) {
@@ -89,7 +93,7 @@ function ClaudeSessionPicker(p: ClaudePickerProps) {
               {items().map((it) => (
                 <li
                   class="claude-row"
-                  onClick={() => p.onPick(it.session_id)}
+                  onClick={() => p.onPick(it.session_id, it.project_path ?? "")}
                   title={it.jsonl_path}
                 >
                   <div class="claude-row-head">
@@ -308,6 +312,87 @@ export function PaneView(p: Props) {
     if (m === "cwd") p.onConnect(p.pane.pane_id, { cwdOverride: v });
     if (m === "cmd") p.onConnect(p.pane.pane_id, { mode: "cmd", cmd: v });
     if (m === "claude_args") p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: v });
+  };
+
+  // Phase 65 (bug AA): "Open in directory" folder picker. Replaces the
+  // bare text input — browse the remote tree (SFTP dir-list) with
+  // drill-down + a recent-dirs shortcut list (per workspace,
+  // localStorage). Local (non-SSH) panes keep the text-input fallback,
+  // since file_list_remote needs an SSH session.
+  const [dirPicker, setDirPicker] = createSignal<{
+    path: string;
+    dirs: string[];
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+  const recentDirsKey = () => `winmux.recent-dirs.${p.workspaceId}`;
+  const loadRecentDirs = (): string[] => {
+    try {
+      const raw = localStorage.getItem(recentDirsKey());
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((x): x is string => typeof x === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  };
+  const [recentDirs, setRecentDirs] = createSignal<string[]>([]);
+  const pushRecentDir = (dir: string) => {
+    const next = [dir, ...loadRecentDirs().filter((d) => d !== dir)].slice(0, 8);
+    try {
+      localStorage.setItem(recentDirsKey(), JSON.stringify(next));
+    } catch {
+      // quota / private mode — recents are best-effort
+    }
+    setRecentDirs(next);
+  };
+  const navigateDirPicker = async (path: string) => {
+    setDirPicker({ path, dirs: [], loading: true, error: null });
+    try {
+      const list = await invoke<{ name: string; is_dir: boolean }[]>(
+        "file_list_remote",
+        { workspaceId: p.workspaceId, path, showHidden: false },
+      );
+      const dirs = list
+        .filter((e) => e.is_dir)
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b));
+      setDirPicker({ path, dirs, loading: false, error: null });
+    } catch (e) {
+      setDirPicker({ path, dirs: [], loading: false, error: String(e) });
+    }
+  };
+  const openDirPicker = async () => {
+    setRecentDirs(loadRecentDirs());
+    if (!isSsh()) {
+      // Local pane: no SFTP — fall back to the text input.
+      setSmartInput("");
+      setSmartModal("cwd");
+      return;
+    }
+    let start = "/";
+    try {
+      start = (await invoke<string>("file_home_remote", {
+        workspaceId: p.workspaceId,
+      })) || "/";
+    } catch {
+      start = "/";
+    }
+    void navigateDirPicker(start);
+  };
+  const dirPickerParent = (path: string): string => {
+    const trimmed = path.replace(/\/+$/, "");
+    const idx = trimmed.lastIndexOf("/");
+    if (idx <= 0) return "/";
+    return trimmed.slice(0, idx);
+  };
+  const dirPickerJoin = (path: string, name: string): string =>
+    path === "/" ? `/${name}` : `${path.replace(/\/+$/, "")}/${name}`;
+  const chooseDir = (dir: string) => {
+    pushRecentDir(dir);
+    setDirPicker(null);
+    p.onConnect(p.pane.pane_id, { cwdOverride: dir });
   };
   const openMeta = () => {
     setTitleDraft(p.pane.title ?? "");
@@ -944,20 +1029,20 @@ export function PaneView(p: Props) {
                         </button>
                       </Show>
                       <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "plain" }); }}>
-                        Plain shell
+                        {t("connect.plainShell")}
                       </button>
                       <hr />
-                      <button onClick={() => { closeConnectMenu(); setSmartInput(""); setSmartModal("cwd"); }}>
-                        Open in directory…
+                      <button onClick={() => { closeConnectMenu(); openDirPicker(); }}>
+                        {t("connect.openDir")}
                       </button>
                       <button onClick={() => { closeConnectMenu(); setSmartInput(""); setSmartModal("cmd"); }}>
-                        Run command…
+                        {t("connect.runCmd")}
                       </button>
                       <hr />
                       {/* Phase 61: Claude launchers are no longer SSH-only —
                           the backend injects shell-appropriate syntax for
                           local PowerShell / Cmd panes too. */}
-                      <div class="connect-menu-section">Run Claude Code:</div>
+                      <div class="connect-menu-section">{t("connect.runClaude")}</div>
                       <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude" }); }}>
                         claude
                       </button>
@@ -971,7 +1056,7 @@ export function PaneView(p: Props) {
                         claude --dangerously-skip-permissions
                       </button>
                       <button onClick={() => { closeConnectMenu(); setShowClaudePicker(true); }}>
-                        Resume from list…
+                        {t("connect.resumeList")}
                       </button>
                     </div>
                   </Show>
@@ -994,9 +1079,9 @@ export function PaneView(p: Props) {
         <div class="modal-backdrop" onClick={() => setSmartModal(null)}>
           <div class="modal smart-prompt" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
             <h3>
-              {smartModal() === "cwd" && "Open in directory"}
-              {smartModal() === "cmd" && "Run command"}
-              {smartModal() === "claude_args" && "Claude args"}
+              {smartModal() === "cwd" && t("connect.modal.openDir")}
+              {smartModal() === "cmd" && t("connect.modal.runCmd")}
+              {smartModal() === "claude_args" && t("connect.modal.claudeArgs")}
             </h3>
             <input
               class="pane-meta-title"
@@ -1023,16 +1108,83 @@ export function PaneView(p: Props) {
         </div>
       </Show>
 
+      {/* Phase 65 (bug AA): remote folder picker for "Open in directory". */}
+      <Show when={dirPicker()}>
+        <div class="modal-backdrop" onClick={() => setDirPicker(null)}>
+          <div
+            class="modal claude-picker"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div class="settings-head">
+              <h3>{t("connect.dirPicker.title")}</h3>
+              <button class="feed-x" title={t("common.close")} onClick={() => setDirPicker(null)}>×</button>
+            </div>
+            <div class="dir-picker-path" title={dirPicker()!.path}>{dirPicker()!.path}</div>
+            <Show when={recentDirs().length > 0}>
+              <div class="dir-picker-recent">
+                <div class="dir-picker-recent-label">{t("connect.dirPicker.recent")}</div>
+                <For each={recentDirs()}>
+                  {(d) => (
+                    <button class="dir-picker-recent-row" title={d} onClick={() => chooseDir(d)}>
+                      🕘 {d}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <div class="claude-picker-body">
+              <Show when={dirPicker()!.loading}>
+                <p class="status-line">{t("connect.dirPicker.loading")}</p>
+              </Show>
+              <Show when={dirPicker()!.error}>
+                <p class="status-line err">⚠ {dirPicker()!.error}</p>
+              </Show>
+              <ul class="dir-picker-list">
+                <Show when={dirPicker()!.path !== "/"}>
+                  <li class="dir-picker-row up" onClick={() => void navigateDirPicker(dirPickerParent(dirPicker()!.path))}>
+                    📁 ..
+                  </li>
+                </Show>
+                <For each={dirPicker()!.dirs}>
+                  {(name) => (
+                    <li
+                      class="dir-picker-row"
+                      onClick={() => void navigateDirPicker(dirPickerJoin(dirPicker()!.path, name))}
+                    >
+                      📁 {name}
+                    </li>
+                  )}
+                </For>
+                <Show when={!dirPicker()!.loading && dirPicker()!.dirs.length === 0 && !dirPicker()!.error}>
+                  <li class="dir-picker-empty">{t("connect.dirPicker.empty")}</li>
+                </Show>
+              </ul>
+            </div>
+            <div class="modal-buttons">
+              <button onClick={() => setDirPicker(null)}>{t("common.cancel")}</button>
+              <button class="primary" onClick={() => chooseDir(dirPicker()!.path)}>
+                {t("connect.dirPicker.useThis")}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
       {/* Phase 12.B: Claude session browser */}
       <Show when={showClaudePicker()}>
         <ClaudeSessionPicker
           workspaceId={p.workspaceId}
           onClose={() => setShowClaudePicker(false)}
-          onPick={(sessionId) => {
+          onPick={(sessionId, cwd) => {
             setShowClaudePicker(false);
+            // Phase 65 (bug Y): cd to the session's original project dir
+            // first (backend turns cwdOverride into `cd <dir> && exec
+            // claude …`), so resume runs where the session was created.
             p.onConnect(p.pane.pane_id, {
               mode: "claude",
               claudeArgs: `--resume ${sessionId}`,
+              ...(cwd ? { cwdOverride: cwd } : {}),
             });
           }}
         />

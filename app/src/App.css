@@ -3225,6 +3225,65 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   padding: 12px 18px 18px;
   overflow-y: auto;
 }
+/* Phase 65 (bug AA): remote folder picker. */
+.dir-picker-path {
+  padding: 6px 18px;
+  font-family: var(--w-font-mono);
+  font-size: var(--w-fs-md);
+  color: var(--w-text-secondary, #7d8590);
+  border-bottom: 1px solid var(--w-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: ltr;
+}
+.dir-picker-recent {
+  padding: 8px 18px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dir-picker-recent-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--w-text-dim, #6b7682);
+}
+.dir-picker-recent-row {
+  background: transparent;
+  border: none;
+  color: var(--w-text);
+  text-align: start;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--w-fs-md);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: ltr;
+}
+.dir-picker-recent-row:hover { background: rgba(122, 162, 247, 0.14); }
+.dir-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.dir-picker-row {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--w-fs-md);
+  direction: ltr;
+}
+.dir-picker-row:hover { background: rgba(122, 162, 247, 0.14); }
+.dir-picker-row.up { color: var(--w-text-secondary, #7d8590); }
+.dir-picker-empty {
+  list-style: none;
+  padding: 8px;
+  color: var(--w-text-dim, #6b7682);
+  font-size: var(--w-fs-md);
+}
 .claude-list {
   list-style: none;
   margin: 0;

@@ -141,6 +141,11 @@ export function pasteIntoActiveTerminal(text: string): void {
   if (!target) target = g_terminals.values().next().value ?? null;
   try {
     target?.term.paste(text);
+    // Phase 65 (bug X): keep focus in the terminal after a paste.
+    // Reading the clipboard (and the menu/keystroke that triggered it)
+    // can pull focus off the xterm textarea, so the caret "jumps" out of
+    // the pane. Re-assert focus on the pasted-into terminal.
+    target?.term.focus();
   } catch (e) {
     console.warn("paste failed", e);
   }
@@ -215,6 +220,9 @@ function showTerminalContextMenu(ti: TerminalInstance, x: number, y: number): vo
       .readText()
       .then((text) => {
         if (text) ti.term.paste(text);
+        // Phase 65 (bug X): the context menu stole focus; return it to
+        // the terminal so the caret stays at the paste site.
+        ti.term.focus();
       })
       .catch((err) => console.warn("terminal paste failed", err));
   });

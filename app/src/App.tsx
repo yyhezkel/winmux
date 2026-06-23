@@ -631,7 +631,10 @@ function App() {
   createEffect(() => {
     const ws = activeWs();
     if (!ws) {
-      void getCurrentWindow().setTitle("winmux");
+      // Phase 65 (bug CC): swallow rejection — needs the
+      // core:window:allow-set-title capability; a missing/denied perm
+      // shouldn't surface as an unhandled promise rejection.
+      void getCurrentWindow().setTitle("winmux").catch(() => {});
       return;
     }
     const parts: string[] = [];
@@ -645,7 +648,7 @@ function App() {
     parts.push(focusedName ?? ws.name);
     if (waitingWorkspaceIds().has(ws.id)) parts.push("●");
     const title = parts.join(" ") + " — winmux";
-    void getCurrentWindow().setTitle(title);
+    void getCurrentWindow().setTitle(title).catch(() => {});
   });
 
   // Phase 41: when the user activates an SSH workspace and the setting is

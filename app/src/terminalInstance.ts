@@ -472,17 +472,26 @@ export class TerminalInstance {
         if (g_winmuxTmuxWheelScroll && this.tmuxScrollProxy && this.sessionId && onAlt) {
           e.preventDefault();
           e.stopPropagation();
-          // CSI 1 ; 3 A/B = Alt+Up / Alt+Down (xterm modifier encoding,
-          // which tmux parses as M-Up / M-Down).
-          const seq = e.deltaY < 0 ? "\x1b[1;3A" : "\x1b[1;3B";
+          // Phase 65.O round 3 (Yossi diag): the CSI-1;3 form (\e[1;3A)
+          // fired the proxy but tmux didn't react — it needs xterm
+          // extended-keys parsing. Use the classic ESC-prefix Alt+arrow
+          // form `\e\e[A` / `\e\e[B` instead: tmux reads the leading ESC
+          // as Meta + Up/Down → M-Up / M-Down (what the conf binds), the
+          // most widely-parsed encoding.
+          const seq = e.deltaY < 0 ? "\x1b\x1b[A" : "\x1b\x1b[B";
           // Scale to the wheel delta so a fast flick scrolls further.
           // deltaMode 1 = lines, 0 = pixels; normalize both to a small
           // tick count (each proxy key scrolls ~3 lines via the conf).
           const magnitude =
             e.deltaMode === 1 ? Math.abs(e.deltaY) : Math.abs(e.deltaY) / 40;
           const ticks = Math.max(1, Math.min(5, Math.round(magnitude)));
+          // Hex of the exact bytes sent to the PTY (metadata, not
+          // content — Rule #1), so the encoding is verifiable from F12.
+          const hex = Array.from(seq)
+            .map((c) => c.charCodeAt(0).toString(16).padStart(2, "0"))
+            .join(" ");
           console.log(
-            `[winmux O] wheel→proxy pane=${this.paneId} deltaY=${e.deltaY} ticks=${ticks} dir=${e.deltaY < 0 ? "up" : "down"}`,
+            `[winmux O] wheel→proxy pane=${this.paneId} deltaY=${e.deltaY} ticks=${ticks} dir=${e.deltaY < 0 ? "up" : "down"} sent=[${hex}]`,
           );
           for (let i = 0; i < ticks; i++) {
             void invoke("pty_write", {

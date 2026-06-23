@@ -58,14 +58,9 @@ let g_rtlMode: RtlMode = "auto_per_line";
  *  selection to clipboard instead of sending SIGINT. Mirrors Windows
  *  Terminal / VS Code's behavior. Settings → Shortcuts toggles it. */
 let g_ctrlCCopyOnSelect = true;
-/** Phase 65.O: when true (and the pane is a tmux session — see
- *  `TerminalInstance.tmuxScrollProxy`), the mouse wheel over the
- *  alternate screen is intercepted and re-sent as Alt+Up/Down instead
- *  of letting xterm.js's alt-scroll emit bare arrows. The bundled
- *  winmux tmux.conf binds Alt+Up/Down to copy-mode scroll at a shell
- *  prompt. Mirrors `use_winmux_tmux_config` (the two are a matched
- *  pair: our interception only makes sense with our conf's bindings). */
-let g_winmuxTmuxWheelScroll = true;
+/** Phase 65.O (round 6): one-time guard so the "no wheel proxy" note is
+ *  logged once, not once per pane. */
+let g_loggedNoWheelProxy = false;
 const g_terminals: Set<TerminalInstance> = new Set();
 
 /**
@@ -117,12 +112,6 @@ export function getRtlMode(): RtlMode {
 /** Phase 16: flip the Ctrl+C-copies-on-selection behavior at runtime. */
 export function setCtrlCCopyOnSelect(enabled: boolean): void {
   g_ctrlCCopyOnSelect = enabled;
-}
-
-/** Phase 65.O: flip the tmux wheel→copy-mode proxy at runtime. Wired to
- *  the `terminal.use_winmux_tmux_config` setting from App.tsx. */
-export function setWinmuxTmuxWheelScroll(enabled: boolean): void {
-  g_winmuxTmuxWheelScroll = enabled;
 }
 
 /** Paste arbitrary text into the active terminal. xterm.js will wrap
@@ -255,12 +244,6 @@ export class TerminalInstance {
   // from the right remote. null until connected (download needs a live
   // SSH session anyway).
   workspaceId: string | null = null;
-  // Phase 65.O: true when this pane is attached to a tmux session, so
-  // the wheel→Alt+Up/Down copy-mode proxy should run. Set by App.tsx
-  // from the pane-persistence map. Stays false for plain (non-tmux)
-  // panes — a local `vim` owns its own alt-screen with no tmux to
-  // translate the proxy keys, so those keep xterm's default alt-scroll.
-  tmuxScrollProxy = false;
   // Phase 62.C (J.1): one-shot diagnostic flag — have we yet seen an
   // OSC 8 hyperlink sequence arrive in this pane's stream? Logged once
   // (metadata only, Rule #1) so we can tell "Claude isn't emitting OSC 8"
@@ -438,97 +421,25 @@ export class TerminalInstance {
       showTerminalContextMenu(this, e.clientX, e.clientY);
     });
 
-    // Phase 65.O: tmux scrollback via the mouse wheel while keeping
-    // tmux `mouse off` (so native left-drag selection still works).
-    // Because tmux owns the alternate screen the whole time it runs,
-    // xterm.js's built-in alternate-scroll would turn each wheel tick
-    // into a bare Up/Down arrow — at a shell prompt that's history
-    // navigation, the v0.2.8 regression. Instead we send Alt+Up/Down,
-    // which the bundled winmux tmux.conf binds to copy-mode scroll at a
-    // shell prompt (and to plain arrows inside an alt-screen app like
-    // vim/less). Gated on `tmuxScrollProxy` so non-tmux panes (a local
-    // vim with no tmux to translate the proxy) keep xterm's default; and
-    // on the normal buffer we don't touch the wheel at all (real xterm
-    // scrollback handles it).
-    //
-    // CAPTURE PHASE (bug O round 2): xterm.js attaches its own wheel
-    // handler to the `.xterm-viewport` child, which fires on the bubble
-    // path BEFORE this container-level handler would in bubble phase —
-    // so the alt-scroll arrows were already sent and our preventDefault
-    // came too late. Registering in the capture phase + stopPropagation
-    // means we intercept the wheel before xterm's handler ever sees it.
-    this.container.addEventListener(
-      "wheel",
-      (e) => {
-        // Phase 65.O diagnostics (visible in the debug build's devtools):
-        // metadata only, never PTY content (Rule #1).
-        const onAlt = (() => {
-          try {
-            return this.term.buffer.active.type === "alternate";
-          } catch {
-            return false;
-          }
-        })();
-        // Phase 65.O round 5 (Yossi's breakthrough diag): if the running
-        // app requested mouse reporting (tmux with `mouse on`, vim/htop
-        // with mouse, etc.), xterm.js ALREADY sends native SGR mouse
-        // events for the wheel — and THAT is what scrolls. Our Alt+arrow
-        // proxy was preempting it (capture + preventDefault), so the app
-        // got arrows instead of mouse events and never scrolled. When
-        // mouse mode is on, step aside entirely and let xterm.js do its
-        // native thing. Our proxy is only for the mouse-OFF case.
-        let mouseMode = "none";
-        try {
-          mouseMode = this.term.modes.mouseTrackingMode ?? "none";
-        } catch {
-          mouseMode = "none";
-        }
-        if (mouseMode !== "none") {
-          console.log(
-            `[winmux O] wheel passthrough (app mouse mode=${mouseMode}) pane=${this.paneId} — xterm sends native SGR mouse events`,
-          );
-          return; // do NOT preventDefault — let xterm.js handle it
-        }
-        if (g_winmuxTmuxWheelScroll && this.tmuxScrollProxy && this.sessionId && onAlt) {
-          e.preventDefault();
-          e.stopPropagation();
-          // Phase 65.O round 3 (Yossi diag): the CSI-1;3 form (\e[1;3A)
-          // fired the proxy but tmux didn't react — it needs xterm
-          // extended-keys parsing. Use the classic ESC-prefix Alt+arrow
-          // form `\e\e[A` / `\e\e[B` instead: tmux reads the leading ESC
-          // as Meta + Up/Down → M-Up / M-Down (what the conf binds), the
-          // most widely-parsed encoding.
-          const seq = e.deltaY < 0 ? "\x1b\x1b[A" : "\x1b\x1b[B";
-          // Scale to the wheel delta so a fast flick scrolls further.
-          // deltaMode 1 = lines, 0 = pixels; normalize both to a small
-          // tick count (each proxy key scrolls ~3 lines via the conf).
-          const magnitude =
-            e.deltaMode === 1 ? Math.abs(e.deltaY) : Math.abs(e.deltaY) / 40;
-          const ticks = Math.max(1, Math.min(5, Math.round(magnitude)));
-          // Hex of the exact bytes sent to the PTY (metadata, not
-          // content — Rule #1), so the encoding is verifiable from F12.
-          const hex = Array.from(seq)
-            .map((c) => c.charCodeAt(0).toString(16).padStart(2, "0"))
-            .join(" ");
-          console.log(
-            `[winmux O] wheel→proxy pane=${this.paneId} deltaY=${e.deltaY} ticks=${ticks} dir=${e.deltaY < 0 ? "up" : "down"} sent=[${hex}]`,
-          );
-          for (let i = 0; i < ticks; i++) {
-            void invoke("pty_write", {
-              sessionId: this.sessionId,
-              data: seq,
-            }).catch((err) => console.error("pty_write (wheel) failed", err));
-          }
-        } else {
-          // Bailed — log WHY so the wheel regression is diagnosable from
-          // the devtools console without a rebuild.
-          console.log(
-            `[winmux O] wheel passthrough pane=${this.paneId} confEnabled=${g_winmuxTmuxWheelScroll} tmuxProxy=${this.tmuxScrollProxy} hasSession=${!!this.sessionId} onAlt=${onAlt} mouseMode=${mouseMode}`,
-          );
-        }
-      },
-      { capture: true, passive: false },
-    );
+    // Phase 65.O (round 6 — final): NO custom wheel handler. Earlier
+    // rounds intercepted the wheel and injected Alt+arrows to drive tmux
+    // copy-mode, but that fought xterm.js's native behaviour and broke
+    // the common case — Yossi's `TMUX=`(empty) / `#{mouse}`=0 diag showed
+    // the proxy was firing in a PLAIN bash shell (not even tmux), sending
+    // Alt+Up that bash read as history navigation. xterm.js's built-in
+    // wheel handling already does the right thing everywhere:
+    //   - plain shell (no tmux)      → scrolls xterm.js's own scrollback
+    //   - tmux + `mouse on`          → emits SGR mouse events; tmux scrolls
+    //   - tmux + `mouse off`         → scrolls xterm.js's scrollback
+    // So we simply let it be. `scrollback` is set in the Terminal options
+    // above; the bundled tmux.conf ships `mouse on` for native tmux
+    // scroll. (One-time note in the console for future debugging.)
+    if (!g_loggedNoWheelProxy) {
+      g_loggedNoWheelProxy = true;
+      console.log(
+        "[winmux] terminal: native wheel scrollback enabled, no wheel proxy",
+      );
+    }
 
     // Phase 15.A: only load the WebGL addon for the non-auto modes.
     // `auto_per_line` needs the DOM renderer so we can attach

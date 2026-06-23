@@ -20,7 +20,6 @@ import {
   copyTerminalSelection,
   pasteIntoActiveTerminal,
   setCtrlCCopyOnSelect,
-  setWinmuxTmuxWheelScroll,
 } from "./terminalInstance";
 import { saveRemoteFileAs } from "./download";
 import {
@@ -447,16 +446,8 @@ function App() {
     return ti;
   };
 
-  // Phase 65.O: keep each terminal's tmux wheel-proxy flag in sync with
-  // the pane-persistence map — presence there means the pane is attached
-  // to a tmux session, which is the only case where the wheel→Alt+Up/Down
-  // copy-mode proxy applies. (Plain panes keep xterm's default wheel.)
-  createEffect(() => {
-    const persist = panePersistence();
-    for (const [pid, ti] of terms) {
-      ti.tmuxScrollProxy = pid in persist;
-    }
-  });
+  // Phase 65.O (round 6): the tmux wheel-proxy was deleted — xterm.js
+  // handles the wheel natively in every case. No per-pane flag to sync.
 
   const setStatus = (paneId: string, msg: string, err: boolean) =>
     setPaneStatus({ ...paneStatus(), [paneId]: { msg, err } });
@@ -1536,9 +1527,6 @@ function App() {
       setCtrlCCopyOnSelect(
         (s.shortcuts ?? DEFAULT_SHORTCUTS).copy_on_select_with_ctrl_c,
       );
-      // Phase 65.O: tmux wheel→copy-mode proxy tracks the same setting
-      // that controls the bundled tmux.conf (they're a matched pair).
-      setWinmuxTmuxWheelScroll(s.terminal.use_winmux_tmux_config ?? true);
     } catch (e) {
       console.warn("settings_load failed", e);
     }
@@ -1759,9 +1747,6 @@ function App() {
         );
         setCtrlCCopyOnSelect(
           (e.payload.shortcuts ?? DEFAULT_SHORTCUTS).copy_on_select_with_ctrl_c,
-        );
-        setWinmuxTmuxWheelScroll(
-          e.payload.terminal.use_winmux_tmux_config ?? true,
         );
       })
     );

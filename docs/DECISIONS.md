@@ -25,6 +25,12 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-23 — Phase 65 O round 5 (build-7) — `1724fbe` — THE fix
+**Yossi's breakthrough:** with `tmux set -g mouse on` confirmed (`tmux show -g | grep mouse` → on), the wheel STILL didn't scroll and `[winmux O] wheel→proxy` kept firing. Root cause at last: **our proxy competes with xterm.js's native mouse handling.** When an app requests mouse reporting, xterm.js sends native SGR mouse events for the wheel (= the scroll); our capture-phase Alt+arrow proxy preempted that with `preventDefault`, so tmux got arrows, not mouse events.
+- **Fix 1 (terminalInstance.ts):** the wheel proxy checks `term.modes.mouseTrackingMode`; if it's not `"none"` (mouse on), it STEPS ASIDE (no preventDefault) → xterm.js sends native SGR mouse events → tmux scrolls. The proxy is now strictly the mouse-OFF fallback.
+- **Fix 2 (winmux-tmux.conf):** flipped default `mouse off` → **`mouse on`**. After 6 rounds, mouse-on + native SGR + tmux's `WheelUpPane` bindings is the reliable scroll path, and it composes with the round-4 auto-`source-file` (which would otherwise reset a manual mouse-on to off on every reconnect). **Trade-off (documented in conf):** selection now needs **Shift+drag** (bypasses tmux mouse capture → native xterm selection); Ctrl+Shift+C still copies. This reverses the Phase 60 mouse-off decision — flagged to Yossi; togglable via "Use winmux tmux config" off. Conf sha `fc076e0b`.
+- The Alt-arrow/M-Up + Shift+PageUp bindings remain as the mouse-off fallback.
+
 ### 2026-06-23 — Phase 65 O round 4 (build-6) — `b3921d6`
 Yossi's build-5 test: proxy fires (`wheel→proxy ticks=3`) but no hex line and tmux still doesn't scroll. Two findings + fixes:
 - **The conf wasn't loading without `tmux kill-server`.** Reconnecting a pane `tmux new-session -A`s onto the EXISTING session (old conf in the running server). **Fix:** the bootstrap now runs `tmux source-file ~/.winmux/tmux.conf` right after (re)uploading the drifted conf — `bind -n` is server-global, so one source-file applies the new wheel bindings to ALL live sessions immediately, no kill-server. THIS is the most likely reason O never worked.

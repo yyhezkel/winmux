@@ -2447,12 +2447,22 @@ async fn spawn_ssh(
     Ok(id)
 }
 
+/// Phase 65 (DD): despite the name, for SSH this is a DETACH, not a
+/// destroy — it closes the local SSH channel (`SshCmd::Kill` →
+/// `channel.close()`), which makes the remote tmux *client* exit; the
+/// tmux *session* keeps running on the server, so a later reconnect with
+/// the same (pane-deterministic) name reattaches it. The ONLY path that
+/// actually destroys a tmux session is `pane_kill_session`
+/// (`tmux kill-session`), wired to the explicit "Kill session" button.
 pub(crate) fn kill_session_inner(s: &mut Session) {
     match s {
         Session::Local(l) => {
             let _ = l.killer.kill();
         }
         Session::Ssh(ssh) => {
+            dlog(
+                "session detach: closing SSH channel (tmux session stays alive on the server for reconnect)",
+            );
             let _ = ssh.try_send(SshCmd::Kill);
         }
     }

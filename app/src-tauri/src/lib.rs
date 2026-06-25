@@ -1323,6 +1323,14 @@ pub(crate) fn schedule_status_clear(app: AppHandle, pane_id: String, secs: u64) 
 }
 
 fn emit_exit(app: &AppHandle, session_id: &str, reason: Option<String>) {
+    // Phase 65 (bug FF): log every PTY/SSH exit + reason so a spurious
+    // disconnect (e.g. "Claude quit closed the connection") is traceable
+    // in debug.log — pair this with the ssh-disconnect Eof/Close/transport
+    // lines to see WHY the channel ended (bash exit vs network vs RPC).
+    dlog(&format!(
+        "pty:exit session={session_id} reason={}",
+        reason.as_deref().unwrap_or("(none)")
+    ));
     let _ = app.emit(
         "pty:exit",
         PtyExitEvent {
@@ -2432,8 +2440,15 @@ async fn spawn_ssh(
                 pane_for_exec,
                 if use_winmux_tmux_conf { "with" } else { "without" }
             ));
+            // Phase 65 (bug EE): the bundled conf ships `mouse off` (the
+            // known-good display config — `mouse on` in the conf garbled
+            // Claude Code's live output). We still want tmux-native wheel
+            // scrollback, so turn mouse on via the new-session command
+            // chain (`\; set -g mouse on`) instead of in the conf. This
+            // applies it to the session at attach time, separate from the
+            // -f conf, exactly as Yossi asked.
             script.push_str(&format!(
-                "command -v tmux >/dev/null 2>&1 && exec tmux {flags}new-session -A -s {name} || echo '[winmux] tmux not installed on remote — falling back to plain shell'\r\n",
+                "command -v tmux >/dev/null 2>&1 && exec tmux {flags}new-session -A -s {name} \\; set -g mouse on || echo '[winmux] tmux not installed on remote — falling back to plain shell'\r\n",
                 flags = tmux_flags,
                 name = shell_quote(&name_clone)
             ));

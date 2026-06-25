@@ -375,21 +375,14 @@ async fn ensure_tmux_conf(
         return;
     }
     let _ = ssh_exec(handle, &format!("chmod 0644 {remote_conf}")).await;
-    // Phase 65.O: apply the refreshed conf to any ALREADY-RUNNING tmux
-    // server so new key bindings (e.g. the wheel→copy-mode M-Up) take
-    // effect on the user's existing sessions WITHOUT a `tmux kill-server`.
-    // `bind -n` bindings are server-global, so a single source-file
-    // updates every session. Best-effort: no tmux server / not installed
-    // → the `|| true` keeps it silent.
-    let _ = ssh_exec(
-        handle,
-        &format!(
-            "command -v tmux >/dev/null 2>&1 && tmux source-file {remote_conf} 2>/dev/null || true"
-        ),
-    )
-    .await;
+    // Phase 65 (bug EE): the round-4 `tmux source-file` auto-apply was
+    // removed. The conf now ships `mouse off`, and mouse-on is set
+    // per-session via the new-session command chain (`\; set -g mouse on`,
+    // see pane connect). Re-sourcing the conf into a running server would
+    // reset `mouse` back to off globally and fight that injection on
+    // every new pane. New sessions still pick up the conf via `-f`.
     dlog(&format!(
-        "bootstrap: tmux-conf uploaded ({} bytes) + sourced into live server",
+        "bootstrap: tmux-conf uploaded ({} bytes)",
         bytes.len()
     ));
 }

@@ -1211,6 +1211,10 @@ async fn dispatch(
                 .and_then(|v| v.as_str())
                 .ok_or("missing pane_id")?
                 .to_string();
+            // Phase 65 (bug FF): log remote-triggered disconnects so we can
+            // tell if something on the server (a hook / CLI call) is what
+            // closed the pane when Claude exited.
+            crate::dlog(&format!("rpc pane.disconnect (remote-triggered) pane={pane_id}"));
             // Mirror what pane_disconnect Tauri command does, minus the
             // teardown_command path (which only matters for app shutdown).
             let sid = state.core.pane_sessions.lock().unwrap().remove(&pane_id);

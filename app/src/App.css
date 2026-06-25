@@ -4291,7 +4291,13 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   flex: 1;
   overflow: hidden;
   display: flex;
-  /* FileManagerPane renders its own dual-column layout inside this. */
+  /* Phase 65 (bug 2.2): MUST be a positioning context. FileManagerPane's
+     root `.fm-pane` is `position:absolute; inset:0`; without a positioned
+     ancestor here it resolved against `.fm-window` (position:fixed) and
+     covered the WHOLE window — including the header — so every header
+     mousedown hit the pane, not the drag handler. `position:relative`
+     confines `.fm-pane` to the body, below the header. */
+  position: relative;
 }
 .fm-window-body > * { flex: 1; min-height: 0; }
 

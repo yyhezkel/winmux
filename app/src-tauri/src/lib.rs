@@ -1052,10 +1052,10 @@ fn line_ending_for(_kind: ShellKind) -> &'static str {
 }
 
 /// Phase 61: Smart Connect (mode="cmd"/"claude") injection script, shaped
-/// for the pane's shell. POSIX keeps the historical `exec` form (the
-/// launched process replaces the shell); PowerShell and Cmd have no
-/// `exec`, so the command runs in the shell and the user gets the prompt
-/// back when it exits. Returns "" when there is nothing to inject.
+/// for the pane's shell. Phase 65 (bug FF): the command runs as a normal
+/// child on every shell (no `exec`), so quitting it returns to the shell
+/// prompt instead of dropping the PTY/SSH. Returns "" when there is
+/// nothing to inject.
 fn build_smart_connect_script(
     kind: ShellKind,
     mode: &str,
@@ -1088,9 +1088,16 @@ fn build_smart_connect_script(
         return String::new();
     }
     match kind {
+        // Phase 65 (bug FF): do NOT `exec` the command. `exec claude`
+        // replaced the shell with claude, so quitting claude
+        // (Ctrl+C Ctrl+C) left no shell — the PTY's process exited and
+        // the SSH channel dropped ("the connection closes"). Running it
+        // as a normal child returns to the shell prompt on exit, keeping
+        // the pane/SSH alive. (Happens with or without tmux; PowerShell/
+        // Cmd never exec'd, so they were already fine.)
         ShellKind::Posix => match (run.as_deref(), cwd) {
-            (Some(r), Some(d)) => format!("cd {} && exec {r}\r\n", shell_quote(d)),
-            (Some(r), None) => format!("exec {r}\r\n"),
+            (Some(r), Some(d)) => format!("cd {} && {r}\r\n", shell_quote(d)),
+            (Some(r), None) => format!("{r}\r\n"),
             (None, Some(d)) => format!("cd {}\r\n", shell_quote(d)),
             (None, None) => String::new(),
         },

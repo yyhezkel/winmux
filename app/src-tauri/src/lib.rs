@@ -2414,6 +2414,17 @@ async fn spawn_ssh(
             } else {
                 ""
             };
+            // Phase 65: log the exact session name + conf mode so tmux
+            // persistence is debuggable. `new-session -A -s <name>`
+            // attaches to <name> if it exists (reconnect resumes), else
+            // creates it. <name> is deterministic per winmux pane unless
+            // the picker supplied an explicit one.
+            crate::dlog(&format!(
+                "tmux: new-session -A -s '{}' (pane {}, {} winmux conf)",
+                name_clone,
+                pane_for_exec,
+                if use_winmux_tmux_conf { "with" } else { "without" }
+            ));
             script.push_str(&format!(
                 "command -v tmux >/dev/null 2>&1 && exec tmux {flags}new-session -A -s {name} || echo '[winmux] tmux not installed on remote — falling back to plain shell'\r\n",
                 flags = tmux_flags,

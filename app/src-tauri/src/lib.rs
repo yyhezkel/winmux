@@ -1088,16 +1088,21 @@ fn build_smart_connect_script(
         return String::new();
     }
     match kind {
-        // Phase 65 (bug FF): do NOT `exec` the command. `exec claude`
-        // replaced the shell with claude, so quitting claude
-        // (Ctrl+C Ctrl+C) left no shell — the PTY's process exited and
-        // the SSH channel dropped ("the connection closes"). Running it
-        // as a normal child returns to the shell prompt on exit, keeping
-        // the pane/SSH alive. (Happens with or without tmux; PowerShell/
-        // Cmd never exec'd, so they were already fine.)
+        // Phase 65 (bug FF round 2): run the command, THEN hand off to a
+        // fresh interactive shell (`; exec "$SHELL"`). Just removing the
+        // old `exec claude` wasn't enough — quitting Claude (Ctrl+C
+        // Ctrl+C) still dropped the SSH channel (debug.log: "clean Eof /
+        // exit 0", i.e. the interactive bash itself exited on an EOF right
+        // after Claude). Chaining `; exec "$SHELL"` means the shell never
+        // gets a chance to read that stray EOF — it replaces itself with a
+        // brand-new interactive shell the moment Claude returns, so the
+        // PTY/SSH stays alive and the user lands back at a prompt. (Yossi's
+        // `claude; exec bash` idea, generalized to the user's $SHELL.)
         ShellKind::Posix => match (run.as_deref(), cwd) {
-            (Some(r), Some(d)) => format!("cd {} && {r}\r\n", shell_quote(d)),
-            (Some(r), None) => format!("{r}\r\n"),
+            (Some(r), Some(d)) => {
+                format!("cd {} && {r}; exec \"${{SHELL:-bash}}\"\r\n", shell_quote(d))
+            }
+            (Some(r), None) => format!("{r}; exec \"${{SHELL:-bash}}\"\r\n"),
             (None, Some(d)) => format!("cd {}\r\n", shell_quote(d)),
             (None, None) => String::new(),
         },

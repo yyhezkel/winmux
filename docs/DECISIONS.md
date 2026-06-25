@@ -25,6 +25,13 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-25 — Phase 65 CRITICAL: invalid tmux key names broke sessions — `34e262a`
+- **Report (Yossi):** open tmux sessions "closed one after another"; reconnect showed `exec tmux -f ~/.winmux/tmux.conf new-session -A -s …` → `[exited]` (tmux exited immediately, no session).
+- **Root cause:** the round-4 (build #6) Shift+Page scrollback bindings used **`S-PageUp` / `S-PageDown`**, but tmux's key names are **`PPage` / `NPage`**. An unknown key in `bind` is a config ERROR, and `tmux -f <conf> new-session` aborts on a config error → tmux exits before the session starts. Shipped broken in builds #6–#10. Existing detached sessions stayed alive in the server (a new client's bad conf doesn't kill them), but every reconnect failed, so they appeared to vanish.
+- **Fix:** `S-PageUp`→`S-PPage`, `S-PageDown`→`S-NPage`; trimmed the meaningless root page-down bind. Conf sha `23e5d936`; bootstrap re-uploads + source-files on next connect (recovers the live server, no kill-server). Added a dlog of the exact `new-session -A -s '<name>'`. Naming was never the bug — it's deterministic (`sanitize_tmux_session_name(pane_id)`, `-A` reattaches); random `new_…` names only come from the picker's explicit "new session".
+- **Lesson:** never hand-edit the bundled tmux.conf without validating against real tmux key names — a single bad `bind` aborts the whole conf and takes tmux down. (No tmux on the Windows dev box to lint it; be conservative.)
+- **Recovery for Yossi:** old detached sessions are likely still alive — `tmux ls` on the server, or the in-app tmux picker lists them to reattach by name.
+
 ### 2026-06-24 — Phase 65 O round 6 (build-8) — `da6c4f7` — RESOLVED (proxy deleted)
 **The real diagnosis:** Yossi ran `echo "TMUX=$TMUX"` → empty, `tmux display-message -p '#{mouse}'` → 0. He was in a **plain bash shell, not tmux at all** — yet the proxy still fired and sent Alt+Up, which bash read as history navigation ("scrolling the CLI line"). The proxy was never helping; it was breaking the common case.
 - **Fix: deleted the entire custom wheel handler** + all plumbing (`g_winmuxTmuxWheelScroll`/setter, `tmuxScrollProxy` field, the App.tsx pane-persistence sync effect + setter calls; −128 lines). xterm.js's native wheel handling is correct everywhere: plain shell → xterm scrollback; tmux+`mouse on` → SGR mouse → tmux native scroll; tmux+`mouse off` → xterm scrollback.

@@ -69,6 +69,12 @@ export interface HooksSettings {
    *  matches `.*` (every tool surfaces a winmux card); "custom" leaves
    *  whatever the user hand-edited and never overwrites. */
   matcher_mode?: "restrictive" | "all" | "custom";
+  /** Phase 66 (66.D): master switch for the 3-state policy engine
+   *  (auto/gate/block) in the desktop feed.push handler. Default true. */
+  policy_enabled?: boolean;
+  /** Phase 66 (66.B): auto-run `winmux setup-hooks` on the remote during
+   *  bootstrap so a fresh server starts surfacing cards. Default true. */
+  auto_install?: boolean;
 }
 
 export interface NotificationSettings {

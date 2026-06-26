@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "cli", "mcp", "crates/winmux-types", "crates/winmux-core", "crates/winmux-tunnel", "crates/winmux-bootstrap", "crates/winmux-ssh"]
+members = [".", "cli", "mcp", "crates/winmux-types", "crates/winmux-core", "crates/winmux-tunnel", "crates/winmux-bootstrap", "crates/winmux-ssh", "crates/winmux-policy"]
 resolver = "2"
 
 # Pre-public hardening: strip symbols from release builds. The
@@ -82,6 +82,8 @@ winmux-tunnel = { path = "crates/winmux-tunnel" }
 winmux-bootstrap = { path = "crates/winmux-bootstrap" }
 # Phase 51.H: SSH auth primitives (try_authenticate + try_agent_auth).
 winmux-ssh = { path = "crates/winmux-ssh" }
+# Phase 66: shared 3-state tool-permission policy engine (auto/gate/block).
+winmux-policy = { path = "crates/winmux-policy" }
 # Phase 57: zip/unzip on the local side of the file manager. Default
 # features include `deflate` which covers the common-case .zip
 # everyone produces; AES + Bzip2 + Zstd are turned off to keep the

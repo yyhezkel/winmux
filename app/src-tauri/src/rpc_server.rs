@@ -220,6 +220,48 @@ fn show_toast(title: &str, body: &str) {
     });
 }
 
+/// Phase 66 (66.D): record a passive feed item for a policy decision that
+/// resolved WITHOUT a card (an Auto allow or a Block deny). Gives the user
+/// an audit trail in the feed — "what did winmux silently allow / block?"
+/// — without ever blocking the agent. Mirrors the passive-item registration
+/// in the feed.push handler.
+fn push_policy_audit(
+    state: &AppState,
+    app: &AppHandle,
+    req_id: &str,
+    subkind: &str,
+    title: &str,
+    summary: &str,
+    pane_id: Option<String>,
+    workspace_id: Option<String>,
+) {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let item = FeedItem {
+        request_id: req_id.to_string(),
+        kind: "passive".to_string(),
+        subkind: subkind.to_string(),
+        pane_id,
+        workspace_id,
+        title: title.to_string(),
+        summary: summary.to_string(),
+        payload: json!({}),
+        state: FeedItemState::Passive,
+        created_ms: now_ms,
+        blocking: false,
+    };
+    {
+        let mut store = state.feed.lock().unwrap();
+        store.items.push_back(item.clone());
+        while store.items.len() > FEED_MAX_ITEMS_LIMIT {
+            store.items.pop_front();
+        }
+    }
+    let _ = app.emit("feed:item-added", &item);
+}
+
 // Phase 53 (rebased): the `kind: "browser"` arm of `pane.split`
 // remains so an older CLI / agent script that still passes that
 // string still works — the spawned pane gets the deprecated
@@ -235,6 +277,11 @@ async fn dispatch(
     app: &AppHandle,
 ) -> Result<Value, String> {
     match method {
+        // Phase 66 (66.D.2): lightweight liveness probe. The remote
+        // claude-hook pings this before a blocking permission request so it
+        // can fall back to its static policy fast when the desktop is
+        // unreachable, instead of stalling the agent on the full timeout.
+        "ping" => Ok(json!({ "ok": true })),
         "list-workspaces" => {
             let file = state.workspaces.lock().unwrap().clone();
             serde_json::to_value(&file).map_err(|e| e.to_string())
@@ -933,6 +980,79 @@ async fn dispatch(
             ));
 
             let blocking = matches!(kind.as_str(), "permission_request");
+
+            // ── Phase 66 (66.D): 3-state policy engine ──────────────────
+            // Before a pre-tool-use request becomes a blocking approval
+            // card, run the user's policy. This is the fix for the original
+            // foot-gun where EVERY tool call blocked (and timed out →
+            // denied) in `default` permission_mode:
+            //   Auto  → allow instantly, no card (the common case).
+            //   Block → deny instantly, no card (+ a toast + audit item).
+            //   Gate  → fall through to the blocking card (current path).
+            // Only Gate blocks; Auto/Block answer the hook immediately so
+            // the agent never stalls on a safe or an obviously-dangerous
+            // command. The same evaluator runs in the remote CLI as a
+            // static fallback when this desktop is unreachable (66.D.1).
+            if blocking && subkind == "pre-tool-use" {
+                let policy_on = settings::load_from_disk()
+                    .map(|s| s.hooks.policy_enabled)
+                    .unwrap_or(true);
+                if policy_on {
+                    let tool_name = payload
+                        .get("tool_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let bash_cmd = payload
+                        .get("tool_input")
+                        .and_then(|ti| ti.get("command"))
+                        .and_then(|c| c.as_str());
+                    let verdict = winmux_policy::evaluate(tool_name, bash_cmd);
+                    crate::dlog(&format!(
+                        "feed.push: policy tool={} decision={:?} matched={:?} req_id={}",
+                        tool_name, verdict.decision, verdict.matched, req_id
+                    ));
+                    match verdict.decision {
+                        winmux_policy::Decision::Auto => {
+                            push_policy_audit(
+                                state,
+                                app,
+                                &req_id,
+                                "policy-auto",
+                                &format!("✓ {tool_name}"),
+                                &verdict.reason,
+                                pane_id.clone(),
+                                workspace_id.clone(),
+                            );
+                            return Ok(json!({
+                                "request_id": req_id,
+                                "decision": "allow",
+                                "policy": "auto",
+                            }));
+                        }
+                        winmux_policy::Decision::Block => {
+                            push_policy_audit(
+                                state,
+                                app,
+                                &req_id,
+                                "policy-block",
+                                &format!("⛔ Blocked: {tool_name}"),
+                                &verdict.reason,
+                                pane_id.clone(),
+                                workspace_id.clone(),
+                            );
+                            show_toast(&format!("⛔ Blocked: {tool_name}"), &verdict.reason);
+                            return Ok(json!({
+                                "request_id": req_id,
+                                "decision": "deny",
+                                "policy": "block",
+                            }));
+                        }
+                        // Gate: fall through to the blocking card below.
+                        winmux_policy::Decision::Gate => {}
+                    }
+                }
+            }
+
             let now_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_millis())

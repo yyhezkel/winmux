@@ -10,4 +10,20 @@ export type Hooks = { enabled: boolean, agents: Array<string>, policy_preset: st
  * by `winmux setup-hooks`. The setting is consumed by the desktop's
  * remote-side setup-hooks call (Phase 18 wraps `agent.setup_hooks`).
  */
-matcher_mode: string, };
+matcher_mode: string, 
+/**
+ * Phase 66 (66.D): master switch for the 3-state policy engine
+ * (auto / gate / block) that runs in the desktop `feed.push` handler.
+ * When false, every pre-tool-use request becomes a blocking card (the
+ * pre-66 behavior). Default true. Older settings.json without the
+ * field loads with the engine ON.
+ */
+policy_enabled: boolean, 
+/**
+ * Phase 66 (66.B): when true (default), the SSH bootstrap auto-runs
+ * `winmux setup-hooks` on the remote after deploying the CLI, so a
+ * fresh server starts surfacing permission cards without the user
+ * invoking setup-hooks by hand. No-op if Claude Code isn't installed
+ * remotely. Older settings.json loads with auto-install ON.
+ */
+auto_install: boolean, };

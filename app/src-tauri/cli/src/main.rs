@@ -47,6 +47,99 @@ fn hook_dlog(msg: &str) {
     }
 }
 
+/// Phase 66 (66.D.1): the CLI's own copy of the permission policy, used
+/// ONLY when the desktop is unreachable. The historical failure mode was
+/// that hook calls never reached the desktop, the blocking request timed
+/// out, and the timeout was conservatively denied — so Claude could not
+/// run a single tool (not even a read). With this fallback the agent keeps
+/// moving on safe defaults even with no desktop: Block → deny; Auto →
+/// allow; Gate → allow (there's nobody to approve a card here — the
+/// desktop path is what actually gates). Returns (permissionDecision,
+/// reason).
+fn static_fallback_decision(payload: &Value) -> (&'static str, String) {
+    let tool_name = payload
+        .get("tool_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let bash_cmd = payload
+        .get("tool_input")
+        .and_then(|ti| ti.get("command"))
+        .and_then(|c| c.as_str());
+    let verdict = winmux_policy::evaluate(tool_name, bash_cmd);
+    match verdict.decision {
+        winmux_policy::Decision::Block => ("deny", verdict.reason),
+        winmux_policy::Decision::Gate => (
+            "allow",
+            format!(
+                "{} [static fallback: desktop unreachable, allowing]",
+                verdict.reason
+            ),
+        ),
+        winmux_policy::Decision::Auto => ("allow", verdict.reason),
+    }
+}
+
+/// Phase 66 (66.D.2): print the Claude Code v2.1+ PreToolUse hook output
+/// (exit 0 + this JSON is the in-band signaling).
+fn print_pre_tool_use(decision: &str, reason: Option<&str>) {
+    let mut hso = json!({
+        "hookEventName": "PreToolUse",
+        "permissionDecision": decision,
+    });
+    if let Some(r) = reason {
+        hso["permissionDecisionReason"] = json!(r);
+    }
+    let out = json!({ "hookSpecificOutput": hso });
+    println!("{}", serde_json::to_string(&out).unwrap_or_default());
+}
+
+/// Phase 66 (66.D.2): quick liveness probe of the desktop RPC endpoint.
+/// Two short attempts; returns false fast when the tunnel / pipe is down
+/// so the caller can fall back to the static policy instead of burning the
+/// full blocking timeout.
+async fn tunnel_healthy() -> bool {
+    for attempt in 0..2u32 {
+        let r = tokio::time::timeout(
+            std::time::Duration::from_millis(1800),
+            rpc_call("ping", json!({})),
+        )
+        .await;
+        match r {
+            Ok(Ok(_)) => return true,
+            Ok(Err(e)) => hook_dlog(&format!("claude-hook ping attempt={attempt} err={e}")),
+            Err(_) => hook_dlog(&format!("claude-hook ping attempt={attempt} timed out")),
+        }
+        if attempt == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    }
+    false
+}
+
+/// Phase 66 (66.D.2): feed.push with a small retry on *connection* failure.
+/// Only connection errors retry — a returned `timeout` verdict means we DID
+/// reach the desktop, so it's surfaced as-is (retrying would double the
+/// user's wait).
+async fn feed_push_with_retry(params: &Value, max_attempts: u32) -> Result<Value, String> {
+    let mut last = String::from("no attempts");
+    for attempt in 0..max_attempts {
+        match rpc_call("feed.push", params.clone()).await {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                hook_dlog(&format!(
+                    "claude-hook feed.push attempt={attempt} err={e}"
+                ));
+                last = e;
+                if attempt + 1 < max_attempts {
+                    let ms = if attempt == 0 { 200 } else { 500 };
+                    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "winmux",
@@ -1762,20 +1855,38 @@ async fn real_main() -> ExitCode {
                  timeout_secs={timeout_secs}"
             ));
 
-            let result = rpc_call(
-                "feed.push",
-                json!({
-                    "request_id": request_id,
-                    "kind": kind,
-                    "subkind": subcommand,
-                    "pane_id": pane_id,
-                    "title": title,
-                    "summary": summary,
-                    "payload": payload,
-                    "wait_timeout_seconds": timeout_secs,
-                }),
-            )
-            .await;
+            let push_params = json!({
+                "request_id": request_id,
+                "kind": kind,
+                "subkind": subcommand,
+                "pane_id": pane_id,
+                "title": title,
+                "summary": summary,
+                "payload": payload,
+                "wait_timeout_seconds": timeout_secs,
+            });
+
+            // Phase 66 (66.D.2): for pre-tool-use, probe the tunnel first.
+            // If the desktop is unreachable, use the static policy NOW
+            // instead of burning the full blocking timeout and then denying
+            // — the exact stall that wedged Claude historically.
+            if subcommand == "pre-tool-use" && !tunnel_healthy().await {
+                let (decision, reason) = static_fallback_decision(&payload);
+                hook_dlog(&format!(
+                    "claude-hook BRANCH=static-fallback-healthcheck \
+                     decision={decision} request_id={request_id} reason={reason:?}"
+                ));
+                print_pre_tool_use(decision, Some(&reason));
+                return ExitCode::SUCCESS;
+            }
+
+            // Phase 66 (66.D.2): retry the push on connection failure (not
+            // on a timeout verdict — that means we reached the desktop).
+            let result = if subcommand == "pre-tool-use" {
+                feed_push_with_retry(&push_params, 2).await
+            } else {
+                rpc_call("feed.push", push_params).await
+            };
 
             match result {
                 Ok(v) => {
@@ -1865,19 +1976,22 @@ async fn real_main() -> ExitCode {
                          (Claude Code's built-in UI will be shown)"
                     ));
                     eprintln!(
-                        "winmux claude-hook: pipe error: {} (falling back to Claude Code UI)",
+                        "winmux claude-hook: pipe error: {} (using static fallback policy)",
                         e
                     );
                     match subcommand.as_str() {
                         "pre-tool-use" => {
-                            let out = json!({
-                                "hookSpecificOutput": {
-                                    "hookEventName": "PreToolUse",
-                                    "permissionDecision": "ask",
-                                    "permissionDecisionReason": "winmux unreachable",
-                                }
-                            });
-                            println!("{}", serde_json::to_string(&out).unwrap_or_default());
+                            // Phase 66 (66.D.1): desktop unreachable even
+                            // after the healthcheck + retry — decide with the
+                            // CLI's static policy so Claude keeps moving on
+                            // safe defaults rather than denying everything.
+                            let (decision, reason) = static_fallback_decision(&payload);
+                            hook_dlog(&format!(
+                                "claude-hook BRANCH=static-fallback-rpc-error \
+                                 decision={decision} request_id={request_id} \
+                                 reason={reason:?} error={e}"
+                            ));
+                            print_pre_tool_use(decision, Some(&reason));
                             return ExitCode::SUCCESS;
                         }
                         "notification" | "session-start" | "session-end" | "stop" => {

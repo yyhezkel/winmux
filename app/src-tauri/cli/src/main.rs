@@ -1700,6 +1700,18 @@ async fn real_main() -> ExitCode {
             }
         },
         Cmd::ClaudeHook { subcommand } => {
+            // Phase 66 (wiring fix): load the fallback env file FIRST, before
+            // the env-gate / permission-mode checks read WINMUX_PANE_ID.
+            // sshd usually rejects `set_env` for WINMUX_* (AcceptEnv only
+            // lists LANG/LC_*), so on a plain (non-tmux) shell those vars
+            // never reach the process env — only `~/.winmux/run/last.env`
+            // has them. Previously this file was loaded lazily inside
+            // rpc_call (AFTER the env-gate), so the env-gate saw PANE_ID
+            // unset → it treated a real winmux session as "not winmux"
+            // (old CLI: ask/block; new CLI: allow-but-never-gate, no cards).
+            // Loading it here makes the env-gate, permission-mode shortcut,
+            // and the RPC dial all see the real pane id + socket + token.
+            load_fallback_env_file();
             let mut buf = String::new();
             let _ = std::io::stdin().read_to_string(&mut buf);
             let payload: Value = if buf.trim().is_empty() {

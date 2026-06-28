@@ -596,6 +596,7 @@
   "connectExisting.status.plain": "متصل (بدون sudo)",
   "connectExisting.mode.existing": "استخدام مستخدم موجود",
   "connectExisting.mode.existing.hint": "تثبيت مفتاح لحساب موجود بالفعل على الخادم.",
+  "connectExisting.mode.existing.none": "لم يتم العثور على حسابات غير root على هذا الخادم — أنشئ مستخدمًا مخصصًا أدناه.",
   "connectExisting.mode.new": "إنشاء مستخدم جديد",
   "connectExisting.mode.new.hint": "إنشاء حساب مخصص لـ winmux وتثبيت مفتاح له.",
   "connectExisting.mode.new.needsSudo": "يتطلب إنشاء مستخدم صلاحية root أو sudo بدون كلمة مرور، وهي غير متوفرة لهذا الحساب.",

@@ -596,6 +596,7 @@
   "connectExisting.status.plain": "מחובר (ללא sudo)",
   "connectExisting.mode.existing": "השתמש במשתמש קיים",
   "connectExisting.mode.existing.hint": "התקן מפתח עבור חשבון שכבר קיים בשרת.",
+  "connectExisting.mode.existing.none": "לא נמצאו חשבונות שאינם root בשרת — צור משתמש ייעודי למטה.",
   "connectExisting.mode.new": "צור משתמש חדש",
   "connectExisting.mode.new.hint": "צור חשבון ייעודי עבור winmux והתקן עבורו מפתח.",
   "connectExisting.mode.new.needsSudo": "יצירת משתמש דורשת root או sudo ללא סיסמה, שאין לחשבון זה.",

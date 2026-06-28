@@ -304,7 +304,18 @@ export function ProvisioningWizard(p: Props) {
                   behaviour. */}
               <div class="provisioning-mode">
                 <p class="settings-hint">{t("provisioning.mode.label")}</p>
-                <label class="provisioning-mode-row">
+                {/* Phase 65.R-fix: the whole row carries the onClick (not just
+                    the native radio) so a webview that swallows the radio's
+                    change event still switches modes. Each click logs to the
+                    captured console so a "stuck in new mode" report can be
+                    diagnosed from `winmux dev console-tail`. */}
+                <label
+                  class={`provisioning-mode-row ${mode() === "new" ? "active" : ""}`}
+                  onClick={() => {
+                    console.log("[provision] mode → new");
+                    setMode("new");
+                  }}
+                >
                   <input
                     type="radio"
                     name="provisioning-mode"
@@ -313,11 +324,17 @@ export function ProvisioningWizard(p: Props) {
                     onChange={() => setMode("new")}
                   />
                   <span>
-                    <strong>{t("provisioning.mode.new")}</strong>
+                    <strong>🆕 {t("provisioning.mode.new")}</strong>
                     <span class="provisioning-mode-hint">{t("provisioning.mode.new.hint")}</span>
                   </span>
                 </label>
-                <label class="provisioning-mode-row">
+                <label
+                  class={`provisioning-mode-row ${mode() === "existing" ? "active" : ""}`}
+                  onClick={() => {
+                    console.log("[provision] mode → existing");
+                    setMode("existing");
+                  }}
+                >
                   <input
                     type="radio"
                     name="provisioning-mode"
@@ -326,7 +343,7 @@ export function ProvisioningWizard(p: Props) {
                     onChange={() => setMode("existing")}
                   />
                   <span>
-                    <strong>{t("provisioning.mode.existing")}</strong>
+                    <strong>🔗 {t("provisioning.mode.existing")}</strong>
                     <span class="provisioning-mode-hint">{t("provisioning.mode.existing.hint")}</span>
                   </span>
                 </label>

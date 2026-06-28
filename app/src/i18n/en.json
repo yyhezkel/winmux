@@ -596,6 +596,7 @@
   "connectExisting.status.plain": "Connected (no sudo)",
   "connectExisting.mode.existing": "Use an existing user",
   "connectExisting.mode.existing.hint": "Install a key for an account that already exists on the server.",
+  "connectExisting.mode.existing.none": "No non-root accounts found on this server — create a dedicated user below.",
   "connectExisting.mode.new": "Create a new user",
   "connectExisting.mode.new.hint": "Create a dedicated account for winmux and install a key for it.",
   "connectExisting.mode.new.needsSudo": "Creating a user needs root or passwordless sudo, which this account doesn't have.",

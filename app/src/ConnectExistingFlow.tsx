@@ -77,9 +77,19 @@ export function ConnectExistingFlow(p: Props) {
         password: password(),
       });
       setDiscovery(d);
-      // Seed the choose-step defaults from what we found.
-      setExistingUser(d.users[0] ?? user().trim());
-      if (!d.can_sudo) setMode("existing");
+      // Phase 65.R-fix: steer away from root. The backend now excludes
+      // root/system accounts from `users`, so on a fresh VPS (root-only)
+      // the list is empty → force "create a new dedicated user". Only when
+      // a real non-root account already exists do we default to picking it.
+      // We never seed `existingUser` with the auth user (which is usually
+      // root) — that's the trap that re-created a root workspace.
+      if (d.users.length > 0) {
+        setExistingUser(d.users[0]);
+        setMode("existing");
+      } else {
+        setExistingUser("");
+        setMode("new");
+      }
       setStep("choose");
     } catch (e) {
       setAuthError(friendlyError(String(e)));
@@ -232,6 +242,7 @@ export function ConnectExistingFlow(p: Props) {
                   name="connect-existing-mode"
                   value="existing"
                   checked={mode() === "existing"}
+                  disabled={d.users.length === 0}
                   onChange={() => setMode("existing")}
                 />
                 <span>
@@ -241,7 +252,15 @@ export function ConnectExistingFlow(p: Props) {
                   </span>
                 </span>
               </label>
-              <Show when={mode() === "existing"}>
+              {/* Phase 65.R-fix: fresh / root-only server — no non-root
+                  account to pick, so the existing option is disabled and we
+                  point the user at "create a new user" instead. */}
+              <Show when={d.users.length === 0}>
+                <p class="settings-hint">
+                  {t("connectExisting.mode.existing.none")}
+                </p>
+              </Show>
+              <Show when={mode() === "existing" && d.users.length > 0}>
                 <label>
                   <span>{t("connectExisting.field.existingUser")}</span>
                   <select

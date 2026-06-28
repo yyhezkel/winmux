@@ -1431,7 +1431,14 @@ async fn connect_existing_discover_inner(
         let bad_shell = shell.ends_with("nologin")
             || shell.ends_with("false")
             || shell.ends_with("/sync");
-        let real = uid == 0 || (uid >= 1000 && uid < 65000);
+        // Phase 65.R-fix: only REAL login accounts are pickable as the
+        // target. root (uid 0) is deliberately EXCLUDED — the whole point
+        // of this flow is to set up a dedicated non-root key user, not to
+        // re-connect as root. On a fresh VPS (root-only) this leaves the
+        // list empty, which the UI uses to force "create a new user". The
+        // `is_root` / `can_sudo` flags above still tell the UI that
+        // creating a user is possible.
+        let real = uid >= 1000 && uid < 65000;
         if real && !bad_shell && !f[0].is_empty() {
             users.push(f[0].to_string());
         }

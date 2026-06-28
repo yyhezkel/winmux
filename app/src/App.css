@@ -2561,9 +2561,19 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 6px 0;
+  padding: 8px 10px;
   cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 6px;
 }
+/* Phase 65.R-fix: make the selected mode unmistakable — the prior flat
+   radios gave no strong "this is active" signal, so users couldn't tell
+   they were still on the default (new-server) mode. */
+.provisioning-mode-row.active {
+  background: var(--w-surface-2, rgba(122, 162, 247, 0.08));
+  border-color: var(--w-accent, #7aa2f7);
+}
+.provisioning-mode-row.active strong { color: var(--w-accent, #7aa2f7); }
 .provisioning-mode-row input[type="radio"] { margin-top: 3px; }
 .provisioning-mode-row > span { display: flex; flex-direction: column; gap: 2px; }
 .provisioning-mode-row strong {

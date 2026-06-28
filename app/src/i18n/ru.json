@@ -596,6 +596,7 @@
   "connectExisting.status.plain": "Подключено (без sudo)",
   "connectExisting.mode.existing": "Использовать существующего пользователя",
   "connectExisting.mode.existing.hint": "Установить ключ для учётной записи, уже существующей на сервере.",
+  "connectExisting.mode.existing.none": "На сервере не найдено учётных записей кроме root — создайте отдельного пользователя ниже.",
   "connectExisting.mode.new": "Создать нового пользователя",
   "connectExisting.mode.new.hint": "Создать выделенную учётную запись для winmux и установить для неё ключ.",
   "connectExisting.mode.new.needsSudo": "Для создания пользователя нужен root или sudo без пароля, которых у этой учётной записи нет.",

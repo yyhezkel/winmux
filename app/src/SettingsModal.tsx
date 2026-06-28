@@ -491,6 +491,17 @@ export function SettingsModal(p: Props) {
                       </label>
                     )}
                   </For>
+                  <label class="settings-checkbox" style="margin-top:8px">
+                    <input
+                      type="checkbox"
+                      checked={p.settings.terminal.mirror_arrows_rtl ?? true}
+                      onChange={(e) => update("terminal", { ...p.settings.terminal, mirror_arrows_rtl: e.currentTarget.checked })}
+                    />
+                    <span>{t("settings.terminal.mirror_arrows_rtl.label")}</span>
+                  </label>
+                  <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
+                    {t("settings.terminal.mirror_arrows_rtl.hint")}
+                  </p>
                 </section>
               </Show>
 

@@ -193,6 +193,13 @@ pub(crate) struct TerminalSettings {
     /// toggle takes effect on the NEXT pane connect.
     #[serde(default = "default_true")]
     pub use_winmux_tmux_config: bool,
+    /// Phase HH: mirror the physical Left/Right arrow keys when the
+    /// terminal line under the cursor is right-to-left (Hebrew/Arabic).
+    /// In an RTL line the visual "right" is logical "left", so without
+    /// this the arrows feel inverted. Only takes effect on RTL lines —
+    /// LTR lines are unaffected — so it's safe to leave on (default true).
+    #[serde(default = "default_true")]
+    pub mirror_arrows_rtl: bool,
 }
 
 fn default_rtl_mode() -> String {
@@ -613,6 +620,7 @@ impl Default for TerminalSettings {
             allow_proposed_api: true,
             rtl_mode: default_rtl_mode(),
             use_winmux_tmux_config: true,
+            mirror_arrows_rtl: true,
         }
     }
 }

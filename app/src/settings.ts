@@ -58,6 +58,9 @@ export interface TerminalSettings {
    *  `-f ~/.winmux/tmux.conf` for sane scrollback / mouse behaviour.
    *  Set false to fall back to the user's own ~/.tmux.conf. */
   use_winmux_tmux_config?: boolean;
+  /** Phase HH: mirror Left/Right arrows on RTL (Hebrew/Arabic) lines.
+   *  Only active when the cursor's line is RTL; default true. */
+  mirror_arrows_rtl?: boolean;
 }
 
 export interface HooksSettings {

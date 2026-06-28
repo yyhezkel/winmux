@@ -19,4 +19,12 @@ rtl_mode: string,
  * conf file is uploaded by the bootstrap regardless, so the
  * toggle takes effect on the NEXT pane connect.
  */
-use_winmux_tmux_config: boolean, };
+use_winmux_tmux_config: boolean, 
+/**
+ * Phase HH: mirror the physical Left/Right arrow keys when the
+ * terminal line under the cursor is right-to-left (Hebrew/Arabic).
+ * In an RTL line the visual "right" is logical "left", so without
+ * this the arrows feel inverted. Only takes effect on RTL lines —
+ * LTR lines are unaffected — so it's safe to leave on (default true).
+ */
+mirror_arrows_rtl: boolean, };

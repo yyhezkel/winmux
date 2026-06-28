@@ -58,6 +58,9 @@ let g_rtlMode: RtlMode = "auto_per_line";
  *  selection to clipboard instead of sending SIGINT. Mirrors Windows
  *  Terminal / VS Code's behavior. Settings → Shortcuts toggles it. */
 let g_ctrlCCopyOnSelect = true;
+/** Phase HH: mirror Left/Right arrows on RTL lines (default on; only
+ *  active when the cursor's line is actually RTL). Settings → Terminal. */
+let g_mirrorArrowsRtl = true;
 /** Phase 65.O (round 6): one-time guard so the "no wheel proxy" note is
  *  logged once, not once per pane. */
 let g_loggedNoWheelProxy = false;
@@ -112,6 +115,40 @@ export function getRtlMode(): RtlMode {
 /** Phase 16: flip the Ctrl+C-copies-on-selection behavior at runtime. */
 export function setCtrlCCopyOnSelect(enabled: boolean): void {
   g_ctrlCCopyOnSelect = enabled;
+}
+
+/** Phase HH: flip RTL arrow-key mirroring at runtime. */
+export function setMirrorArrowsRtl(enabled: boolean): void {
+  g_mirrorArrowsRtl = enabled;
+}
+
+/** Phase HH: is the string predominantly RTL (Hebrew/Arabic + related)?
+ *  Counts strong-RTL vs Latin code points (matches the heuristic used by
+ *  the dir="auto" per-line renderer). */
+function isRtlText(s: string): boolean {
+  const rtl = (s.match(/[֐-׿؀-ۿ܀-ࣿיִ-ﻼ]/g) || [])
+    .length;
+  const ltr = (s.match(/[A-Za-z]/g) || []).length;
+  return rtl > ltr;
+}
+
+/** Phase HH: swap a Left/Right cursor-key escape sequence to the other
+ *  direction. Handles both normal (`\e[C`/`\e[D`) and application-cursor
+ *  mode (`\eOC`/`\eOD`), so it's correct regardless of the TUI's mode.
+ *  Returns the input unchanged if it isn't a horizontal arrow. */
+function swapArrowSeq(data: string): string {
+  switch (data) {
+    case "\x1b[C":
+      return "\x1b[D";
+    case "\x1b[D":
+      return "\x1b[C";
+    case "\x1bOC":
+      return "\x1bOD";
+    case "\x1bOD":
+      return "\x1bOC";
+    default:
+      return data;
+  }
 }
 
 /** Paste arbitrary text into the active terminal. xterm.js will wrap
@@ -548,15 +585,44 @@ export class TerminalInstance {
     this.detach();
     this.sessionId = sessionId;
     this.dataDisposable = this.term.onData((data) => {
+      let out = data;
+      // Phase HH: on an RTL line, the visual Left/Right arrows map to the
+      // opposite logical direction, so mirror them. Only the 4 horizontal
+      // cursor-key sequences are considered, and only when the cursor's
+      // line is predominantly RTL — LTR lines pass through untouched.
+      if (
+        g_mirrorArrowsRtl &&
+        (data === "\x1b[C" ||
+          data === "\x1b[D" ||
+          data === "\x1bOC" ||
+          data === "\x1bOD") &&
+        this.isCurrentLineRtl()
+      ) {
+        out = swapArrowSeq(data);
+      }
       if (this.sessionId)
-        invoke("pty_write", { sessionId: this.sessionId, data }).catch((err) =>
-          console.error("pty_write failed", err)
+        invoke("pty_write", { sessionId: this.sessionId, data: out }).catch(
+          (err) => console.error("pty_write failed", err)
         );
     });
     // Phase 25.C: force a pty_resize on attach so tmux gets the
     // current dimensions immediately, even on a reconnect where
     // xterm.js's cols/rows happen to match the previous session.
     this.fitAndResize(true);
+  }
+
+  /** Phase HH: is the terminal line under the cursor predominantly RTL?
+   *  Reads the live buffer line at the absolute cursor row. Best-effort —
+   *  any xterm API hiccup falls back to "not RTL" (no mirroring). */
+  private isCurrentLineRtl(): boolean {
+    try {
+      const buf = this.term.buffer.active;
+      const line = buf.getLine(buf.baseY + buf.cursorY);
+      if (!line) return false;
+      return isRtlText(line.translateToString(true));
+    } catch {
+      return false;
+    }
   }
 
   detach() {

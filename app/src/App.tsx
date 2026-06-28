@@ -20,6 +20,7 @@ import {
   copyTerminalSelection,
   pasteIntoActiveTerminal,
   setCtrlCCopyOnSelect,
+  setMirrorArrowsRtl,
 } from "./terminalInstance";
 import { saveRemoteFileAs } from "./download";
 import {
@@ -1527,6 +1528,7 @@ function App() {
       setCtrlCCopyOnSelect(
         (s.shortcuts ?? DEFAULT_SHORTCUTS).copy_on_select_with_ctrl_c,
       );
+      setMirrorArrowsRtl(s.terminal?.mirror_arrows_rtl ?? true);
     } catch (e) {
       console.warn("settings_load failed", e);
     }
@@ -1748,6 +1750,7 @@ function App() {
         setCtrlCCopyOnSelect(
           (e.payload.shortcuts ?? DEFAULT_SHORTCUTS).copy_on_select_with_ctrl_c,
         );
+        setMirrorArrowsRtl(e.payload.terminal?.mirror_arrows_rtl ?? true);
       })
     );
     // Phase 18: agent-hooks outdated event from the backend's

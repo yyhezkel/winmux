@@ -25,6 +25,9 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-26 — Phase 66 round 2 (partial): hooks Settings UI toggles — DONE (branch `66-hooks`)
+Exposed the round-1 backend switches in Settings → Hooks: **"Use the 3-state policy engine"** (`hooks.policy_enabled`) and **"Auto-install hooks on connect"** (`hooks.auto_install`), each with a hint, mirroring the existing `enabled` checkbox + i18n en/he/ar/ru. tsc clean. Remaining round-2 work (deferred, bigger): **66.E** swap the `notify-rust` toast for `tauri-plugin-notification` (the current toast silently fails on Windows w/o AppUserModelID), **66.F** a richer policy editor (view/edit the block/gate lists — round 1 uses built-in lists), **66.G** notification-click → focus app + pane. Those need their own round.
+
 ### 2026-06-26 — Phase 66.D.x — env-gate fallback: ALLOW when not in a winmux pane
 Yossi's screenshot showed Claude Code popping `PreToolUse:Bash requires confirmation: not running in winmux session` — its built-in "Do you want to proceed?" prompt — on EVERY tool call in a non-winmux terminal. Cause: `cli/main.rs` returned `permissionDecision: "ask"` from the env-gate (WINMUX_PANE_ID unset). That noise is exactly why the hooks were hated. Fix: return **`"allow"`** instead — if winmux isn't in the session there's no policy to apply, so get out of the way. Only when WINMUX_PANE_ID is set does the 3-state engine run. Rebuilt `winmux-linux-x64` (sha `9fb805ef…`). Lifecycle hooks already no-op'd silently — unchanged.
 

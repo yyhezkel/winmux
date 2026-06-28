@@ -61,5 +61,11 @@ pub async fn bootstrap(
     ));
     let manifest = winmux_bootstrap::parse_manifest(REMOTE_MANIFEST)?;
     let loader = |rel: &str| read_resource_bytes(rel);
-    winmux_bootstrap::bootstrap(handle, manifest, &loader, force).await
+    // Phase 66 (66.B): auto-install the Claude Code hooks on the remote
+    // after deploying the CLI, unless the user disabled it. Read from
+    // settings (defaults ON for older settings.json).
+    let auto_install_hooks = crate::settings::load_from_disk()
+        .map(|s| s.hooks.auto_install)
+        .unwrap_or(true);
+    winmux_bootstrap::bootstrap(handle, manifest, &loader, force, auto_install_hooks).await
 }

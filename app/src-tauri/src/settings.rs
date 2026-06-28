@@ -221,6 +221,20 @@ pub(crate) struct Hooks {
     /// remote-side setup-hooks call (Phase 18 wraps `agent.setup_hooks`).
     #[serde(default = "default_matcher_mode")]
     pub matcher_mode: String,
+    /// Phase 66 (66.D): master switch for the 3-state policy engine
+    /// (auto / gate / block) that runs in the desktop `feed.push` handler.
+    /// When false, every pre-tool-use request becomes a blocking card (the
+    /// pre-66 behavior). Default true. Older settings.json without the
+    /// field loads with the engine ON.
+    #[serde(default = "default_true")]
+    pub policy_enabled: bool,
+    /// Phase 66 (66.B): when true (default), the SSH bootstrap auto-runs
+    /// `winmux setup-hooks` on the remote after deploying the CLI, so a
+    /// fresh server starts surfacing permission cards without the user
+    /// invoking setup-hooks by hand. No-op if Claude Code isn't installed
+    /// remotely. Older settings.json loads with auto-install ON.
+    #[serde(default = "default_true")]
+    pub auto_install: bool,
 }
 
 fn default_matcher_mode() -> String {
@@ -632,6 +646,8 @@ impl Default for Hooks {
             agents: vec!["claude".into()],
             policy_preset: "default".into(),
             matcher_mode: default_matcher_mode(),
+            policy_enabled: true,
+            auto_install: true,
         }
     }
 }

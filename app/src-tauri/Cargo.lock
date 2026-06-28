@@ -185,6 +185,7 @@ dependencies = [
  "whoami",
  "winmux-bootstrap",
  "winmux-core",
+ "winmux-policy",
  "winmux-ssh",
  "winmux-tunnel",
  "winmux-types",
@@ -6901,6 +6902,7 @@ dependencies = [
  "sha2",
  "tokio",
  "whoami",
+ "winmux-policy",
 ]
 
 [[package]]
@@ -6944,6 +6946,10 @@ dependencies = [
  "tokio",
  "whoami",
 ]
+
+[[package]]
+name = "winmux-policy"
+version = "0.0.0"
 
 [[package]]
 name = "winmux-ssh"

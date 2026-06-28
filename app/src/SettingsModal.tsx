@@ -619,6 +619,28 @@ export function SettingsModal(p: Props) {
                     />
                     <span>{t("settings.hooks.enabled")}</span>
                   </label>
+                  <label class="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={p.settings.hooks.policy_enabled ?? true}
+                      onChange={(e) => update("hooks", { ...p.settings.hooks, policy_enabled: e.currentTarget.checked })}
+                    />
+                    <span>{t("settings.hooks.policy_enabled")}</span>
+                  </label>
+                  <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
+                    {t("settings.hooks.policy_enabled.hint")}
+                  </p>
+                  <label class="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={p.settings.hooks.auto_install ?? true}
+                      onChange={(e) => update("hooks", { ...p.settings.hooks, auto_install: e.currentTarget.checked })}
+                    />
+                    <span>{t("settings.hooks.auto_install")}</span>
+                  </label>
+                  <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
+                    {t("settings.hooks.auto_install.hint")}
+                  </p>
                   <label>
                     <span>{t("settings.hooks.policy_preset")}</span>
                     <select

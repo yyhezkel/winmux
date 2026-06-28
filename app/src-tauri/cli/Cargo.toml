@@ -16,3 +16,5 @@ whoami = "1"
 hmac = "0.12"
 sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# Phase 66: shared 3-state policy engine for the remote static fallback.
+winmux-policy = { path = "../crates/winmux-policy" }

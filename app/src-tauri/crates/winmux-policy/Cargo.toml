@@ -1,0 +1,13 @@
+[package]
+name = "winmux-policy"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Phase 66: shared 3-state tool-permission policy engine (auto / gate / block) used by the desktop RPC server and the remote CLI static fallback."
+
+# Intentionally dependency-free (pure std). The desktop links it alongside
+# the full Tauri runtime; the remote CLI links it while staying lean (it
+# deliberately avoids reqwest/serde-heavy trees). Callers extract the Bash
+# command string from their own JSON and pass it in as &str, so this crate
+# never needs serde_json itself.
+[dependencies]

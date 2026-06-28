@@ -113,7 +113,10 @@ fn bundled_claude_spec() -> HookSpec {
         events.insert(
             ev.into(),
             HookEvent {
-                matcher: "*".into(),
+                // Lifecycle events aren't tool-matched; an empty matcher is
+                // the documented "applies always" form. `"*"` is NOT a
+                // documented wildcard (it's a literal), so avoid it.
+                matcher: "".into(),
                 command: format!("${{WINMUX_BIN}} claude-hook {sub}"),
             },
         );

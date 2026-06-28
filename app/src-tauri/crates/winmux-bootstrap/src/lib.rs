@@ -197,8 +197,11 @@ pub async fn bootstrap(
     manifest: HashMap<String, ManifestEntry>,
     resource_loader: ResourceLoader<'_>,
     force: bool,
+    auto_install_hooks: bool,
 ) -> Result<BootstrapStatus, String> {
-    dlog(&format!("bootstrap: starting (force={force})"));
+    dlog(&format!(
+        "bootstrap: starting (force={force} auto_install_hooks={auto_install_hooks})"
+    ));
 
     // Identify remote.
     let (uname, code) = ssh_exec(handle, "uname -s -m").await?;
@@ -258,6 +261,9 @@ pub async fn bootstrap(
             // last bootstrap, or this is a fresh machine that has the
             // binary cached but no PATH entry. Idempotent.
             ensure_path_in_rc(handle).await;
+            if auto_install_hooks {
+                ensure_hooks_installed(handle, &remote_symlink_abs).await;
+            }
             return Ok(BootstrapStatus::AlreadyOk);
         }
         dlog(&format!(
@@ -314,10 +320,40 @@ pub async fn bootstrap(
     // toggle works without re-bootstrapping.
     ensure_tmux_conf(handle, resource_loader, home, &manifest, force).await;
 
+    // Phase 66 (66.B): install the Claude Code permission hooks now that
+    // the CLI is on the remote. Best-effort, idempotent, no-op without
+    // Claude Code installed.
+    if auto_install_hooks {
+        ensure_hooks_installed(handle, &remote_symlink_abs).await;
+    }
+
     Ok(BootstrapStatus::Uploaded {
         bytes: bytes.len(),
         sha256: entry.sha256.clone(),
     })
+}
+
+/// Phase 66 (66.B): best-effort `winmux setup-hooks` on the remote so a
+/// freshly-bootstrapped server starts piping Claude Code permission
+/// requests back to the desktop without the user running setup-hooks by
+/// hand. Idempotent (the CLI skips events already present) and `--source
+/// bundled` so it never depends on network access at connect time. No-op
+/// when `~/.claude` is absent — the adapter reports "not detected". We do
+/// NOT pass `--force`, so a user's hand-edited matcher is never clobbered.
+async fn ensure_hooks_installed(handle: &mut Handle<SshClient>, symlink_abs: &str) {
+    let cmd = format!("{symlink_abs} setup-hooks --agent claude --source bundled 2>&1 || true");
+    match ssh_exec(handle, &cmd).await {
+        Ok((out, code)) => {
+            // Log only the final status line (e.g. "Done. …") — never the
+            // full output, which can include remote paths.
+            let last = out.trim().lines().last().unwrap_or("").trim();
+            dlog(&format!(
+                "bootstrap: setup-hooks exit={code} status={:?}",
+                last
+            ));
+        }
+        Err(e) => dlog(&format!("bootstrap: setup-hooks exec failed: {e}")),
+    }
 }
 
 /// Phase tmux-conf: upload `winmux-tmux.conf` to `~/.winmux/tmux.conf`

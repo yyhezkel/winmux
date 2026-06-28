@@ -25,6 +25,9 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-26 — Integration build `v0.2.x-integration` — ONE exe with everything (for batch smoke-test)
+Merged `66-hooks` into `66-67-extras` → branch `v0.2.x-integration` = wizard fix + JJ + HH + GG + label polish + hooks (round 1 + round 2 Settings UI + env-gate→allow + the env-file-first wiring fix + matcher `""`) + the fixed `winmux-linux-x64` (sha `15e9845e`) + auto-install bootstrap. Only conflict was DECISIONS.md (resolved as a union); settings.rs / settings.ts / SettingsModal / i18n all auto-merged cleanly (different structs/keys). `cargo check --workspace` + the desktop build both green. This is the single exe for Yossi's batch smoke-test; reconnecting also auto-deploys the fixed CLI so hooks work. NOT merged to main (v0.2.9 cut waits on smoke-test approval). 67-mobile (protocol) + 68-insights (addons crate) stay on their own branches (backend crates, not user-testable yet).
+
 ### 2026-06-26 — Wizard UX label polish — DONE (branch `66-67-extras`)
 Per Yossi's request, clearer mode wording so the two paths are unmistakable (on top of the 🆕/🔗 icons + .active highlight + null-default already shipped): "New server (from scratch)" / "שרת חדש (יצירה מאפס)" with hint "Blank server — creates a user, sudo, SSH key, agent tooling", and "Existing server (join)" / "שרת קיים (הצטרפות)" with hint "Server already set up / in use — detect users, pick or create a key-only user, attach THIS machine". en/he/ar/ru. Built into the combined `app.exe`. (Button-label tweaks — "גלה"→"גלה משתמשים" etc. — left as a tiny optional nicety.) **II (RTL caret) remains parked** pending runtime DOM inspection (no blind fix — a wrong guess could move the caret to a *new* wrong spot).
 

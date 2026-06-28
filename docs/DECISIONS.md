@@ -25,6 +25,9 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-26 — Wizard UX label polish — DONE (branch `66-67-extras`)
+Per Yossi's request, clearer mode wording so the two paths are unmistakable (on top of the 🆕/🔗 icons + .active highlight + null-default already shipped): "New server (from scratch)" / "שרת חדש (יצירה מאפס)" with hint "Blank server — creates a user, sudo, SSH key, agent tooling", and "Existing server (join)" / "שרת קיים (הצטרפות)" with hint "Server already set up / in use — detect users, pick or create a key-only user, attach THIS machine". en/he/ar/ru. Built into the combined `app.exe`. (Button-label tweaks — "גלה"→"גלה משתמשים" etc. — left as a tiny optional nicety.) **II (RTL caret) remains parked** pending runtime DOM inspection (no blind fix — a wrong guess could move the caret to a *new* wrong spot).
+
 ### 2026-06-26 — (GG) Markdown viewer — DONE (branch `66-67-extras`)
 Double-clicking a `.md`/`.markdown` file in the File Manager (local OR remote) now opens it in an in-app rendered viewer instead of the OS default app. Pieces:
 - **`MarkdownViewer.tsx`** — floating window reusing the `.fm-window` chrome (`makeWindowControls`/`ResizeHandles`/`clampToViewport`), so it drags + 8-way resizes. `markdown-it@14` (`html:false, linkify:true, breaks:false`) → `DOMPurify@3.sanitize` (FORBID script/style/iframe/object/embed/form + inline-event attrs). Read-only (Edit mode deferred per spec).

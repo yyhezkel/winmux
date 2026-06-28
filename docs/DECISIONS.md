@@ -25,6 +25,9 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-26 — Phase 68 design doc READY for review → `docs/PHASE-68-DESIGN.md`
+Wrote the full planning doc for Server Insights + the unified Add-on framework (per Yossi's spec): architecture, `AddonManifest`/`AddonAction`/`AddonStatus` Rust schema (new `winmux-addons` pure crate, like winmux-policy), the `addon_*` Tauri commands, migration of the existing installers (winmux-cli / tmux-conf / hooks) to `Builtin` add-ons with no behaviour change, the `winmux-insights` Go daemon (sampling, localhost HTTP API spec with payloads, SQLite schema + 7-day retention, <50 MB/<1% budget), the Monitor UI (floating window + uPlot sparklines + Docker table with per-container actions + ⚠️ alerts), the Settings→Add-ons table, and the wizard add-on-selection step (both new + connect-existing). **6 open questions need Yossi's call before any code** — notably: bundle-vs-fetch the daemon, **Go vs Rust** for the daemon (second toolchain), default port 7879, round-1 scope (A+B+C+D vs all), chart lib. Planning only; nothing built. Last in priority (after v0.2.9 cut, Phase 66 r2, Phase 67).
+
 ### 2026-06-26 — (JJ) port-watcher leak — FIXED
 Every connect spawns a remote `winmux port-watch` tokio task (per workspace). The only cleanup, `clear_workspace_detection`, was called solely when the user manually toggled auto-port-forward OFF — never on disconnect/shutdown. The watcher task self-cleaned only on channel Eof/Close, which is unreliable when the SSH transport drops, so dead tasks lingered and accumulated over a long session. Fixes (main, `lib.rs`):
 1. **Abort on disconnect:** the session-end task now aborts the workspace's watcher (task `.abort()` + remove from `port_watchers`/`port_watcher_tasks`) in the existing `!still_alive` "last SSH session gone" branch — right next to the forward teardown. dlog: `port-watch[ws]: workspace disconnected, watcher stopped`.

@@ -25,6 +25,12 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-26 — (JJ) port-watcher leak — FIXED
+Every connect spawns a remote `winmux port-watch` tokio task (per workspace). The only cleanup, `clear_workspace_detection`, was called solely when the user manually toggled auto-port-forward OFF — never on disconnect/shutdown. The watcher task self-cleaned only on channel Eof/Close, which is unreliable when the SSH transport drops, so dead tasks lingered and accumulated over a long session. Fixes (main, `lib.rs`):
+1. **Abort on disconnect:** the session-end task now aborts the workspace's watcher (task `.abort()` + remove from `port_watchers`/`port_watcher_tasks`) in the existing `!still_alive` "last SSH session gone" branch — right next to the forward teardown. dlog: `port-watch[ws]: workspace disconnected, watcher stopped`.
+2. **Self-healing dedup:** `spawn_port_watcher` now skips only if the existing task is genuinely alive (`!is_finished()`); a stale/finished slot is aborted + replaced with a fresh watcher on the current session (locks taken singly, never nested, to match `clear_workspace_detection`'s order → no deadlock). Caps live watchers to ≤1/workspace and prevents a stale entry from permanently blocking respawn.
+**Reverse-tunnel checked (Yossi #4):** no equivalent leak — forwarded channels are handled by the `SshClient` russh callback (dies with the session); `bridge_to_pipe` tasks are per-incoming-connection and end when the connection closes. The internal-ports set is already cleaned in the same session-end path. Shutdown abort-all skipped intentionally (process exit reclaims all tokio tasks; the during-session leak is what mattered). Built into the current `app.exe`.
+
 ### 2026-06-26 — Phase 65.R wizard: connect-to-existing not reached + root trap — fix + new build
 **Yossi's report:** "Connect to existing server" connects straight as root, no user-picker; he wants to attach `runner` (a real non-root user), but the existing-user picker never appears. Confirmed he WAS on the "existing" radio; the pre-R standalone button used to show the flow, the new radio doesn't.
 **Investigation (code is otherwise correct end-to-end):** `ProvisioningWizard` routes `mode==="existing"` → `ConnectExistingFlow` (verified), which calls `connect_existing_discover` → user-picker → `connect_existing_execute` → `finalize_workspace` saves `user: new_user` + key (NOT root/password) — all correct. Two real defects found:

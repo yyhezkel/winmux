@@ -2245,6 +2245,14 @@ async fn spawn_ssh(
     // the internal-ports set when the session ends.
     let internal_ports_for_task = state.core.internal_reverse_tunnel_remote_ports.clone();
     let reverse_port_for_task = remote_port as u16;
+    // Phase JJ (port-watcher leak): clone the watcher maps so the
+    // session-end task can abort this workspace's remote port-watcher when
+    // its last SSH session goes away — otherwise the watcher's tokio task
+    // lingers waiting on a dead channel (the channel-Eof self-clean is
+    // unreliable when the transport drops), accumulating over a long
+    // work session.
+    let port_watchers_for_task = state.core.port_watchers.clone();
+    let port_watcher_tasks_for_task = state.core.port_watcher_tasks.clone();
     let bidi_for_task = state.bidi_filters.clone();
     tokio::spawn(async move {
         let mut leftover: Vec<u8> = Vec::new();
@@ -2341,6 +2349,21 @@ async fn spawn_ssh(
             .any(|s| matches!(s, Session::Ssh(ssh) if ssh.workspace_id == workspace_for_task));
         if !still_alive {
             close_workspace_forwards(&forwards_for_task, &workspace_for_task);
+            // Phase JJ: last SSH session for this workspace is gone — abort
+            // the remote port-watcher task so it doesn't leak.
+            let aborted = {
+                let mut tasks = port_watcher_tasks_for_task.lock().unwrap();
+                tasks.remove(&workspace_for_task).map(|h| h.abort()).is_some()
+            };
+            port_watchers_for_task
+                .lock()
+                .unwrap()
+                .remove(&workspace_for_task);
+            if aborted {
+                dlog(&format!(
+                    "port-watch[{workspace_for_task}]: workspace disconnected, watcher stopped"
+                ));
+            }
         }
         emit_exit(&app_for_task, &id_for_task, exit_reason);
     });
@@ -2577,13 +2600,53 @@ async fn spawn_port_watcher(
     remote_port: u16,
     token: &Arc<String>,
 ) -> Result<(), String> {
-    // Dedup: if a watcher's already running for this workspace, no-op.
+    // Dedup, self-healing (Phase JJ). Skip ONLY if a LIVE watcher is
+    // already running for this workspace. If the set still has the entry
+    // but the task is finished/missing (e.g. a disconnect that didn't
+    // reach the abort path, or a channel-Eof clean that raced), the slot
+    // is stale — clear it and respawn fresh on the current session. Locks
+    // are taken one at a time (never nested) to match the lock order in
+    // clear_workspace_detection and avoid a deadlock.
     {
-        let mut set = state.core.port_watchers.lock().unwrap();
-        if set.contains(workspace_id) {
-            return Ok(());
+        let already = state
+            .core
+            .port_watchers
+            .lock()
+            .unwrap()
+            .contains(workspace_id);
+        if already {
+            let alive = state
+                .core
+                .port_watcher_tasks
+                .lock()
+                .unwrap()
+                .get(workspace_id)
+                .map(|h| !h.is_finished())
+                .unwrap_or(false);
+            if alive {
+                return Ok(());
+            }
+            // Stale slot — abort any finished handle and replace it.
+            if let Some(h) = state
+                .core
+                .port_watcher_tasks
+                .lock()
+                .unwrap()
+                .remove(workspace_id)
+            {
+                h.abort();
+            }
+            state.core.port_watchers.lock().unwrap().remove(workspace_id);
+            dlog(&format!(
+                "port-watch[{workspace_id}]: stale slot, replacing with fresh watcher"
+            ));
         }
-        set.insert(workspace_id.to_string());
+        state
+            .core
+            .port_watchers
+            .lock()
+            .unwrap()
+            .insert(workspace_id.to_string());
     }
     let mut wchan = match handle.channel_open_session().await {
         Ok(c) => c,

@@ -1755,20 +1755,24 @@ async fn real_main() -> ExitCode {
             // pwsh, VS Code's own terminal, an external WSL session) would
             // otherwise dial winmux on every tool call. We tag winmux-spawned
             // shells with WINMUX_PANE_ID — if it's missing, Claude Code is
-            // not running under us and we should immediately defer to its
-            // built-in UI for pre-tool-use, or silently no-op for lifecycle.
+            // not running under us and winmux has no business in the loop.
+            // Phase 66.D.x: ALLOW (not "ask"). Returning "ask" made Claude
+            // Code pop its built-in "Do you want to proceed?" prompt on every
+            // tool call in non-winmux terminals — pure noise, and the original
+            // reason the hooks were hated. If winmux isn't involved there's no
+            // policy to apply, so get out of the way and let Claude run.
             if std::env::var("WINMUX_PANE_ID").is_err() {
                 hook_dlog(&format!(
                     "claude-hook BRANCH=env-gate (WINMUX_PANE_ID unset) \
-                     decision=ask-or-noop subcommand={subcommand}"
+                     decision=allow-or-noop subcommand={subcommand}"
                 ));
                 match subcommand.as_str() {
                     "pre-tool-use" => {
                         let out = json!({
                             "hookSpecificOutput": {
                                 "hookEventName": "PreToolUse",
-                                "permissionDecision": "ask",
-                                "permissionDecisionReason": "not running in winmux session"
+                                "permissionDecision": "allow",
+                                "permissionDecisionReason": "winmux not in this session — not gating"
                             }
                         });
                         println!("{}", serde_json::to_string(&out).unwrap_or_default());

@@ -25,6 +25,9 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-26 — Phase 66.D.x — env-gate fallback: ALLOW when not in a winmux pane
+Yossi's screenshot showed Claude Code popping `PreToolUse:Bash requires confirmation: not running in winmux session` — its built-in "Do you want to proceed?" prompt — on EVERY tool call in a non-winmux terminal. Cause: `cli/main.rs` returned `permissionDecision: "ask"` from the env-gate (WINMUX_PANE_ID unset). That noise is exactly why the hooks were hated. Fix: return **`"allow"`** instead — if winmux isn't in the session there's no policy to apply, so get out of the way. Only when WINMUX_PANE_ID is set does the 3-state engine run. Rebuilt `winmux-linux-x64` (sha `9fb805ef…`). Lifecycle hooks already no-op'd silently — unchanged.
+
 ### 2026-06-26 — Phase 66 round 1 (branch `66-hooks`, NOT v0.2.9 → v0.2.10/v0.3.0) — built, awaiting smoke-test
 Re-enabling the shelved Claude Code Hooks with a **3-state policy engine** instead of "block everything." Root cause of the old breakage (66.A + Yossi): in `default` permission_mode EVERY matched tool went to a blocking card; worse, the hook RPC sometimes never reached the desktop, so the 120s wait timed out → conservative deny → Claude couldn't run a single tool (not even a read). Round 1 (built, on branch, **not pushed to remote**):
 - **66.C — `winmux-policy` crate** (new, pure-std, zero deps so both the Tauri app and the lean CLI link it). `Decision{Auto,Gate,Block}`, a quote-aware `split_chained_command` (splits `&& || | ; & \n`), built-in BLOCK patterns (rm -rf /, mkfs, dd of=/dev/, drop database, fork bomb, …) and GATE patterns (sudo, rm -rf <path>, curl|sh, git push --force, chmod 777, …). Block beats gate; checked whole-command AND per-segment. 8 unit tests.

@@ -4311,6 +4311,73 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 }
 .fm-window-body > * { flex: 1; min-height: 0; }
 
+/* ── Phase GG: Markdown viewer (reuses .fm-window chrome) ────────────── */
+.md-window {
+  /* Override .fm-window's File-Manager-sized minimums + float above it. */
+  min-width: 360px;
+  min-height: 240px;
+  z-index: 96;
+}
+.md-view-body {
+  display: block;        /* not flex — let the rendered doc flow + scroll */
+  overflow: auto;
+  background: var(--w-bg, #1a1b26);
+}
+.md-view {
+  padding: 18px 22px;
+  color: var(--w-text-primary, #c0caf5);
+  font-size: 14px;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+/* Mixed Hebrew/English blocks stay readable; each block picks its own dir. */
+.md-view p, .md-view li, .md-view td, .md-view th, .md-view dd,
+.md-view blockquote, .md-view h1, .md-view h2, .md-view h3,
+.md-view h4, .md-view h5, .md-view h6 {
+  unicode-bidi: plaintext;
+}
+.md-view h1, .md-view h2, .md-view h3, .md-view h4 {
+  line-height: 1.3;
+  margin: 1.2em 0 0.5em;
+}
+.md-view h1 { font-size: 1.8em; border-bottom: 1px solid var(--w-border, #2a2e44); padding-bottom: .3em; }
+.md-view h2 { font-size: 1.45em; border-bottom: 1px solid var(--w-border, #2a2e44); padding-bottom: .25em; }
+.md-view h3 { font-size: 1.2em; }
+.md-view a { color: var(--w-accent, #7aa2f7); text-decoration: none; cursor: pointer; }
+.md-view a:hover { text-decoration: underline; }
+.md-view code {
+  font-family: var(--w-font-mono, "Cascadia Mono", monospace);
+  font-size: .9em;
+  background: var(--w-surface-2, rgba(255,255,255,0.06));
+  padding: .15em .35em;
+  border-radius: 4px;
+  /* Inline code is code — keep it LTR even inside an RTL paragraph. */
+  direction: ltr;
+  unicode-bidi: embed;
+}
+.md-view pre {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: embed;
+  background: var(--w-surface-2, rgba(255,255,255,0.05));
+  border: 1px solid var(--w-border, #2a2e44);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+.md-view pre code { background: none; padding: 0; }
+.md-view blockquote {
+  margin: .8em 0;
+  padding: .2em 1em;
+  border-inline-start: 3px solid var(--w-accent, #7aa2f7);
+  color: var(--w-text-secondary, #9aa5ce);
+}
+.md-view table { border-collapse: collapse; margin: .8em 0; }
+.md-view th, .md-view td { border: 1px solid var(--w-border, #2a2e44); padding: 6px 10px; }
+.md-view img { max-width: 100%; }
+.md-view hr { border: none; border-top: 1px solid var(--w-border, #2a2e44); margin: 1.2em 0; }
+.md-view ul, .md-view ol { padding-inline-start: 1.5em; }
+
 /* Phase 62 (item 2): shared 8-way resize handles for the floating
    Browser / File-Manager windows. Absolutely positioned inside the
    `position: fixed` window. Edges are thin strips; corners are small

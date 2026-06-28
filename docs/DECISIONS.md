@@ -25,6 +25,15 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-26 — (GG) Markdown viewer — DONE (branch `66-67-extras`)
+Double-clicking a `.md`/`.markdown` file in the File Manager (local OR remote) now opens it in an in-app rendered viewer instead of the OS default app. Pieces:
+- **`MarkdownViewer.tsx`** — floating window reusing the `.fm-window` chrome (`makeWindowControls`/`ResizeHandles`/`clampToViewport`), so it drags + 8-way resizes. `markdown-it@14` (`html:false, linkify:true, breaks:false`) → `DOMPurify@3.sanitize` (FORBID script/style/iframe/object/embed/form + inline-event attrs). Read-only (Edit mode deferred per spec).
+- **Links** — clicks intercepted: `http(s)`/`mailto` → system `openUrl` (existing `@tauri-apps/plugin-opener`); everything else blocked (logged). No auto-navigation.
+- **RTL** — body `dir` from a Hebrew/Arabic-vs-Latin heuristic; `unicode-bidi: plaintext` on block elements keeps mixed Hebrew/English readable; inline code + code blocks forced LTR.
+- **`mdViewerStore.ts`** — module signal store (`openMarkdown`/`closeMarkdown`/`isMarkdownFile`) so the nested `FileManagerPane` opens the viewer without prop-threading; one `<MarkdownViewer/>` mounted at the App root. FileManager `openLocal`/`openRemote` intercept `.md` → `file_read_local`/`file_read_remote` → `openMarkdown`.
+- **Gotcha:** the store was first named `markdownViewer.ts` — a case-only collision with `MarkdownViewer.tsx` on Windows's case-insensitive FS broke the rollup import resolution. Renamed to `mdViewerStore.ts`.
+Deps added: `markdown-it`, `dompurify`, `@types/markdown-it`. Built into the current `app.exe`. Next: **II (RTL caret)** — needs runtime DOM inspection.
+
 ### 2026-06-26 — (HH) RTL arrow-key mirroring — DONE (branch `66-67-extras`)
 On a Hebrew/Arabic terminal line the visual Left/Right is the opposite logical direction, so the arrows feel inverted. Implemented in `terminalInstance.ts` `attach()` `onData`: when the new setting `terminal.mirror_arrows_rtl` (default true) is on AND the cursor's line is predominantly RTL, swap the horizontal cursor-key sequence — `\e[C`↔`\e[D` and the application-cursor-mode `\eOC`↔`\eOD` (so it's correct in both shell line-editing and TUIs). RTL detection = per Yossi's choice: the live buffer line at `baseY+cursorY`, strong-RTL vs Latin code-point count (`isRtlText`). Only RTL lines are affected → LTR usage untouched, safe to default on. Setting plumbed: `settings.rs` TerminalSettings + ts-rs binding + `settings.ts` + SettingsModal (Terminal → RTL section toggle) + i18n en/he/ar/ru; applied at load + on `settings:changed` via `setMirrorArrowsRtl`. Built into the current `app.exe`. Next: GG (MD viewer), then II (RTL caret).
 

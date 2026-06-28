@@ -23,6 +23,7 @@ import {
   setMirrorArrowsRtl,
 } from "./terminalInstance";
 import { saveRemoteFileAs } from "./download";
+import { MarkdownViewer } from "./MarkdownViewer";
 import {
   applyTheme,
   loadSettings,
@@ -2159,6 +2160,10 @@ function App() {
           </div>
         </Show>
       </div>
+
+      {/* Phase GG: in-app Markdown viewer (floating window). Reads its
+          own global store, opened by FileManager .md double-click. */}
+      <MarkdownViewer />
 
       <CreateWorkspaceModal
         open={showCreate()}

@@ -5,6 +5,7 @@ import { t } from "./i18n";
 import { FileEditor } from "./FileEditor";
 import { TechText } from "./TechText";
 import { saveRemoteFileAs } from "./download";
+import { openMarkdown, isMarkdownFile } from "./mdViewerStore";
 
 // Phase 15.B: dual-column file manager (local + remote SFTP).
 //
@@ -402,6 +403,14 @@ export function FileManagerPane(p: Props) {
       return;
     }
     const path = fullLocal(e.name);
+    // Phase GG: render .md in the in-app viewer instead of the OS app.
+    if (isMarkdownFile(e.name)) {
+      await wrap(`open ${e.name}`, async () => {
+        const fc = await invoke<{ text: string }>("file_read_local", { path });
+        openMarkdown(e.name, fc.text);
+      });
+      return;
+    }
     await wrap(`open ${e.name}`, async () => {
       await invoke("file_open_local", { path });
       setStatus(t("fm.toast.opened_local", { file: e.name }));
@@ -413,6 +422,18 @@ export function FileManagerPane(p: Props) {
       return;
     }
     const path = fullRemote(e.name);
+    // Phase GG: render .md in the in-app viewer (SFTP-fetch the text)
+    // instead of downloading to a temp file + opening the OS app.
+    if (isMarkdownFile(e.name)) {
+      await wrap(`open ${e.name}`, async () => {
+        const fc = await invoke<{ text: string }>("file_read_remote", {
+          workspaceId: p.workspaceId,
+          path,
+        });
+        openMarkdown(e.name, fc.text);
+      });
+      return;
+    }
     await wrap(`open ${e.name}`, async () => {
       const tempPath = await invoke<string>("file_open_remote", {
         workspaceId: p.workspaceId,

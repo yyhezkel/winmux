@@ -77,6 +77,12 @@ export function ConnectExistingFlow(p: Props) {
         password: password(),
       });
       setDiscovery(d);
+      // Phase 65.R-fix: diagnostic — confirms discover ran and what the
+      // picker will offer (captured by `winmux dev console-tail`).
+      console.log(
+        `[connect-existing] discovered users=${JSON.stringify(d.users)} ` +
+          `is_root=${d.is_root} can_sudo=${d.can_sudo} → step=choose`
+      );
       // Phase 65.R-fix: steer away from root. The backend now excludes
       // root/system accounts from `users`, so on a fresh VPS (root-only)
       // the list is empty → force "create a new dedicated user". Only when

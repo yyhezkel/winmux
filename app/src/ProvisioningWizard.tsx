@@ -86,8 +86,15 @@ export function ProvisioningWizard(p: Props) {
   //                execute → result). The old standalone "Connect to
   //                existing" sidebar button is gone; this is the single
   //                entry point.
-  type WizardMode = "new" | "existing";
-  const [mode, setMode] = createSignal<WizardMode>("new");
+  // Phase 65.R-fix: default to NO mode selected. Previously the wizard
+  // opened in "new" mode, so a user who wanted "connect to existing"
+  // could fill the (already-visible) new-server form and hit "Connect &
+  // inspect" without ever switching — silently provisioning/attaching
+  // root. With `null` the connect step shows ONLY the two choice cards
+  // until the user explicitly picks one, so the connect-existing flow
+  // can't be skipped by accident.
+  type WizardMode = "new" | "existing" | null;
+  const [mode, setMode] = createSignal<WizardMode>(null);
 
   // Connect-step inputs.
   const [host, setHost] = createSignal("");

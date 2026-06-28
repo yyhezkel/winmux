@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "cli", "mcp", "crates/winmux-types", "crates/winmux-core", "crates/winmux-tunnel", "crates/winmux-bootstrap", "crates/winmux-ssh"]
+members = [".", "cli", "mcp", "crates/winmux-types", "crates/winmux-core", "crates/winmux-tunnel", "crates/winmux-bootstrap", "crates/winmux-ssh", "crates/winmux-addons"]
 resolver = "2"
 
 # Pre-public hardening: strip symbols from release builds. The

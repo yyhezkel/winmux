@@ -6904,6 +6904,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "winmux-addons"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ts-rs",
+]
+
+[[package]]
 name = "winmux-bootstrap"
 version = "0.0.0"
 dependencies = [

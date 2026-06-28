@@ -1,0 +1,18 @@
+[package]
+name = "winmux-addons"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Phase 68.A: add-on manifest schema + built-in registry shared by the desktop AddonManager. Pure types — no IO."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+ts-rs = { version = "8", optional = true }
+
+[features]
+# Opt-in TS binding export (the desktop enables it so the Settings →
+# Add-ons table + wizard step get typed AddonManifest / AddonStatus).
+ts = ["dep:ts-rs"]
+
+[dev-dependencies]
+serde_json = "1"

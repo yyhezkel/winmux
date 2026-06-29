@@ -670,6 +670,28 @@ export function SettingsModal(p: Props) {
                     />
                     <span>{t("settings.notifications.sound_enabled")}</span>
                   </label>
+                  {/* Phase 66 (KK): per-event toast toggles. */}
+                  <h4 style="margin-top:14px">{t("settings.notifications.perEvent.title")}</h4>
+                  <For each={[
+                    ["toast_session_start", "settings.notifications.ev.session_start"],
+                    ["toast_session_end", "settings.notifications.ev.session_end"],
+                    ["toast_stop", "settings.notifications.ev.stop"],
+                    ["toast_notification", "settings.notifications.ev.notification"],
+                    ["toast_gate", "settings.notifications.ev.gate"],
+                    ["toast_block", "settings.notifications.ev.block"],
+                  ] as const}>
+                    {([key, labelKey]) => (
+                      <label class="settings-checkbox">
+                        <input
+                          type="checkbox"
+                          disabled={!p.settings.notifications.toast_enabled}
+                          checked={p.settings.notifications[key] ?? false}
+                          onChange={(e) => update("notifications", { ...p.settings.notifications, [key]: e.currentTarget.checked })}
+                        />
+                        <span>{t(labelKey)}</span>
+                      </label>
+                    )}
+                  </For>
                 </section>
               </Show>
 

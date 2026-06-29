@@ -83,6 +83,14 @@ export interface HooksSettings {
 export interface NotificationSettings {
   toast_enabled: boolean;
   sound_enabled: boolean;
+  /** Phase 66 (KK): per-event toast toggles. Defaults: session start/end
+   *  OFF; stop / notification / gate / block ON. */
+  toast_session_start?: boolean;
+  toast_session_end?: boolean;
+  toast_stop?: boolean;
+  toast_notification?: boolean;
+  toast_gate?: boolean;
+  toast_block?: boolean;
 }
 
 export interface UpdatesSettings {

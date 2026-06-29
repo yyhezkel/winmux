@@ -244,8 +244,31 @@ fn default_matcher_mode() -> String {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub(crate) struct Notifications {
+    /// Master switch — when false, no hook toasts at all.
     pub toast_enabled: bool,
     pub sound_enabled: bool,
+    // Phase 66 (KK): per-event toast toggles. Defaults chosen to cut noise
+    // — lifecycle session events are silent; "needs you" / "finished" /
+    // security events surface. Older settings.json loads with these
+    // serde defaults (so an upgrade picks the sane set automatically).
+    /// Claude session started — noisy, default OFF.
+    #[serde(default)]
+    pub toast_session_start: bool,
+    /// Claude session ended — default OFF.
+    #[serde(default)]
+    pub toast_session_end: bool,
+    /// Claude finished a task (Stop) — useful, default ON.
+    #[serde(default = "default_true")]
+    pub toast_stop: bool,
+    /// Claude needs you (Notification event) — critical, default ON.
+    #[serde(default = "default_true")]
+    pub toast_notification: bool,
+    /// A tool needs approval (PreToolUse gate) — must respond, default ON.
+    #[serde(default = "default_true")]
+    pub toast_gate: bool,
+    /// A dangerous tool was blocked — security insight, default ON.
+    #[serde(default = "default_true")]
+    pub toast_block: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
@@ -657,6 +680,12 @@ impl Default for Notifications {
         Self {
             toast_enabled: true,
             sound_enabled: false,
+            toast_session_start: false,
+            toast_session_end: false,
+            toast_stop: true,
+            toast_notification: true,
+            toast_gate: true,
+            toast_block: true,
         }
     }
 }

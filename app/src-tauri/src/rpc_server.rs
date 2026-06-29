@@ -220,6 +220,79 @@ fn show_toast(title: &str, body: &str) {
     });
 }
 
+/// Phase 66 (KK): truncate a string to `max` chars with an ellipsis.
+fn clip(s: &str, max: usize) -> String {
+    let s = s.trim();
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(max).collect::<String>())
+    }
+}
+
+/// Phase 66 (KK): turn a raw hook payload into a friendly (title, body)
+/// toast instead of dumping the JSON. `subkind` is the hook event
+/// (session-start / session-end / stop / notification / pre-tool-use).
+/// `lang` is the UI language (he/ar/ru/en) — Hebrew is first-class; ar/ru
+/// fall back to English for the toast text (the Settings labels are fully
+/// translated separately).
+fn humanize_notification(subkind: &str, payload: &Value, lang: &str) -> (String, String) {
+    let cwd = payload.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
+    let tool = payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+    let cmd = payload
+        .get("tool_input")
+        .and_then(|t| t.get("command"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+    let msg = payload.get("message").and_then(|v| v.as_str()).unwrap_or("");
+    let he = lang == "he";
+    match subkind {
+        "session-start" => (
+            "Claude".into(),
+            if he { format!("סשן התחיל ב-{cwd}") } else { format!("Session started in {cwd}") },
+        ),
+        "session-end" => (
+            "Claude".into(),
+            if he { format!("סשן הסתיים — {cwd}") } else { format!("Session ended — {cwd}") },
+        ),
+        "stop" => (
+            "Claude".into(),
+            if he { format!("סיים משימה ב-{cwd}") } else { format!("Finished task in {cwd}") },
+        ),
+        "notification" => (
+            "Claude".into(),
+            if !msg.is_empty() {
+                msg.to_string()
+            } else if he {
+                "Claude זקוק לך".into()
+            } else {
+                "Claude needs you".into()
+            },
+        ),
+        "pre-tool-use" => (
+            if he { format!("Claude רוצה להריץ: {tool}") } else { format!("Claude wants to run: {tool}") },
+            clip(cmd, 100),
+        ),
+        _ => ("Claude".into(), String::new()),
+    }
+}
+
+/// Phase 66 (KK): is a toast wanted for this hook event, per the
+/// per-event Notifications toggles? `toast_enabled` is the master switch.
+fn hook_toast_enabled(n: &settings::Notifications, subkind: &str) -> bool {
+    if !n.toast_enabled {
+        return false;
+    }
+    match subkind {
+        "session-start" => n.toast_session_start,
+        "session-end" => n.toast_session_end,
+        "stop" => n.toast_stop,
+        "notification" => n.toast_notification,
+        "pre-tool-use" => n.toast_gate,
+        _ => false,
+    }
+}
+
 /// Phase 66 (66.D): record a passive feed item for a policy decision that
 /// resolved WITHOUT a card (an Auto allow or a Block deny). Gives the user
 /// an audit trail in the feed — "what did winmux silently allow / block?"
@@ -1040,7 +1113,12 @@ async fn dispatch(
                                 pane_id.clone(),
                                 workspace_id.clone(),
                             );
-                            show_toast(&format!("⛔ Blocked: {tool_name}"), &verdict.reason);
+                            // Phase 66 (KK): gate the block toast by the
+                            // per-event toggle (default ON — security insight).
+                            let bn = settings::load_from_disk().unwrap_or_default().notifications;
+                            if bn.toast_enabled && bn.toast_block {
+                                show_toast(&format!("⛔ Blocked: {tool_name}"), &verdict.reason);
+                            }
                             return Ok(json!({
                                 "request_id": req_id,
                                 "decision": "deny",
@@ -1096,7 +1174,19 @@ async fn dispatch(
             };
 
             let _ = app.emit("feed:item-added", &item);
-            show_toast(&title, &summary);
+            // Phase 66 (KK): friendly, per-event-gated toast — never dump the
+            // raw payload JSON, and stay silent for noisy lifecycle events
+            // (session-start/end default OFF). `title`/`summary` from the CLI
+            // are still used for the feed card; the TOAST text is humanized
+            // from the payload here.
+            {
+                let s = settings::load_from_disk().unwrap_or_default();
+                if hook_toast_enabled(&s.notifications, &subkind) {
+                    let (tt, tb) =
+                        humanize_notification(&subkind, &item.payload, &s.i18n.language);
+                    show_toast(&tt, &tb);
+                }
+            }
 
             // Phase 17: auto-summarize on Stop hook. The Claude Code
             // Stop hook arrives here as a feed.push with `subkind ==

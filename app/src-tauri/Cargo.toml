@@ -82,6 +82,8 @@ winmux-tunnel = { path = "crates/winmux-tunnel" }
 winmux-bootstrap = { path = "crates/winmux-bootstrap" }
 # Phase 51.H: SSH auth primitives (try_authenticate + try_agent_auth).
 winmux-ssh = { path = "crates/winmux-ssh" }
+# Phase 68.A: add-on manifest schema + registry (ts feature → bindings).
+winmux-addons = { path = "crates/winmux-addons", features = ["ts"] }
 # Phase 57: zip/unzip on the local side of the file manager. Default
 # features include `deflate` which covers the common-case .zip
 # everyone produces; AES + Bzip2 + Zstd are turned off to keep the

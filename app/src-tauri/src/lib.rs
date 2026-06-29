@@ -1,4 +1,5 @@
 // Phase 24.D: claude_chat module deleted with the ClaudeChat pane.
+mod addons;
 mod bidi_filter;
 // Phase 53 (rebased): browser_pane.rs renamed to workspace_browser.rs;
 // per-pane commands swapped for workspace-keyed commands.
@@ -5554,6 +5555,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Phase 68.B: add-on framework commands.
+            addons::addon_list,
+            addons::addon_install,
+            addons::addon_uninstall,
+            addons::addon_update,
+            addons::addon_logs,
             workspaces_load,
             workspace_create,
             workspace_update,

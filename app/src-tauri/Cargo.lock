@@ -183,6 +183,7 @@ dependencies = [
  "ts-rs",
  "ureq",
  "whoami",
+ "winmux-addons",
  "winmux-bootstrap",
  "winmux-core",
  "winmux-ssh",

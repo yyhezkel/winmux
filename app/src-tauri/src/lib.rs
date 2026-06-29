@@ -5561,6 +5561,9 @@ pub fn run() {
             addons::addon_uninstall,
             addons::addon_update,
             addons::addon_logs,
+            // Phase 68.D: Monitor — pull from the insights daemon.
+            addons::insights_fetch,
+            addons::insights_docker_action,
             workspaces_load,
             workspace_create,
             workspace_update,

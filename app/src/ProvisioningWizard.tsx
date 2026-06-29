@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { t } from "./i18n";
 import { ConnectExistingFlow } from "./ConnectExistingFlow";
+import { AddonsTab } from "./AddonsTab";
 
 // Phase 14.A type mirrors — see src-tauri/src/provisioning.rs.
 interface InspectResult {
@@ -712,6 +713,11 @@ export function ProvisioningWizard(p: Props) {
                   >
                     {t("provisioning.done.btn.open_now")}
                   </button>
+                </Show>
+                {/* Phase 68.F: install/manage add-ons on the new server. */}
+                <Show when={result()?.workspace_id}>
+                  <hr class="modal-sep" />
+                  <AddonsTab workspaceId={result()!.workspace_id ?? undefined} />
                 </Show>
                 <Show when={!result()?.workspace_id}>
                   <button class="primary" onClick={p.onClose}>{t("common.close")}</button>

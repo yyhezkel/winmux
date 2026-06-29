@@ -9,6 +9,7 @@ import { LayoutView } from "./LayoutView";
 import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
 import { ProvisioningWizard } from "./ProvisioningWizard";
+import { InsightsWindow } from "./InsightsWindow";
 import { SettingsModal } from "./SettingsModal";
 import { SshKeyOfferModal } from "./SshKeyOfferModal";
 import { CommandPalette, type Command } from "./CommandPalette";
@@ -171,6 +172,7 @@ function App() {
   // "Connect to existing server" flow into this wizard's "existing"
   // mode, so there's no separate connect-existing modal anymore.
   const [showProvision, setShowProvision] = createSignal(false);
+  const [showInsights, setShowInsights] = createSignal(false);
   // Phase 35 (#1.3): command palette (Ctrl+Shift+P).
   const [showPalette, setShowPalette] = createSignal(false);
   // Phase 36 (#2.2): live auto port-forwards (all workspaces).
@@ -563,6 +565,7 @@ function App() {
       { id: "ssh.connect", label: t("cmd.ssh.connect"), enabled: () => hasPane, handler: () => { if (pid) void connectPane(pid); } },
       { id: "ssh.disconnect", label: t("cmd.ssh.disconnect"), enabled: () => hasPane, handler: () => { if (pid) void disconnectPane(pid); } },
       { id: "ssh.provision", label: t("cmd.ssh.provision"), handler: () => setShowProvision(true) },
+      { id: "insights.monitor", label: t("cmd.insights.monitor"), enabled: () => hasWs, handler: () => setShowInsights(true) },
       { id: "settings.open", label: t("cmd.settings.open"), handler: () => setShowSettings(true) },
       { id: "settings.language", label: t("cmd.settings.language"), handler: () => setShowSettings(true) },
       { id: "settings.theme", label: t("cmd.settings.theme"), handler: () => setShowSettings(true) },
@@ -2249,6 +2252,14 @@ function App() {
           onChange={(next) => setSettings(next)}
         />
       </Show>
+
+      {/* Phase 68.D: Server Insights monitor (floating window). */}
+      <InsightsWindow
+        open={showInsights()}
+        workspaceId={file().active_workspace_id ?? undefined}
+        workspaceName={activeWs()?.name}
+        onClose={() => setShowInsights(false)}
+      />
 
       {/* Phase 32.B: SSH key offer. Self-contained — listens for the
           `ssh-key-offer` event on its own, no props needed. */}

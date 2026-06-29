@@ -372,6 +372,65 @@ pub(crate) async fn addon_update(
     run_lifecycle(&state, &workspace_id, &id, |m| m.update.clone()).await
 }
 
+// ─── Phase 68.D: Monitor — pull from the insights daemon over the tunnel ──
+// The daemon binds 127.0.0.1:7879 on the remote; we reach it by curling it
+// over the workspace's SSH session (no extra port-forward needed). The token
+// is read from the daemon's own file on the remote, so it never transits the
+// desktop.
+
+/// Whitelist the API path (defends the interpolated curl URL).
+fn safe_api_path(p: &str) -> bool {
+    !p.is_empty()
+        && p.starts_with('/')
+        && p.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"/_-?=&.,".contains(&b))
+}
+
+#[tauri::command]
+pub(crate) async fn insights_fetch(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+) -> Result<String, String> {
+    if !safe_api_path(&path) {
+        return Err("invalid insights path".into());
+    }
+    let handle = pick_handle(&state, &workspace_id)
+        .ok_or("no active SSH session for this workspace")?;
+    let home = remote_home(&handle).await;
+    let cmd = format!(
+        "curl -s --max-time 6 \
+         -H \"Authorization: Bearer $(cat '{home}/.winmux/insights/token' 2>/dev/null)\" \
+         'http://127.0.0.1:7879{path}'"
+    );
+    exec(&handle, &cmd, 10).await
+}
+
+#[tauri::command]
+pub(crate) async fn insights_docker_action(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    container_id: String,
+    action: String,
+) -> Result<String, String> {
+    if !matches!(action.as_str(), "start" | "stop" | "restart" | "kill") {
+        return Err("invalid docker action".into());
+    }
+    if container_id.is_empty() || !container_id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err("invalid container id".into());
+    }
+    let handle = pick_handle(&state, &workspace_id)
+        .ok_or("no active SSH session for this workspace")?;
+    let home = remote_home(&handle).await;
+    let cmd = format!(
+        "curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
+         -H \"Authorization: Bearer $(cat '{home}/.winmux/insights/token' 2>/dev/null)\" \
+         -d '{{\"cmd\":\"{action}\"}}' \
+         'http://127.0.0.1:7879/docker/{container_id}/action'"
+    );
+    exec(&handle, &cmd, 12).await
+}
+
 #[tauri::command]
 pub(crate) async fn addon_logs(
     state: State<'_, AppState>,

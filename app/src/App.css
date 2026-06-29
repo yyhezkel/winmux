@@ -4327,6 +4327,35 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 }
 .fm-window-body > * { flex: 1; min-height: 0; }
 
+/* ── Phase 68.D: Server Insights monitor (reuses .fm-window chrome) ──── */
+.insights-window { min-width: 460px; min-height: 360px; z-index: 95; }
+.insights-window .fm-window-header { gap: 8px; }
+.ins-auto { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--w-text-secondary, #9aa5ce); }
+.ins-refresh { background: none; border: none; color: var(--w-text-primary, #e6edf3); cursor: pointer; font-size: 15px; }
+.insights-body { display: block; overflow: auto; padding: 12px 14px; background: var(--w-bg, #1a1b26); }
+.ins-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.ins-metric {
+  background: var(--w-surface-2, rgba(255,255,255,0.04));
+  border: 1px solid var(--w-border, #2a2e44); border-radius: 6px; padding: 8px 10px;
+}
+.ins-metric-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--w-text-primary, #e6edf3); }
+.ins-metric-sub { font-size: 11px; color: var(--w-text-secondary, #9aa5ce); margin-top: 3px; direction: ltr; }
+.ins-bar { height: 6px; border-radius: 3px; background: var(--w-border, #2a2e44); margin-top: 6px; overflow: hidden; }
+.ins-bar-fill { height: 100%; background: var(--w-accent, #7aa2f7); transition: width .3s; }
+.ins-bar-fill.danger { background: var(--w-error, #f7768e); }
+.ins-h4 { margin: 16px 0 6px; font-size: 13px; color: var(--w-text-primary, #e6edf3); }
+.ins-docker { display: flex; flex-direction: column; gap: 4px; }
+.ins-cont {
+  display: grid; grid-template-columns: 1.2fr 1.6fr auto; align-items: center; gap: 8px;
+  padding: 6px 8px; border: 1px solid var(--w-border, #2a2e44); border-radius: 5px; font-size: 12px;
+}
+.ins-cont.alert { border-color: var(--w-error, #f7768e); }
+.ins-cont-name { color: var(--w-text-primary, #e6edf3); }
+.ins-cont-stat { color: var(--w-text-secondary, #9aa5ce); direction: ltr; }
+.ins-cont-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.ins-procs { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--w-text-secondary, #9aa5ce); }
+.ins-proc b { color: var(--w-text-primary, #e6edf3); }
+
 /* ── Phase GG: Markdown viewer (reuses .fm-window chrome) ────────────── */
 .md-window {
   /* Override .fm-window's File-Manager-sized minimums + float above it. */

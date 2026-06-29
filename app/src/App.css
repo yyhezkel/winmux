@@ -1935,6 +1935,22 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   color: var(--w-text-dim);
   line-height: 1.5;
 }
+/* Phase 68.E: Settings → Add-ons list. */
+.addons-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.addons-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 8px 10px;
+  border: 1px solid var(--w-border, #2a2e44); border-radius: 6px;
+}
+.addons-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.addons-meta strong { color: var(--w-text-primary, #e6edf3); }
+.addons-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.addons-logs {
+  max-height: 220px; overflow: auto; margin-top: 10px; padding: 10px;
+  background: var(--w-surface-2, rgba(255,255,255,0.05));
+  border: 1px solid var(--w-border, #2a2e44); border-radius: 6px;
+  font-family: var(--w-font-mono, monospace); font-size: 12px; direction: ltr; text-align: left;
+}
 .settings-hint code {
   background: var(--w-surface-hi);
   padding: 1px 6px;

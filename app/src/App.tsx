@@ -2244,6 +2244,7 @@ function App() {
         <SettingsModal
           open={showSettings()}
           settings={settings()!}
+          activeWorkspaceId={file().active_workspace_id ?? undefined}
           onClose={() => setShowSettings(false)}
           onChange={(next) => setSettings(next)}
         />

@@ -183,6 +183,7 @@ dependencies = [
  "ts-rs",
  "ureq",
  "whoami",
+ "winmux-addons",
  "winmux-bootstrap",
  "winmux-core",
  "winmux-policy",
@@ -6903,6 +6904,15 @@ dependencies = [
  "tokio",
  "whoami",
  "winmux-policy",
+]
+
+[[package]]
+name = "winmux-addons"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ts-rs",
 ]
 
 [[package]]

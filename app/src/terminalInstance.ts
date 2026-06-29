@@ -1,6 +1,33 @@
 import { Terminal, type IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { ClipboardAddon } from "@xterm/addon-clipboard";
+import type {
+  IClipboardProvider,
+  ClipboardSelectionType,
+} from "@xterm/addon-clipboard";
+
+// Phase LL: OSC 52 clipboard provider — WRITE-ONLY. A remote program (e.g.
+// Claude's fullscreen renderer) can copy its selection into the OS clipboard
+// via OSC 52; but we deliberately return "" for OSC 52 READ queries so a
+// remote can NEVER exfiltrate the user's local clipboard. The addon hands us
+// the already-base64-decoded text.
+const g_oscClipboardProvider: IClipboardProvider = {
+  readText(_selection: ClipboardSelectionType): string {
+    return "";
+  },
+  async writeText(
+    _selection: ClipboardSelectionType,
+    text: string,
+  ): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      console.debug("[osc52] copied", text.length, "chars to clipboard");
+    } catch (e) {
+      console.warn("OSC52 clipboard write failed", e);
+    }
+  },
+};
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { reorderRtlForDisplay } from "./bidi";
@@ -412,6 +439,12 @@ export class TerminalInstance {
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
+    // Phase LL: OSC 52 clipboard support. Claude Code's new fullscreen
+    // renderer copies the selection by emitting an OSC 52 escape sequence
+    // (the alt-screen + SGR-mouse mode steals drag-selection, so OSC 52 is
+    // how it reaches the system clipboard). xterm.js ignores OSC 52 without
+    // this addon — which is exactly why "copy didn't work" in fullscreen.
+    this.term.loadAddon(new ClipboardAddon(undefined, g_oscClipboardProvider));
     this.term.open(this.container);
 
     // Phase 16: custom key handler. When the user presses plain

@@ -76,6 +76,7 @@ export function InsightsWindow(p: Props) {
   const [snap, setSnap] = createSignal<Snapshot | null>(null);
   const [docker, setDocker] = createSignal<DockerContainer[]>([]);
   const [dockerOk, setDockerOk] = createSignal(false);
+  const [dockerReason, setDockerReason] = createSignal<string | null>(null);
   const [err, setErr] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [auto, setAuto] = createSignal(false);
@@ -96,11 +97,17 @@ export function InsightsWindow(p: Props) {
           workspaceId: p.workspaceId,
           path: "/docker",
         });
-        const parsed = JSON.parse(d) as { available: boolean; containers: DockerContainer[] };
+        const parsed = JSON.parse(d) as {
+          available: boolean;
+          reason?: string;
+          containers: DockerContainer[];
+        };
         setDockerOk(parsed.available);
+        setDockerReason(parsed.available ? null : parsed.reason ?? null);
         setDocker(parsed.containers ?? []);
       } catch {
         setDockerOk(false);
+        setDockerReason(null);
         setDocker([]);
       }
     } catch (e) {
@@ -227,7 +234,15 @@ export function InsightsWindow(p: Props) {
 
                 <h4 class="ins-h4">
                   🐳 Docker ({s().docker_running}/{s().docker_total})
-                  <Show when={!dockerOk()}><span class="settings-hint"> — {t("insights.no_docker")}</span></Show>
+                  <Show when={!dockerOk()}>
+                    <span class="settings-hint"> — {t(
+                      dockerReason() === "permission" ? "insights.dk_reason.permission"
+                      : dockerReason() === "not_installed" ? "insights.dk_reason.not_installed"
+                      : dockerReason() === "no_socket" ? "insights.dk_reason.no_socket"
+                      : dockerReason() === "api_error" ? "insights.dk_reason.api_error"
+                      : "insights.no_docker"
+                    )}</span>
+                  </Show>
                 </h4>
                 <div class="ins-docker">
                   <For each={docker()}>

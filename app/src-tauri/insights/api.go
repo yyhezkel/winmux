@@ -90,7 +90,18 @@ func (s *server) handleHistory(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleDocker(w http.ResponseWriter, _ *http.Request) {
 	conts, err := dockerList()
 	if err != nil {
-		writeJSON(w, map[string]any{"available": false, "containers": []DockerContainer{}})
+		reason := dockerProbe()
+		if reason == "" {
+			// Socket reachable but the API call still failed (daemon down, etc.).
+			reason = "api_error"
+		}
+		writeJSON(w, map[string]any{
+			"available":  false,
+			"reason":     reason,
+			"detail":     err.Error(),
+			"socket":     dockerSockPath(),
+			"containers": []DockerContainer{},
+		})
 		return
 	}
 	writeJSON(w, map[string]any{"available": true, "containers": conts})

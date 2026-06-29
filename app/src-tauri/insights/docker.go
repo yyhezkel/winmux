@@ -7,11 +7,36 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
 
-const dockerSock = "/var/run/docker.sock"
+// dockerSockPath finds the first usable Docker unix socket. The daemon runs as
+// the SSH user (systemd --user / nohup), so the standard root socket at
+// /var/run/docker.sock is often unreadable; rootless Docker exposes a per-user
+// socket under $XDG_RUNTIME_DIR instead. Probe both, honouring DOCKER_HOST.
+func dockerSockPath() string {
+	if h := os.Getenv("DOCKER_HOST"); strings.HasPrefix(h, "unix://") {
+		return strings.TrimPrefix(h, "unix://")
+	}
+	candidates := []string{}
+	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+		candidates = append(candidates, xdg+"/docker.sock")
+	}
+	candidates = append(candidates,
+		fmt.Sprintf("/run/user/%d/docker.sock", os.Getuid()),
+		"/var/run/docker.sock",
+		"/run/docker.sock",
+	)
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	// Fall back to the standard path so the error message is meaningful.
+	return "/var/run/docker.sock"
+}
 
 // DockerContainer is the slim view the Monitor UI renders.
 type DockerContainer struct {
@@ -28,15 +53,40 @@ type DockerContainer struct {
 // dockerHTTP returns an http.Client that talks to the Docker unix socket
 // (no heavy SDK dependency — keeps the daemon tiny).
 func dockerHTTP() *http.Client {
+	sock := dockerSockPath()
 	return &http.Client{
 		Timeout: 4 * time.Second,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer
-				return d.DialContext(ctx, "unix", dockerSock)
+				return d.DialContext(ctx, "unix", sock)
 			},
 		},
 	}
+}
+
+// dockerProbe classifies why Docker is unavailable, so the UI can guide the
+// user (not installed vs. permission vs. socket missing) instead of a generic
+// "socket not reachable".
+func dockerProbe() (reason string) {
+	sock := dockerSockPath()
+	info, err := os.Stat(sock)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "not_installed"
+		}
+		return "no_socket"
+	}
+	_ = info
+	conn, err := net.DialTimeout("unix", sock, 2*time.Second)
+	if err != nil {
+		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
+			return "permission"
+		}
+		return "no_socket"
+	}
+	_ = conn.Close()
+	return ""
 }
 
 func dockerList() ([]DockerContainer, error) {

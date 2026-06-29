@@ -5186,7 +5186,12 @@ pub(crate) fn build_doctor_snapshot(state: &AppState) -> serde_json::Value {
         let mut out: Vec<String> = s
             .lines()
             .rev()
-            .filter(|l| l.contains("ERROR") || l.contains("WARN"))
+            // dlog writes "[<ts>] <msg>" — require that prefix so we only
+            // surface real log entries. Multi-line logged commands put their
+            // continuation lines (e.g. a shell snippet's own `echo "ERROR …"`)
+            // on un-prefixed lines; those are NOT errors and were polluting
+            // the doctor report.
+            .filter(|l| l.starts_with('[') && (l.contains("ERROR") || l.contains("WARN")))
             .take(10)
             .map(|s| s.to_string())
             .collect();
@@ -5974,16 +5979,18 @@ mod migration_tests {
 #[cfg(test)]
 mod smart_connect_tests {
     // Phase 61: Smart Connect injection became shell-aware so local
-    // PowerShell / Cmd panes can launch Claude Code too. POSIX must keep
-    // its historical `exec` form byte-for-byte; the other two must not
+    // PowerShell / Cmd panes can launch Claude Code too. Phase 65 (bug FF
+    // round 2): POSIX no longer uses `exec <cmd>` — it runs the command then
+    // hands off to a fresh interactive shell (`; exec "${SHELL:-bash}"`) so
+    // the SSH channel survives Claude exiting. The other two shells must not
     // contain `exec` (it doesn't exist there).
     use super::{build_smart_connect_script, ShellKind};
 
     #[test]
-    fn posix_claude_keeps_exec_form() {
+    fn posix_claude_hands_off_to_fresh_shell() {
         assert_eq!(
             build_smart_connect_script(ShellKind::Posix, "claude", None, None, None),
-            "exec claude\r\n"
+            "claude; exec \"${SHELL:-bash}\"\r\n"
         );
         assert_eq!(
             build_smart_connect_script(
@@ -5993,7 +6000,7 @@ mod smart_connect_tests {
                 None,
                 Some("--resume abc"),
             ),
-            "cd '/home/x/my proj' && exec claude --resume abc\r\n"
+            "cd '/home/x/my proj' && claude --resume abc; exec \"${SHELL:-bash}\"\r\n"
         );
     }
 
@@ -6037,7 +6044,7 @@ mod smart_connect_tests {
         );
         assert_eq!(
             build_smart_connect_script(ShellKind::Posix, "cmd", None, Some("htop"), None),
-            "exec htop\r\n"
+            "htop; exec \"${SHELL:-bash}\"\r\n"
         );
         // Empty / whitespace command → nothing to inject, even with a cwd.
         assert_eq!(

@@ -242,7 +242,9 @@ RestartSec=5
 WantedBy=default.target
 UNIT
 if command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload 2>/dev/null; then
-  systemctl --user enable --now winmux-insights 2>&1 && echo "started (systemd --user)"
+  systemctl --user enable winmux-insights 2>&1 >/dev/null
+  # restart (not just start) so an update picks up the new binary
+  systemctl --user restart winmux-insights 2>&1 && echo "started (systemd --user)"
 else
   pkill -f 'winmux-insights serve' 2>/dev/null
   nohup "{final_path}" serve >/dev/null 2>&1 &

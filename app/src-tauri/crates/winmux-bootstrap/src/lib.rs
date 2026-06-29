@@ -60,11 +60,25 @@ pub fn parse_manifest(text: &str) -> Result<HashMap<String, ManifestEntry>, Stri
     serde_json::from_str(stripped).map_err(|e| format!("parse manifest: {e}"))
 }
 
+/// One-line summary of a (possibly multi-line) command for the log. Dumping
+/// a whole multi-line snippet (e.g. the PATH rc snippet, which contains
+/// `echo "ERROR ..."` lines) made `/doctor`'s recent-errors scan flag those
+/// script lines as if they were real errors, and bloated debug.log.
+fn cmd_summary(cmd: &str) -> String {
+    let first = cmd.lines().next().unwrap_or("").trim();
+    let n = cmd.lines().count();
+    if n > 1 {
+        format!("{first} …(+{} lines)", n - 1)
+    } else {
+        first.to_string()
+    }
+}
+
 async fn ssh_exec(
     handle: &mut Handle<SshClient>,
     cmd: &str,
 ) -> Result<(String, i32), String> {
-    dlog(&format!("bootstrap: exec '{}'", cmd));
+    dlog(&format!("bootstrap: exec '{}'", cmd_summary(cmd)));
     let mut chan = handle
         .channel_open_session()
         .await
@@ -89,7 +103,7 @@ async fn ssh_exec(
     let stderr_str = String::from_utf8_lossy(&stderr).to_string();
     dlog(&format!(
         "bootstrap: exec '{}' exit={} stdout={:?} stderr={:?}",
-        cmd,
+        cmd_summary(cmd),
         exit_code,
         stdout_str.trim(),
         stderr_str.trim()

@@ -25,6 +25,12 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-29 — Phase 68 add-ons/monitor UX relocation (Yossi) — branch `v0.2.x-integration`
+Yossi: add-ons are per-server, so manage them from the **workspace right-click**, not a global Settings tab; and the monitor button belongs in the **workspace header after Files**, opening the install window when the daemon isn't there. Done:
+- **`AddonsWindow.tsx`** (new) — floating per-workspace add-ons window (wraps `AddonsTab` in `.fm-window` chrome). Opened from a new **"Add-ons…" item in the sidebar workspace context menu** (`onAction("addons")` → App resolves the workspace + opens the window). Shows what's on THAT server (hooks, Insights, cli, tmux-conf).
+- **📊 Insights button in the workspace header**, right after 🗂 Files (`setShowInsights`). When the daemon is unreachable, the Monitor's error state now shows an **"Install Server Insights"** button → closes the monitor + opens the Add-ons window (`onInstall`).
+- The Settings → Add-ons tab stays (harmless extra entry point; same shared `AddonsTab`). i18n en/he/ar/ru (`ws.context.addons`, `sidebar.insights.*`, `insights.install_btn`). tsc green.
+
 ### 2026-06-29 — Phase 68 COMPLETE — 68.D Monitor + 68.F wizard (branch `v0.2.x-integration`)
 - **68.D Monitor UI:** `InsightsWindow.tsx` — floating "📊 Server Insights" window (reuses `.fm-window` chrome). **Real data, no mock:** new `insights_fetch(workspace_id, path)` + `insights_docker_action(...)` Tauri commands curl the daemon's `127.0.0.1:7879` API over the workspace SSH session (token read from the daemon's own file on the remote; whitelisted path; validated action/id). Renders CPU/RAM/per-disk/net as labelled bars (red >80%), a Docker table (state · cpu · mem · status) with Start/Stop/Restart per container + ⚠️ alert rows (>80% cpu/mem), and top processes. Pull-based (refresh button + opt-in 5s auto). Opens from the command palette ("Server Insights"). Graceful "daemon not reachable → install from Add-ons" state. uPlot sparklines deferred (bars for now). i18n en/he/ar/ru + CSS.
 - **68.F wizard add-on step:** reused `AddonsTab` in the ProvisioningWizard **done** step — right after a server is provisioned, the user can install/manage add-ons (incl. Server Insights) in-context. (A pre-install checklist + the connect-existing detect-missing variant are a follow-up refinement.)

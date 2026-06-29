@@ -4329,6 +4329,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 
 /* ── Phase 68.D: Server Insights monitor (reuses .fm-window chrome) ──── */
 .insights-window { min-width: 460px; min-height: 360px; z-index: 95; }
+.addons-window { min-width: 420px; min-height: 320px; z-index: 95; }
 .insights-window .fm-window-header { gap: 8px; }
 .ins-auto { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--w-text-secondary, #9aa5ce); }
 .ins-refresh { background: none; border: none; color: var(--w-text-primary, #e6edf3); cursor: pointer; font-size: 15px; }

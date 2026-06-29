@@ -38,7 +38,7 @@ interface Props {
   onOpenNotes: () => void;
   onAction: (
     id: string,
-    action: "rename" | "edit" | "delete" | "disconnect",
+    action: "rename" | "edit" | "delete" | "disconnect" | "addons",
   ) => void;
   // Phase 36.A / 39: all forwards across workspaces, for the per-
   // workspace inline 🌐 badge. Clicking the badge opens the Ports
@@ -214,6 +214,11 @@ export function Sidebar(p: Props) {
                   </button>
                   <button onClick={() => p.onAction(w.id, "edit")}>
                     {t("ws.context.edit")}
+                  </button>
+                  {/* Phase 68 (UX): per-workspace add-ons (hooks, Insights,
+                      cli, tmux-conf) live on the remote — manage them here. */}
+                  <button onClick={() => p.onAction(w.id, "addons")}>
+                    {t("ws.context.addons")}
                   </button>
                   {/* Phase 65.Q removed "Add this machine…" — joining an
                       existing server now goes through the main wizard. */}

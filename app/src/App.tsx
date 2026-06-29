@@ -10,6 +10,7 @@ import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
 import { ProvisioningWizard } from "./ProvisioningWizard";
 import { InsightsWindow } from "./InsightsWindow";
+import { AddonsWindow } from "./AddonsWindow";
 import { SettingsModal } from "./SettingsModal";
 import { SshKeyOfferModal } from "./SshKeyOfferModal";
 import { CommandPalette, type Command } from "./CommandPalette";
@@ -173,6 +174,7 @@ function App() {
   // mode, so there's no separate connect-existing modal anymore.
   const [showProvision, setShowProvision] = createSignal(false);
   const [showInsights, setShowInsights] = createSignal(false);
+  const [addonsWin, setAddonsWin] = createSignal<{ id: string; name: string } | null>(null);
   // Phase 35 (#1.3): command palette (Ctrl+Shift+P).
   const [showPalette, setShowPalette] = createSignal(false);
   // Phase 36 (#2.2): live auto port-forwards (all workspaces).
@@ -1897,6 +1899,10 @@ function App() {
             } else if (action === "delete") void handleDelete(id);
             else if (action === "disconnect")
               void handleDisconnectWorkspace(id);
+            else if (action === "addons") {
+              const ws = file().workspaces.find((w) => w.id === id);
+              setAddonsWin({ id, name: ws?.name ?? "" });
+            }
             // Phase 65.Q removed the "add_machine" action — joining an
             // existing server is handled by the main wizard (R).
           }}
@@ -2005,6 +2011,14 @@ function App() {
                 onClick={() => setShowFilesWindow(true)}
               >
                 🗂 {t("sidebar.files.label")}
+              </button>
+              {/* Phase 68 (UX): Server Insights monitor, right after Files. */}
+              <button
+                class="ws-header-btn"
+                title={t("sidebar.insights.tooltip")}
+                onClick={() => setShowInsights(true)}
+              >
+                📊 {t("sidebar.insights.label")}
               </button>
               {/* Phase 24.D: removed + chat / + claude log buttons.
                   The two pane kinds + their backends are rolled back
@@ -2259,6 +2273,18 @@ function App() {
         workspaceId={file().active_workspace_id ?? undefined}
         workspaceName={activeWs()?.name}
         onClose={() => setShowInsights(false)}
+        onInstall={() => {
+          const ws = activeWs();
+          if (ws) setAddonsWin({ id: ws.id, name: ws.name });
+        }}
+      />
+
+      {/* Phase 68 (UX): per-workspace Add-ons window (from right-click). */}
+      <AddonsWindow
+        open={!!addonsWin()}
+        workspaceId={addonsWin()?.id}
+        workspaceName={addonsWin()?.name}
+        onClose={() => setAddonsWin(null)}
       />
 
       {/* Phase 32.B: SSH key offer. Self-contained — listens for the

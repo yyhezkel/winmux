@@ -40,6 +40,8 @@ interface Props {
   workspaceId?: string;
   workspaceName?: string;
   onClose: () => void;
+  /** Phase 68 (UX): open the Add-ons window to install the daemon. */
+  onInstall?: () => void;
 }
 
 const DEFAULT_GEOMETRY: Geometry = { x: 180, y: 90, w: 820, h: 620 };
@@ -173,6 +175,18 @@ export function InsightsWindow(p: Props) {
             <div class="wizard-test-result err" style="margin:10px">
               <div class="wizard-test-line">✗ {err()}</div>
               <div class="wizard-test-meta">{t("insights.install_hint")}</div>
+              <Show when={p.onInstall}>
+                <button
+                  class="primary"
+                  style="margin-top:8px"
+                  onClick={() => {
+                    p.onClose();
+                    p.onInstall!();
+                  }}
+                >
+                  {t("insights.install_btn")}
+                </button>
+              </Show>
             </div>
           </Show>
           <Show when={snap()}>

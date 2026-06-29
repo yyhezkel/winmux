@@ -103,6 +103,9 @@ pub mod routines {
     pub const HOOKS_INSTALL: &str = "hooks_install";
     pub const HOOKS_UNINSTALL: &str = "hooks_uninstall";
     pub const HOOKS_DETECT: &str = "hooks_detect";
+    pub const INSIGHTS_INSTALL: &str = "insights_install";
+    pub const INSIGHTS_UNINSTALL: &str = "insights_uninstall";
+    pub const INSIGHTS_DETECT: &str = "insights_detect";
 }
 
 /// Stable add-on ids.
@@ -187,22 +190,23 @@ pub fn builtin_registry() -> Vec<AddonManifest> {
             description: "Lightweight metrics daemon (CPU/RAM/disk/net/Docker).".into(),
             version: INSIGHTS_VERSION.into(),
             dependencies: vec![ids::CLI.into()],
-            // 68.C provides the real fetch+install script; placeholder
-            // detect works today (binary absent ⇒ empty stdout).
-            install: AddonAction::Shell {
-                script: "${WINMUX_BIN} insights install".into(),
+            // 68.C: the desktop AddonManager SFTP-uploads the bundled
+            // daemon binary (arch-matched) + starts it; detect asks the
+            // installed daemon for its version.
+            install: AddonAction::Builtin {
+                routine: routines::INSIGHTS_INSTALL.into(),
             },
-            uninstall: AddonAction::Shell {
-                script: "${WINMUX_BIN} insights uninstall".into(),
+            uninstall: AddonAction::Builtin {
+                routine: routines::INSIGHTS_UNINSTALL.into(),
             },
-            update: AddonAction::Shell {
-                script: "${WINMUX_BIN} insights install --force".into(),
+            update: AddonAction::Builtin {
+                routine: routines::INSIGHTS_INSTALL.into(),
             },
-            detect: AddonAction::Shell {
-                script: "\"${REMOTE_HOME}/.winmux/bin/winmux-insights\" --version 2>/dev/null || true"
-                    .into(),
+            detect: AddonAction::Builtin {
+                routine: routines::INSIGHTS_DETECT.into(),
             },
-            // System systemd unit needs sudo; falls back to --user without.
+            // Runs as a `systemd --user` service (no sudo needed); falls
+            // back to nohup when user-lingering isn't available.
             needs_sudo: false,
         },
     ]

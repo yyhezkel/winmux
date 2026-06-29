@@ -19,15 +19,18 @@ import {
 } from "./settings";
 import { applyI18nSettings, LANGUAGES, t } from "./i18n";
 import { formatEvent } from "./shortcuts";
+import { AddonsTab } from "./AddonsTab";
 
 interface Props {
   open: boolean;
   settings: Settings;
   onClose: () => void;
   onChange: (next: Settings) => void;
+  /** Phase 68.E: active workspace — add-ons are per-remote. */
+  activeWorkspaceId?: string;
 }
 
-type Tab = "general" | "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "updates" | "logs" | "language" | "stt";
+type Tab = "general" | "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "addons" | "updates" | "logs" | "language" | "stt";
 
 export function SettingsModal(p: Props) {
   const [tab, setTab] = createSignal<Tab>("theme");
@@ -203,7 +206,7 @@ export function SettingsModal(p: Props) {
 
           <div class="settings-body">
             <nav class="settings-tabs">
-              <For each={["general", "theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "updates", "logs", "language", "stt"] as Tab[]}>
+              <For each={["general", "theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "addons", "updates", "logs", "language", "stt"] as Tab[]}>
                 {(name) => (
                   <button
                     class={`settings-tab ${tab() === name ? "active" : ""}`}
@@ -730,6 +733,11 @@ export function SettingsModal(p: Props) {
                     <pre class="settings-logs-viewer">{doctorJson()}</pre>
                   </Show>
                 </section>
+              </Show>
+
+              {/* ── Add-ons (Phase 68.E) ─────────────────────────────── */}
+              <Show when={tab() === "addons"}>
+                <AddonsTab workspaceId={p.activeWorkspaceId} />
               </Show>
 
               {/* ── Language ──────────────────────────────────────────── */}

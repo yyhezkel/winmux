@@ -17,13 +17,21 @@ use std::sync::Arc;
 
 use russh::client::Handle as SshHandle;
 use russh::ChannelMsg;
+use russh_sftp::client::SftpSession;
 use tauri::State;
+use tokio::io::AsyncWriteExt;
 
 use winmux_addons::{
     builtin_registry, ids, manifest_for, routines, AddonAction, AddonManifest, AddonStatus,
 };
 
 use crate::{AppState, Session, SshClient};
+
+// Phase 68.C: the cross-compiled insights daemon, embedded so the AddonManager
+// can SFTP-upload the arch-matched binary on install (no GitHub release needed
+// for testing; the eventual release can switch to fetch).
+const INSIGHTS_X64: &[u8] = include_bytes!("../resources/winmux-insights-linux-x64");
+const INSIGHTS_ARM64: &[u8] = include_bytes!("../resources/winmux-insights-linux-arm64");
 
 /// A live SSH handle for the workspace (mirrors file_manager's picker).
 fn pick_handle(state: &AppState, workspace_id: &str) -> Option<Arc<SshHandle<SshClient>>> {
@@ -136,8 +144,113 @@ async fn run_builtin(
             .await
         }
         routines::HOOKS_UNINSTALL => exec(handle, &hooks_uninstall_script(home), 15).await,
+        routines::INSIGHTS_DETECT => {
+            exec(
+                handle,
+                &format!("\"{home}/.winmux/bin/winmux-insights\" --version 2>/dev/null | head -1"),
+                8,
+            )
+            .await
+        }
+        routines::INSIGHTS_INSTALL => insights_install(handle, home).await,
+        routines::INSIGHTS_UNINSTALL => {
+            exec(
+                handle,
+                &format!(
+                    "systemctl --user disable --now winmux-insights 2>/dev/null; \
+                     pkill -f 'winmux-insights serve' 2>/dev/null; \
+                     rm -f \"{home}/.winmux/bin/winmux-insights\"; echo removed"
+                ),
+                15,
+            )
+            .await
+        }
         other => Err(format!("unknown builtin routine {other}")),
     }
+}
+
+/// Upload bytes to a remote path via a fresh SFTP channel (atomic-ish:
+/// write to .tmp then mv).
+async fn sftp_upload(
+    handle: &SshHandle<SshClient>,
+    remote_path: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let chan = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("open channel: {e}"))?;
+    chan.request_subsystem(true, "sftp")
+        .await
+        .map_err(|e| format!("request sftp: {e}"))?;
+    let sftp = SftpSession::new(chan.into_stream())
+        .await
+        .map_err(|e| format!("sftp init: {e}"))?;
+    {
+        let mut f = sftp
+            .create(remote_path)
+            .await
+            .map_err(|e| format!("sftp create {remote_path}: {e}"))?;
+        f.write_all(bytes)
+            .await
+            .map_err(|e| format!("sftp write: {e}"))?;
+        f.flush().await.ok();
+        f.shutdown().await.ok();
+    }
+    let _ = sftp.close().await;
+    Ok(())
+}
+
+/// 68.C: install the insights daemon — arch-detect, SFTP-upload the
+/// embedded binary, then start it as a `systemd --user` service (falling
+/// back to nohup). The daemon self-creates its API token on first run.
+async fn insights_install(handle: &SshHandle<SshClient>, home: &str) -> Result<String, String> {
+    let uname = exec(handle, "uname -m", 8).await.unwrap_or_default();
+    let bytes: &[u8] = if uname.contains("aarch64") || uname.contains("arm64") {
+        INSIGHTS_ARM64
+    } else {
+        INSIGHTS_X64
+    };
+    let _ = exec(
+        handle,
+        &format!("mkdir -p \"{home}/.winmux/bin\" \"{home}/.winmux/insights\""),
+        8,
+    )
+    .await;
+    let final_path = format!("{home}/.winmux/bin/winmux-insights");
+    let tmp = format!("{final_path}.tmp");
+    sftp_upload(handle, &tmp, bytes).await?;
+    let _ = exec(
+        handle,
+        &format!("chmod 0755 \"{tmp}\" && mv -f \"{tmp}\" \"{final_path}\""),
+        10,
+    )
+    .await;
+    // Prefer a user systemd unit (auto-restart, survives logout if lingering
+    // is on); fall back to nohup where systemd --user isn't usable.
+    let start = format!(
+        r#"mkdir -p "{home}/.config/systemd/user"
+cat > "{home}/.config/systemd/user/winmux-insights.service" <<'UNIT'
+[Unit]
+Description=winmux insights daemon
+After=network.target
+[Service]
+ExecStart={final_path} serve
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=default.target
+UNIT
+if command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload 2>/dev/null; then
+  systemctl --user enable --now winmux-insights 2>&1 && echo "started (systemd --user)"
+else
+  pkill -f 'winmux-insights serve' 2>/dev/null
+  nohup "{final_path}" serve >/dev/null 2>&1 &
+  echo "started (nohup)"
+fi"#
+    );
+    let r = exec(handle, &start, 20).await?;
+    Ok(format!("installed; {}", r.trim().lines().last().unwrap_or("")))
 }
 
 /// Strip winmux hook entries from settings.json + hooks.json (best-effort).

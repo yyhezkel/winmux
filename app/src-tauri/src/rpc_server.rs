@@ -140,49 +140,61 @@ async fn handle_client_with_telemetry(
     ));
 }
 
+/// v0.3.1 (pipe-instance-leak fix): the pipe RPC protocol is **one request per
+/// connection** — a hook fires, sends one feed.push line, reads one reply, and
+/// is done. Previously `handle_client` looped waiting for a *next* request that
+/// never comes, and the tunnel bridge's `copy_bidirectional` does NOT propagate
+/// the remote CLI's channel-close to the local pipe (the russh ChannelStream
+/// doesn't surface EOF here), so the handler blocked in `read_line` FOREVER —
+/// never dropping the `NamedPipeServer`, leaking one of the 254 `max_instances`.
+/// Phase 66 made hooks fire on every Claude tool call, so the pipe exhausted
+/// within ~254 calls and ERROR_PIPE_BUSY (231) wedged every connection.
+///
+/// Fix: serve exactly one request, then return — the stream drops, the pipe
+/// instance is freed immediately, and the bridge's `copy_bidirectional`
+/// unblocks (it sees the pipe EOF). The bounded first-read guards a client that
+/// connects but never sends. A blocking permission decision runs inside
+/// `dispatch` (after the read), so gated requests are unaffected.
+const HANDLER_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 async fn handle_client(stream: NamedPipeServer, state: AppState, app: AppHandle) {
     let (read_half, write_half) = tokio::io::split(stream);
     let mut reader = BufReader::new(read_half);
     let mut writer = write_half;
     let mut line = String::new();
-    loop {
-        line.clear();
-        match reader.read_line(&mut line).await {
-            Ok(0) => break,
-            Ok(_) => {}
-            Err(_) => break,
-        }
-        let req: Value = match serde_json::from_str(line.trim()) {
-            Ok(v) => v,
-            Err(e) => {
-                let resp = json!({
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": { "code": -32700, "message": format!("parse error: {e}") }
-                });
-                let _ = writer.write_all(format!("{resp}\n").as_bytes()).await;
-                continue;
-            }
-        };
-        let id = req.get("id").cloned().unwrap_or(Value::Null);
-        let method = req
-            .get("method")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let params = req.get("params").cloned().unwrap_or(json!({}));
-        let result = dispatch(&method, params, &state, &app).await;
-        let resp = match result {
-            Ok(v) => json!({ "jsonrpc": "2.0", "id": id, "result": v }),
-            Err(e) => json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": { "code": -32000, "message": e }
-            }),
-        };
-        let _ = writer.write_all(format!("{resp}\n").as_bytes()).await;
-        let _ = writer.flush().await;
+    // Read the single request line (bounded so a silent client can't pin the
+    // instance). Anything other than a non-empty line → nothing to serve.
+    match tokio::time::timeout(HANDLER_READ_TIMEOUT, reader.read_line(&mut line)).await {
+        Ok(Ok(n)) if n > 0 => {}
+        _ => return,
     }
+    let resp = match serde_json::from_str::<Value>(line.trim()) {
+        Ok(req) => {
+            let id = req.get("id").cloned().unwrap_or(Value::Null);
+            let method = req
+                .get("method")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let params = req.get("params").cloned().unwrap_or(json!({}));
+            match dispatch(&method, params, &state, &app).await {
+                Ok(v) => json!({ "jsonrpc": "2.0", "id": id, "result": v }),
+                Err(e) => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": { "code": -32000, "message": e }
+                }),
+            }
+        }
+        Err(e) => json!({
+            "jsonrpc": "2.0",
+            "id": null,
+            "error": { "code": -32700, "message": format!("parse error: {e}") }
+        }),
+    };
+    let _ = writer.write_all(format!("{resp}\n").as_bytes()).await;
+    let _ = writer.flush().await;
+    // Return → `stream` (split halves) drop → pipe instance freed immediately.
 }
 
 fn translate_key(key: &str) -> Vec<u8> {
@@ -2061,6 +2073,83 @@ mod tests {
                 "client {i} expected Ok, got {:?} (231 = pool exhausted)",
                 r.as_ref().err().map(|e| e.raw_os_error())
             );
+        }
+    }
+
+    // v0.3.1 pipe-instance-leak regression: 500 SEQUENTIAL one-shot clients
+    // (simulating 500 Claude hook calls) must all succeed. The pre-fix handler
+    // looped forever (never dropping its NamedPipeServer), so each connection
+    // permanently consumed one of the 254 max_instances and the pipe was
+    // exhausted after ~254 — exactly the bug that disconnected sessions. With
+    // the one-shot handler (read one line, reply, DROP), instances are freed
+    // and 500+ connections cycle cleanly.
+    #[tokio::test]
+    async fn pool_survives_500_sequential_oneshot_clients() {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+        const POOL_SIZE: usize = 8;
+        const CLIENTS: usize = 500;
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let name = format!(r"\\.\pipe\winmux-test-031-leak-{n}");
+
+        for _ in 0..POOL_SIZE {
+            let name = name.clone();
+            tokio::spawn(async move {
+                loop {
+                    let listener = match super::make_listener(&name) {
+                        Ok(l) => l,
+                        Err(_) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                            continue;
+                        }
+                    };
+                    if listener.connect().await.is_ok() {
+                        // One-shot handler mirroring the fixed handle_client:
+                        // read one line, reply, then drop → free the instance.
+                        tokio::spawn(async move {
+                            let (rh, mut wh) = tokio::io::split(listener);
+                            let mut br = tokio::io::BufReader::new(rh);
+                            let mut line = String::new();
+                            let _ = br.read_line(&mut line).await;
+                            let _ = wh.write_all(b"OK\n").await;
+                            let _ = wh.flush().await;
+                            // br + wh drop here → NamedPipeServer freed.
+                        });
+                    }
+                }
+            });
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+
+        for i in 0..CLIENTS {
+            // Open (retry only on transient 231, capped so a real leak FAILS
+            // the test instead of hanging).
+            let mut client = {
+                let mut attempt = 0;
+                loop {
+                    match tokio::net::windows::named_pipe::ClientOptions::new().open(&name) {
+                        Ok(c) => break c,
+                        Err(e) if e.raw_os_error() == Some(231) && attempt < 200 => {
+                            attempt += 1;
+                            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                        }
+                        Err(e) => panic!(
+                            "client {i} failed to open after {attempt} retries: {:?} \
+                             (231 sustained = pipe-instance leak)",
+                            e.raw_os_error()
+                        ),
+                    }
+                }
+            };
+            client.write_all(b"REQ\n").await.unwrap();
+            let mut buf = [0u8; 3];
+            client
+                .read_exact(&mut buf)
+                .await
+                .unwrap_or_else(|e| panic!("client {i} read failed: {e}"));
+            assert_eq!(&buf, b"OK\n", "client {i} got wrong reply");
         }
     }
 }

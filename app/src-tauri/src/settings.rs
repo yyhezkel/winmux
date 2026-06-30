@@ -709,9 +709,7 @@ impl Default for Updates {
             // API rate limits. Updated as part of each release flow
             // (see RELEASING.md). A power user can override the URL
             // here without recompiling.
-            manifest_url: Some(
-                "https://raw.githubusercontent.com/yyhezkel/winmux/main/manifest.json".into(),
-            ),
+            manifest_url: Some(DEFAULT_MANIFEST_URL.into()),
             last_check_iso: None,
             last_seen_version: None,
             skipped_versions: Vec::new(),
@@ -875,6 +873,39 @@ pub(crate) fn save_to_disk_pub(file: &Settings) -> Result<(), String> {
     save_to_disk(file)
 }
 
+/// The canonical update manifest (raw.githubusercontent — no API rate limit).
+const DEFAULT_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/yyhezkel/winmux/main/manifest.json";
+
+/// One-shot fixups for an on-disk settings.json written by an older winmux.
+/// Returns true if anything changed (so the caller re-persists). Phase 71:
+/// an early default shipped a placeholder `winmux.example.com` manifest URL
+/// that can never resolve — it caused the recurring `hooks-check: fetch
+/// manifest failed` DNS spam. Replace any example/placeholder host with the
+/// real default so update checks (and the version banner) work.
+fn migrate_settings(s: &mut Settings) -> bool {
+    let mut changed = false;
+    let is_placeholder = s
+        .updates
+        .manifest_url
+        .as_deref()
+        .map(|u| {
+            let l = u.to_ascii_lowercase();
+            u.trim().is_empty()
+                || l.contains("example.com")
+                || l.contains("example.org")
+                || l.contains("your-domain")
+                || l.contains("changeme")
+        })
+        .unwrap_or(true);
+    if is_placeholder {
+        s.updates.manifest_url = Some(DEFAULT_MANIFEST_URL.to_string());
+        changed = true;
+        dlog("settings: migrated placeholder manifest_url → default");
+    }
+    changed
+}
+
 pub(crate) fn load_from_disk() -> Result<Settings, String> {
     let path = settings_path()?;
     if !path.exists() {
@@ -890,7 +921,14 @@ pub(crate) fn load_from_disk() -> Result<Settings, String> {
     let text = std::fs::read_to_string(&path).map_err(|e| format!("read {:?}: {e}", path))?;
     let parsed: Result<Settings, _> = serde_json::from_str(text.trim_start_matches('\u{FEFF}'));
     match parsed {
-        Ok(s) => Ok(s),
+        Ok(mut s) => {
+            if migrate_settings(&mut s) {
+                // Persist the migrated values so the fix sticks (and the
+                // placeholder-URL spam stops for good). Best-effort.
+                let _ = save_to_disk(&s);
+            }
+            Ok(s)
+        }
         Err(e) => {
             // Forward-compat: if the schema grew, fall back to defaults rather
             // than refusing to start. The user can re-save from the UI to
@@ -1178,7 +1216,32 @@ fn insert_at_path(root: &mut Value, path: &str, leaf: Value) -> Result<(), Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{MigrationFlags, Settings};
+    use super::{migrate_settings, MigrationFlags, Settings, DEFAULT_MANIFEST_URL};
+
+    #[test]
+    fn migrates_placeholder_manifest_url() {
+        let mut s = Settings::default();
+        s.updates.manifest_url = Some("https://winmux.example.com/manifest.json".into());
+        assert!(migrate_settings(&mut s), "should report a change");
+        assert_eq!(s.updates.manifest_url.as_deref(), Some(DEFAULT_MANIFEST_URL));
+    }
+
+    #[test]
+    fn migrates_empty_manifest_url() {
+        let mut s = Settings::default();
+        s.updates.manifest_url = Some("".into());
+        assert!(migrate_settings(&mut s));
+        assert_eq!(s.updates.manifest_url.as_deref(), Some(DEFAULT_MANIFEST_URL));
+    }
+
+    #[test]
+    fn leaves_real_manifest_url_alone() {
+        let mut s = Settings::default();
+        s.updates.manifest_url = Some("https://example-server.io/my.json".into());
+        // "example-server.io" is NOT a placeholder host (no "example.com").
+        assert!(!migrate_settings(&mut s));
+        assert_eq!(s.updates.manifest_url.as_deref(), Some("https://example-server.io/my.json"));
+    }
 
     #[test]
     fn migration_flags_default_is_not_run() {

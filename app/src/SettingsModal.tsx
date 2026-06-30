@@ -18,6 +18,7 @@ import {
   DEFAULT_CLAUDE_SETTINGS,
 } from "./settings";
 import { applyI18nSettings, LANGUAGES, t } from "./i18n";
+import { VersionManager } from "./VersionManager";
 import { formatEvent } from "./shortcuts";
 import { AddonsTab } from "./AddonsTab";
 
@@ -753,6 +754,20 @@ export function SettingsModal(p: Props) {
                     </div>
                   </Show>
 
+                  {/* Phase 71: version history + install/downgrade + channel. */}
+                  <hr class="modal-sep" />
+                  <h4>{t("vm.history")}</h4>
+                  <VersionManager
+                    channel={p.settings.updates.channel}
+                    onSetChannel={(c) => update("updates", { ...p.settings.updates, channel: c })}
+                    skipped={p.settings.updates.skipped_versions}
+                    onUnskip={(v) =>
+                      update("updates", {
+                        ...p.settings.updates,
+                        skipped_versions: p.settings.updates.skipped_versions.filter((x) => x !== v),
+                      })
+                    }
+                  />
                 </section>
               </Show>
 

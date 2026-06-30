@@ -99,6 +99,10 @@ export interface UpdatesSettings {
   manifest_url?: string | null;
   last_check_iso?: string | null;
   last_seen_version?: string | null;
+  skipped_versions: string[];
+  remind_after_iso?: string | null;
+  // Phase 71: "stable" | "beta".
+  channel: string;
 }
 
 export interface ShortcutsSettings {

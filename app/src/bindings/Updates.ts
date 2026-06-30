@@ -12,4 +12,10 @@ skipped_versions: Array<string>,
  * Phase 65 (U): "remind me later" — suppress the banner until this
  * ISO timestamp passes. None = no active snooze.
  */
-remind_after_iso: string | null, };
+remind_after_iso: string | null, 
+/**
+ * Phase 71: update channel — "stable" (only `MAJOR.MINOR.PATCH`
+ * releases) or "beta" (also shows pre-releases like `0.4.0-beta1`).
+ * Older settings.json without this field default to stable.
+ */
+channel: string, };

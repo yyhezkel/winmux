@@ -5637,6 +5637,9 @@ pub fn run() {
             updater::download_and_install_update,
             updater::updater_skip_version,
             updater::updater_remind_later,
+            // Phase 71: version manager — list + install-specific-version.
+            updater::updater_list_versions,
+            updater::updater_install_version,
             updater::ssh_exec_in_workspace,
             connect_wizard::parse_ssh_config,
             connect_wizard::list_ssh_keys,

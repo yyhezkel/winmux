@@ -648,3 +648,314 @@ pub(crate) async fn download_and_install_update(
     });
     Ok(())
 }
+
+// ─── Phase 71: version manager (list + install-specific-version) ──────────
+
+/// One published release, as the Settings → Updates "version history" list
+/// needs it. Built from the GitHub releases API. Plain `Serialize` (the TS
+/// side defines the matching interface), consistent with `UpdateInfo`.
+#[derive(Clone, Serialize)]
+pub(crate) struct ReleaseInfo {
+    pub version: String, // tag without a leading 'v'
+    pub tag: String,
+    pub published_at: Option<String>,
+    pub notes_url: String,
+    pub body_md: String,
+    pub prerelease: bool,
+    pub nsis_url: Option<String>,
+    pub nsis_sha256: Option<String>,
+    pub msi_url: Option<String>,
+    pub msi_sha256: Option<String>,
+}
+
+// GitHub releases API — only the fields we use.
+#[derive(Deserialize)]
+struct GhRelease {
+    tag_name: String,
+    #[serde(default)]
+    published_at: Option<String>,
+    #[serde(default)]
+    html_url: String,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    assets: Vec<GhAsset>,
+}
+
+#[derive(Deserialize)]
+struct GhAsset {
+    name: String,
+    browser_download_url: String,
+    #[serde(default)]
+    digest: Option<String>, // "sha256:<hex>" on newer GitHub
+}
+
+const GITHUB_RELEASES_API: &str =
+    "https://api.github.com/repos/yyhezkel/winmux/releases?per_page=50";
+
+/// 5-minute cache so flicking between channels / re-opening Settings doesn't
+/// hammer the unauthenticated GitHub API (60 req/hr).
+static VERSIONS_CACHE: std::sync::Mutex<Option<(std::time::Instant, Vec<ReleaseInfo>)>> =
+    std::sync::Mutex::new(None);
+const VERSIONS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+fn cached_versions() -> Option<Vec<ReleaseInfo>> {
+    let guard = VERSIONS_CACHE.lock().ok()?;
+    let (at, list) = guard.as_ref()?;
+    if at.elapsed() < VERSIONS_CACHE_TTL {
+        Some(list.clone())
+    } else {
+        None
+    }
+}
+
+fn cached_versions_stale() -> Option<Vec<ReleaseInfo>> {
+    let guard = VERSIONS_CACHE.lock().ok()?;
+    guard.as_ref().map(|(_, list)| list.clone())
+}
+
+fn store_versions(list: &[ReleaseInfo]) {
+    if let Ok(mut g) = VERSIONS_CACHE.lock() {
+        *g = Some((std::time::Instant::now(), list.to_vec()));
+    }
+}
+
+fn strip_sha256(digest: &Option<String>) -> Option<String> {
+    digest
+        .as_deref()
+        .map(|d| d.strip_prefix("sha256:").unwrap_or(d).to_string())
+}
+
+/// Fetch + parse the releases list from GitHub. drafts are skipped; the API
+/// already returns newest-first.
+async fn fetch_releases() -> Result<Vec<ReleaseInfo>, String> {
+    let body = tokio::task::spawn_blocking(|| -> Result<String, String> {
+        let resp = ureq::get(GITHUB_RELEASES_API)
+            .set("User-Agent", &format!("winmux/{}", env!("CARGO_PKG_VERSION")))
+            .set("Accept", "application/vnd.github+json")
+            .set("X-GitHub-Api-Version", "2022-11-28")
+            .timeout(std::time::Duration::from_secs(10))
+            .call()
+            .map_err(|e| format!("github releases: {e}"))?;
+        if resp.status() < 200 || resp.status() >= 300 {
+            return Err(format!("github releases HTTP {}", resp.status()));
+        }
+        resp.into_string().map_err(|e| format!("read body: {e}"))
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))??;
+
+    parse_releases(&body)
+}
+
+/// Pure parse of a GitHub releases JSON body → ReleaseInfo list (drafts
+/// dropped). Split out so it's unit-testable without a network call.
+fn parse_releases(body: &str) -> Result<Vec<ReleaseInfo>, String> {
+    let raw: Vec<GhRelease> =
+        serde_json::from_str(body).map_err(|e| format!("parse releases: {e}"))?;
+    Ok(raw
+        .into_iter()
+        .filter(|r| !r.draft)
+        .map(|r| {
+            let nsis = r.assets.iter().find(|a| a.name.ends_with("-setup.exe"));
+            let msi = r.assets.iter().find(|a| a.name.ends_with(".msi"));
+            ReleaseInfo {
+                version: r.tag_name.trim_start_matches('v').to_string(),
+                tag: r.tag_name.clone(),
+                published_at: r.published_at,
+                notes_url: r.html_url,
+                body_md: r.body.unwrap_or_default(),
+                prerelease: r.prerelease,
+                nsis_url: nsis.map(|a| a.browser_download_url.clone()),
+                nsis_sha256: nsis.and_then(|a| strip_sha256(&a.digest)),
+                msi_url: msi.map(|a| a.browser_download_url.clone()),
+                msi_sha256: msi.and_then(|a| strip_sha256(&a.digest)),
+            }
+        })
+        .collect())
+}
+
+#[cfg(test)]
+mod version_manager_tests {
+    use super::{parse_releases, strip_sha256};
+
+    #[test]
+    fn strips_sha256_prefix() {
+        assert_eq!(strip_sha256(&Some("sha256:abc".into())), Some("abc".into()));
+        assert_eq!(strip_sha256(&Some("abc".into())), Some("abc".into()));
+        assert_eq!(strip_sha256(&None), None);
+    }
+
+    #[test]
+    fn parses_github_releases() {
+        let json = r#"[
+          {
+            "tag_name": "v0.3.1", "published_at": "2026-06-30T17:32:00Z",
+            "html_url": "https://github.com/yyhezkel/winmux/releases/tag/v0.3.1",
+            "body": "notes here", "prerelease": false, "draft": false,
+            "assets": [
+              {"name": "winmux_0.3.1_x64-setup.exe", "browser_download_url": "https://x/setup.exe", "digest": "sha256:deadbeef"},
+              {"name": "winmux_0.3.1_x64_en-US.msi", "browser_download_url": "https://x/app.msi", "digest": "sha256:cafef00d"}
+            ]
+          },
+          {
+            "tag_name": "v0.4.0-beta1", "published_at": null, "html_url": "https://x",
+            "body": null, "prerelease": true, "draft": false, "assets": []
+          },
+          {
+            "tag_name": "v9.9.9-draft", "html_url": "https://x",
+            "prerelease": false, "draft": true, "assets": []
+          }
+        ]"#;
+        let list = parse_releases(json).expect("should parse");
+        assert_eq!(list.len(), 2, "draft must be dropped");
+
+        let r0 = &list[0];
+        assert_eq!(r0.version, "0.3.1");
+        assert_eq!(r0.tag, "v0.3.1");
+        assert!(!r0.prerelease);
+        assert_eq!(r0.nsis_url.as_deref(), Some("https://x/setup.exe"));
+        assert_eq!(r0.nsis_sha256.as_deref(), Some("deadbeef"));
+        assert_eq!(r0.msi_sha256.as_deref(), Some("cafef00d"));
+
+        let r1 = &list[1];
+        assert_eq!(r1.version, "0.4.0-beta1");
+        assert!(r1.prerelease, "beta must be flagged for channel filtering");
+        assert!(r1.nsis_url.is_none());
+        assert_eq!(r1.body_md, "");
+    }
+}
+
+/// List published versions (newest-first). `force` bypasses the 5-min cache.
+/// On a fetch failure (rate limit / offline) we fall back to the stale cache
+/// if present, so the list still renders (71.E).
+#[tauri::command]
+pub(crate) async fn updater_list_versions(force: bool) -> Result<Vec<ReleaseInfo>, String> {
+    if !force {
+        if let Some(c) = cached_versions() {
+            return Ok(c);
+        }
+    }
+    match fetch_releases().await {
+        Ok(list) => {
+            store_versions(&list);
+            Ok(list)
+        }
+        Err(e) => {
+            if let Some(stale) = cached_versions_stale() {
+                dlog(&format!(
+                    "updater: list_versions fetch failed ({e}) — serving stale cache"
+                ));
+                Ok(stale)
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Back up settings.json before a downgrade (71.C). Best-effort copy to a
+/// sibling so a newer-version-written settings.json isn't lost if an older
+/// winmux rewrites it.
+fn backup_settings_file(tag: &str) -> Result<String, String> {
+    let dir = crate::config_dir_pub()?;
+    let src = dir.join("settings.json");
+    if !src.exists() {
+        return Ok(String::new());
+    }
+    let safe_tag: String = tag
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+        .collect();
+    let dest = dir.join(format!("settings.backup-before-{safe_tag}.json"));
+    std::fs::copy(&src, &dest).map_err(|e| format!("backup settings: {e}"))?;
+    dlog(&format!("updater: backed up settings.json -> {}", dest.display()));
+    Ok(dest.to_string_lossy().to_string())
+}
+
+/// Download + verify + install a SPECIFIC published version (71.B/C). Unlike
+/// `download_and_install_update`, this has NO newer-than guard, so it powers
+/// downgrades too. `backup_settings` copies settings.json first.
+#[tauri::command]
+pub(crate) async fn updater_install_version(
+    app: AppHandle,
+    version: String,
+    backup_settings: bool,
+) -> Result<(), String> {
+    // Resolve the release (prefer cache; fall back to a fresh fetch).
+    let list = match cached_versions() {
+        Some(c) => c,
+        None => fetch_releases().await?,
+    };
+    let rel = list
+        .iter()
+        .find(|r| r.version == version || r.tag == version)
+        .ok_or_else(|| format!("version {version} not found in releases"))?
+        .clone();
+    let nsis_url = rel
+        .nsis_url
+        .clone()
+        .ok_or_else(|| format!("release {} has no NSIS installer asset", rel.tag))?;
+
+    if backup_settings {
+        let _ = backup_settings_file(&rel.tag); // best-effort, never blocks install
+    }
+
+    let dest = std::env::temp_dir().join(format!("winmux-install-{}.exe", rel.version));
+    dlog(&format!(
+        "updater: installing {} from {} -> {:?}",
+        rel.tag, nsis_url, dest
+    ));
+    http_download_to_file(&nsis_url, &dest)
+        .await
+        .map_err(|e| format!("download failed: {e}"))?;
+
+    // Verify the published checksum when present; GitHub HTTPS is the floor.
+    match &rel.nsis_sha256 {
+        Some(expected) => {
+            let actual = sha256_file(&dest).map_err(|e| format!("hash failed: {e}"))?;
+            if !actual.eq_ignore_ascii_case(expected) {
+                let _ = std::fs::remove_file(&dest);
+                return Err(format!(
+                    "integrity check failed — expected {expected}, got {actual}"
+                ));
+            }
+            dlog(&format!("updater: sha256 verified for {} ({actual})", rel.tag));
+        }
+        None => dlog(&format!(
+            "updater: {} has no published checksum — relying on GitHub TLS",
+            rel.tag
+        )),
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        std::process::Command::new(&dest)
+            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+            .spawn()
+            .map_err(|e| format!("spawn installer: {e}"))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new(&dest)
+            .spawn()
+            .map_err(|e| format!("spawn installer: {e}"))?;
+    }
+    dlog(&format!(
+        "updater: installer for {} spawned — exiting in 800ms",
+        rel.tag
+    ));
+    let app_clone = app.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        app_clone.exit(0);
+    });
+    Ok(())
+}

@@ -292,6 +292,15 @@ pub(crate) struct Updates {
     /// ISO timestamp passes. None = no active snooze.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remind_after_iso: Option<String>,
+    /// Phase 71: update channel — "stable" (only `MAJOR.MINOR.PATCH`
+    /// releases) or "beta" (also shows pre-releases like `0.4.0-beta1`).
+    /// Older settings.json without this field default to stable.
+    #[serde(default = "default_channel")]
+    pub channel: String,
+}
+
+fn default_channel() -> String {
+    "stable".to_string()
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
@@ -707,6 +716,7 @@ impl Default for Updates {
             last_seen_version: None,
             skipped_versions: Vec::new(),
             remind_after_iso: None,
+            channel: default_channel(),
         }
     }
 }

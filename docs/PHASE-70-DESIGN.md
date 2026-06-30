@@ -1,7 +1,8 @@
 # Phase 70 — Server-side Mobile Pairing (nginx + Cloudflare + Let's Encrypt) (DESIGN)
 
-> Status: **APPROVED, building** (2026-06-30). Branch: `70-mobile-pairing`
-> (off `69-claude-chat`). Nothing pushed to `main`.
+> Status: **70.A–D BUILT** (2026-06-30). Branch: `70-mobile-pairing`
+> (off `69-claude-chat`). Nothing pushed to `main`. See DECISIONS.md for the
+> per-milestone commit map. Daemon → 1.2.0 (chat + pairing).
 > All §3 decisions confirmed by Yossi: §3.1 root-or-NOPASSWD now (defer
 > interactive sudo password); §3.2 WebPKI-only (no leaf pinning, fingerprint
 > informational); §3.3 accept all-scopes RCE surface with the listed

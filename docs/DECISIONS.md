@@ -25,7 +25,16 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
-### 2026-06-30 — Phase 70 design READY for review → `docs/PHASE-70-DESIGN.md` (branch `70-mobile-pairing` off 69, NOT pushed)
+### 2026-06-30 — Phase 70 A–D COMPLETE (branch `70-mobile-pairing` off 69, NOT pushed)
+Yossi approved all 4 flagged decisions (root-or-NOPASSWD; WebPKI-only no pinning; accept all-scopes RCE with controls; replace 69.D devices with paired_devices). Built A–D, each its own commit; daemon → **1.2.0** (chat + pairing), INSIGHTS_VERSION → 1.2.0 (lockstep). Combined exe refreshed (winmux-DEBUG-test.exe, 13:57).
+- **70.A** `ea08f2c` — `nginx-proxy` add-on (needs_sudo). `resolve_privilege` (root → NOPASSWD sudo → clear error), `exec_stdin` (CF token over SSH stdin, never argv), `nginx_proxy_install` (validated domain, fixed installer script: apt nginx+certbot, certbot DNS-01 idempotent, WS-aware nginx site w/ TLS1.2+/HSTS/rate-limit/86400 read-timeout, renewal hook), detect/uninstall. `valid_domain` + tests.
+- **70.B** `8b4dfb1` — daemon pairing: `paired_devices` replaces 69.D `devices`; issue (5-min one-shot, admin) → redeem (single-use, atomic, no bearer) → long-term token; list/revoke/rename (admin); authDevice resolves against active devices; WS touches last_seen/ip via nginx X-Real-IP. 11 tests.
+- **70.C** `fbb40f8` — Monitor **Mobile tab**: setup (domain + CF token + install + status), pairing (Generate QR via `qrcode-generator`, rendered locally from the payload, 5-min countdown), device list (status/last-seen/ip, rename/revoke). i18n ×4.
+- **70.D** `f27f429`+`f691263` — `pairing.rs` 6 Tauri commands (init/status/generate_qr/list/revoke/rename); CF token `Zeroize`d desktop-side (Rule #2), persists mode-600 root remote for certbot renew; `daemon_curl` (admin token from remote file, POST/PUT bodies on stdin, path-whitelisted). Registered in invoke_handler.
+- Acceptance gaps for the real-server integration test: a real root VPS (nginx install), a real Cloudflare token (DNS-01), and the mobile app to redeem+connect. The store/auth/validation logic is unit-tested; the SSH-install + curl-over-SSH paths need a live box. **Not pushed.**
+- **Version reconciliation still pending** at the grand integration: 70 (1.2.0, chat+pairing) + v0.3.x-monitor-docker-fix (1.0.2 docker diag) — merge the docker-diag source into the 1.2.0 lineage; INSIGHTS_VERSION already 1.2.0.
+
+### 2026-06-30 — Phase 70 design (superseded by the COMPLETE entry above) → `docs/PHASE-70-DESIGN.md`
 Yossi locked 5 decisions: Cloudflare DNS for LE, nginx reverse proxy, auto-install nginx+cert, **all scopes always**, multi-workspace pairing. Phase 70 = the answer to Phase 69 §9-Q4 (mobile→daemon transport): nginx :443 public TLS (LE via DNS-01/Cloudflare) → daemon stays localhost. Design doc written; **no code yet** — 4 blocking decisions surfaced that change the build:
 - **§3.1 sudo (the big one):** the add-on framework has NO sudo path today (`needs_sudo` is just a UI flag). nginx/apt/certbot need root. Proposed: run-as-root-if-root → else NOPASSWD sudo → else clear error; defer interactive-sudo-password. **Needs confirm.**
 - **§3.2 cert pinning bug:** the spec pins `sha256-of-cert` in the QR, but LE rotates the leaf ≤90d → would break every phone on renewal. Recommend WebPKI-only (LE is publicly trusted), fingerprint informational/optional. **Needs confirm.**

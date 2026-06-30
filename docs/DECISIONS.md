@@ -25,9 +25,8 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
-### 2026-07-01 — v0.4.1 — manifest-URL migration + Version-Manager visibility
-Yossi (computer-use test of v0.4.0) reported: (1) the Phase 71 Version Manager UI didn't show in Settings→Updates, only the old fields; (2) manifest_url still `winmux.example.com` (the DNS-spam source). Findings + fixes:
-- **#1 — code is verified present in v0.4.0 artifacts** (dist `index-*.js`, release `app.exe`, debug exe all contain `updater_list_versions` + `VersionManager`; wired in SettingsModal unconditionally; `getVersion` import valid). So v0.4.0 *does* ship the UI — Yossi tested a stale WebView2 bundle / older exe. v0.4.1 ships a fresh content-hashed bundle so a clean install renders it. No code change needed for #1 (could not reproduce a render bug).
+### 2026-07-01 — v0.4.1 — manifest-URL migration; "missing UI" was old INSTALLED exe (not a bug)
+Yossi (computer-use test) reported the Phase 71 Version Manager + Monitor "missing". **Root cause: he was running the OLD INSTALLED `winmux.exe` (≈v0.3.1, which genuinely predates Phase 68/70/71), not the v0.4.x build.** The debug `app.exe` I keep refreshing DOES show the features. **Proven the installers are correct:** the release `app.exe` (what the MSI/NSIS bundle) references the current dist `index-Di43Wi1i.js`, and that bundle contains `vm.history` (×5, Phase 71) + `ניטור` (×2, Monitor). Backend cmds (`updater_list_versions`, `mobile_pairing_init`, …) all embedded. So **v0.4.1 MSI/NSIS fully contain the UI** — Yossi just needs to install v0.4.1 manually (his updater never notified him because of the placeholder URL → see below). Live `manifest.json` now serves 0.4.1; the GitHub Releases API returns v0.4.1/v0.4.0/v0.3.1 (Phase 71 list works).
 - **#2 — real bug, fixed:** an early default persisted `winmux.example.com` in users' settings.json; serde loads the persisted bad value. `migrate_settings()` now rewrites any placeholder/example/empty manifest_url → `DEFAULT_MANIFEST_URL` on load and re-persists. Default impl shares the const. 3 unit tests. (The v0.3.1 `is_placeholder_host` guard already silenced the *log* spam; this fixes the underlying setting so update checks actually work.)
 - v0.4.1: bump, build, tag, release, manifest, refresh debug exe (01:57).
 

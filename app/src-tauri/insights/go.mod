@@ -3,6 +3,7 @@ module winmux-insights
 go 1.26
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/shirou/gopsutil/v4 v4.24.5
 	modernc.org/sqlite v1.34.1
 )

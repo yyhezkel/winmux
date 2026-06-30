@@ -43,3 +43,13 @@ app/src-tauri/resources/winmux-cli.exe
 
 # Personal skills/agents collection (not part of distribution)
 skills/
+
+# Off-limits per CLAUDE.md Rule #11 — never commit these
+backup-phase23-*/
+release_notes.md
+check-status.bat
+commit-and-push.bat
+fix-git.bat
+fix-git.ps1
+setup-line-endings-and-commit.bat
+status.txt

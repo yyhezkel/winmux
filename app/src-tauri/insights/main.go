@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const Version = "1.0.1"
+const Version = "1.2.0"
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
@@ -73,6 +73,20 @@ func main() {
 	go runSampler(store, sm, time.Duration(*interval)*time.Second, stop)
 
 	srv := newServer(store, sm, token, *port)
+
+	// Phase 69 — mobile Claude chat subsystem (separate chat.db). On any
+	// setup error we log and continue serving metrics; chat just stays off.
+	chatStore, err := openChatStore(filepath.Join(*base, "chat.db"))
+	if err != nil {
+		log.Printf("chat: open store failed, chat disabled: %v", err)
+	} else {
+		defer chatStore.Close()
+		mgr := newSessionManager(chatStore)
+		srv.chat = newChatAPI(mgr, chatStore, token)
+		startHookRPC(mgr) // 69.C — Phase 66 hook bridge listener
+		go runSessionSweeper(mgr, stop)
+		log.Printf("chat: Claude chat subsystem enabled (claude=%s)", mgr.cfg.claudeBin)
+	}
 	go func() {
 		if err := srv.run(); err != nil {
 			log.Fatalf("http server: %v", err)

@@ -14,6 +14,7 @@ type server struct {
 	sm    *Sampler
 	token string
 	port  int
+	chat  *chatAPI // Phase 69 — mobile Claude chat (nil if disabled)
 }
 
 func newServer(store *Store, sm *Sampler, token string, port int) *server {
@@ -28,6 +29,9 @@ func (s *server) run() error {
 	mux.HandleFunc("/docker", s.auth(s.handleDocker))
 	mux.HandleFunc("/docker/", s.auth(s.handleDockerAction)) // /docker/{id}/action
 	mux.HandleFunc("/processes", s.auth(s.handleProcesses))
+	if s.chat != nil {
+		s.chat.registerRoutes(mux) // Phase 69 — /api/claude/* + /ws/claude/*
+	}
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("127.0.0.1:%d", s.port),
 		Handler:      mux,

@@ -166,6 +166,26 @@ func (s *ChatStore) listSessions() ([]SessionRow, error) {
 	return out, rows.Err()
 }
 
+func (s *ChatStore) listSessionsForDevice(deviceID string) ([]SessionRow, error) {
+	rows, err := s.db.Query(
+		`SELECT id, device_id, claude_session_id, cwd, model, status, policy,
+		        started_at, last_activity_at, message_count
+		   FROM sessions WHERE device_id=? ORDER BY last_activity_at DESC`, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SessionRow
+	for rows.Next() {
+		var r SessionRow
+		if err := rows.Scan(&r.ID, &r.DeviceID, &r.ClaudeSessionID, &r.Cwd, &r.Model,
+			&r.Status, &r.Policy, &r.StartedAt, &r.LastActivityAt, &r.MessageCount); err == nil {
+			out = append(out, r)
+		}
+	}
+	return out, rows.Err()
+}
+
 // activeSessionCountForDevice counts non-terminal sessions, for the per-device
 // rate limit (69.D).
 func (s *ChatStore) activeSessionCountForDevice(deviceID string) int {

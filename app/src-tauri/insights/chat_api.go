@@ -37,37 +37,60 @@ func (c *chatAPI) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/claude/sessions", c.guard(c.handleList))    // GET
 	mux.HandleFunc("/api/claude/session/", c.guard(c.handleItem))    // GET/DELETE {id}
 	mux.HandleFunc("/ws/claude/session/", c.handleWS)                // WS (auth inside)
+	c.registerDeviceRoutes(mux)                                      // 69.D admin-only
 }
 
 // ─── auth ────────────────────────────────────────────────────────────────
 
-// authDevice validates the bearer token and returns the device id ("" for the
-// shared/insights token). 69.D extends this with the device table.
-func (c *chatAPI) authDevice(token string) (deviceID string, ok bool) {
+// authDevice validates the bearer token. admin is true for the shared
+// (insights/desktop) token; for a registered device token, deviceID is its id.
+func (c *chatAPI) authDevice(token string) (deviceID string, admin, ok bool) {
 	if token == "" {
-		return "", false
+		return "", false, false
 	}
 	if token == c.sharedToken {
-		return "", true
+		return "", true, true
 	}
 	if d, found := c.store.deviceByTokenHash(hashToken(token)); found {
-		return d.ID, true
+		return d.ID, false, true
 	}
-	return "", false
+	return "", false, false
 }
 
-// guard wraps a handler with bearer auth, passing the resolved device id via a
-// header so the handler stays simple.
+func bearer(r *http.Request) string {
+	return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+}
+
+// guard wraps a session handler with bearer auth, passing the resolved device
+// id ("" for admin/shared) to the handler.
 func (c *chatAPI) guard(h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		dev, ok := c.authDevice(tok)
+		dev, _, ok := c.authDevice(bearer(r))
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		h(w, r, dev)
 	}
+}
+
+// adminGuard restricts device-management endpoints to the shared (desktop)
+// token — a device token can never mint or revoke other devices.
+func (c *chatAPI) adminGuard(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, admin, ok := c.authDevice(bearer(r))
+		if !ok || !admin {
+			http.Error(w, "admin token required", http.StatusForbidden)
+			return
+		}
+		h(w, r)
+	}
+}
+
+// ownsSession reports whether the caller may touch this session: admin
+// (deviceID=="") sees all; a device sees only its own.
+func ownsSession(callerDeviceID string, row *SessionRow) bool {
+	return callerDeviceID == "" || row.DeviceID == callerDeviceID
 }
 
 // ─── REST handlers ───────────────────────────────────────────────────────
@@ -94,8 +117,14 @@ func (c *chatAPI) handleCreate(w http.ResponseWriter, r *http.Request, deviceID 
 	})
 }
 
-func (c *chatAPI) handleList(w http.ResponseWriter, r *http.Request, _ string) {
-	rows, err := c.store.listSessions()
+func (c *chatAPI) handleList(w http.ResponseWriter, r *http.Request, deviceID string) {
+	var rows []SessionRow
+	var err error
+	if deviceID == "" {
+		rows, err = c.store.listSessions() // admin sees all
+	} else {
+		rows, err = c.store.listSessionsForDevice(deviceID)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -107,20 +136,20 @@ func (c *chatAPI) handleList(w http.ResponseWriter, r *http.Request, _ string) {
 	writeJSON(w, map[string]any{"sessions": out})
 }
 
-func (c *chatAPI) handleItem(w http.ResponseWriter, r *http.Request, _ string) {
+func (c *chatAPI) handleItem(w http.ResponseWriter, r *http.Request, deviceID string) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/claude/session/")
 	id = strings.Trim(id, "/")
 	if id == "" {
 		http.Error(w, "missing session id", http.StatusBadRequest)
 		return
 	}
+	row, err := c.store.getSession(id)
+	if err != nil || !ownsSession(deviceID, row) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
-		row, err := c.store.getSession(id)
-		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
 		sum := sessionSummary(*row)
 		if s := c.mgr.get(id); s != nil {
 			s.mu.Lock()
@@ -188,16 +217,21 @@ type clientMsg struct {
 
 func (c *chatAPI) handleWS(w http.ResponseWriter, r *http.Request) {
 	// WS auth: bearer header or ?token= (browsers/mobile can't always set headers).
-	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	tok := bearer(r)
 	if tok == "" {
 		tok = r.URL.Query().Get("token")
 	}
-	if _, ok := c.authDevice(tok); !ok {
+	dev, _, ok := c.authDevice(tok)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/ws/claude/session/")
 	id = strings.Trim(id, "/")
+	if row, err := c.store.getSession(id); err != nil || !ownsSession(dev, row) {
+		http.Error(w, "no such session", http.StatusNotFound)
+		return
+	}
 	s := c.mgr.get(id)
 	if s == nil {
 		http.Error(w, "no such session", http.StatusNotFound)

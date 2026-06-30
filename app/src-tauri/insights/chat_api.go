@@ -121,7 +121,16 @@ func (c *chatAPI) handleItem(w http.ResponseWriter, r *http.Request, _ string) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		writeJSON(w, sessionSummary(*row))
+		sum := sessionSummary(*row)
+		if s := c.mgr.get(id); s != nil {
+			s.mu.Lock()
+			sum["status"] = s.status
+			if s.pendingTool != "" {
+				sum["pending_tool"] = s.pendingTool
+			}
+			s.mu.Unlock()
+		}
+		writeJSON(w, sum)
 	case http.MethodDelete:
 		if s := c.mgr.get(id); s != nil {
 			s.stop("client delete")

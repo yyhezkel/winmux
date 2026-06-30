@@ -54,6 +54,7 @@ type Session struct {
 	claudeSessionID string
 	startedAt       int64
 	lastActivityAt  int64
+	pendingTool     string // in-flight tool name, "" when none (69.B)
 
 	seq   int64 // monotonically increasing event sequence (atomic)
 	subMu sync.Mutex

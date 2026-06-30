@@ -213,7 +213,7 @@ async fn sftp_upload(
 /// Run a command on the remote feeding `stdin` to it, capturing stdout+stderr.
 /// Used to pass secrets (the Cloudflare token) over the encrypted SSH channel
 /// instead of on the command line (never ps-visible, never in the cmd string).
-async fn exec_stdin(
+pub(crate) async fn exec_stdin(
     handle: &SshHandle<SshClient>,
     cmd: &str,
     stdin: &[u8],

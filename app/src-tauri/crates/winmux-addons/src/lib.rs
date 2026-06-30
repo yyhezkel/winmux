@@ -106,6 +106,12 @@ pub mod routines {
     pub const INSIGHTS_INSTALL: &str = "insights_install";
     pub const INSIGHTS_UNINSTALL: &str = "insights_uninstall";
     pub const INSIGHTS_DETECT: &str = "insights_detect";
+    // Phase 70 — nginx reverse proxy + Let's Encrypt (Cloudflare DNS-01).
+    // install needs params (domain + cf_token), so it's driven by the
+    // mobile_pairing_init command, not generic addon_install.
+    pub const NGINX_PROXY_INSTALL: &str = "nginx_proxy_install";
+    pub const NGINX_PROXY_UNINSTALL: &str = "nginx_proxy_uninstall";
+    pub const NGINX_PROXY_DETECT: &str = "nginx_proxy_detect";
 }
 
 /// Stable add-on ids.
@@ -114,7 +120,11 @@ pub mod ids {
     pub const TMUX_CONF: &str = "tmux-conf";
     pub const HOOKS: &str = "hooks";
     pub const INSIGHTS: &str = "insights";
+    pub const NGINX_PROXY: &str = "nginx-proxy";
 }
+
+/// Version of the `nginx-proxy` add-on (the installer logic, not nginx itself).
+pub const NGINX_PROXY_VERSION: &str = "1.0.0";
 
 /// The version the `insights` daemon add-on installs. The binary itself is
 /// fetched from GitHub at install time (Yossi's call: fetch both arches,
@@ -208,6 +218,32 @@ pub fn builtin_registry() -> Vec<AddonManifest> {
             // Runs as a `systemd --user` service (no sudo needed); falls
             // back to nohup when user-lingering isn't available.
             needs_sudo: false,
+        },
+        AddonManifest {
+            id: ids::NGINX_PROXY.into(),
+            name: "Mobile Proxy (nginx + TLS)".into(),
+            description: "Public nginx reverse proxy with a Let's Encrypt cert \
+                          (Cloudflare DNS) so mobile devices can reach the daemon."
+                .into(),
+            version: NGINX_PROXY_VERSION.into(),
+            dependencies: vec![],
+            // install needs params (domain + CF token) → driven by
+            // mobile_pairing_init, not generic addon_install. The Builtin
+            // routine errors with that guidance if called paramless.
+            install: AddonAction::Builtin {
+                routine: routines::NGINX_PROXY_INSTALL.into(),
+            },
+            uninstall: AddonAction::Builtin {
+                routine: routines::NGINX_PROXY_UNINSTALL.into(),
+            },
+            update: AddonAction::Builtin {
+                routine: routines::NGINX_PROXY_INSTALL.into(),
+            },
+            detect: AddonAction::Builtin {
+                routine: routines::NGINX_PROXY_DETECT.into(),
+            },
+            // nginx/apt/certbot require root (run-as-root or NOPASSWD sudo).
+            needs_sudo: true,
         },
     ]
 }

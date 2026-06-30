@@ -1,10 +1,11 @@
 # Phase 70 — Server-side Mobile Pairing (nginx + Cloudflare + Let's Encrypt) (DESIGN)
 
-> Status: **planning only.** Doc first, then code (per Yossi). Branch:
-> `70-mobile-pairing` (off `69-claude-chat`, since the pairing endpoints live
-> in the same daemon as the Phase 69 chat). Nothing pushed to `main`.
-> This doc is the contract; a few **spec corrections / blocking decisions**
-> are flagged in §3 and §11 — please confirm those before I write code.
+> Status: **APPROVED, building** (2026-06-30). Branch: `70-mobile-pairing`
+> (off `69-claude-chat`). Nothing pushed to `main`.
+> All §3 decisions confirmed by Yossi: §3.1 root-or-NOPASSWD now (defer
+> interactive sudo password); §3.2 WebPKI-only (no leaf pinning, fingerprint
+> informational); §3.3 accept all-scopes RCE surface with the listed
+> controls; §3.4 replace 69.D `devices` with `paired_devices`.
 
 ## 1. Motivation
 

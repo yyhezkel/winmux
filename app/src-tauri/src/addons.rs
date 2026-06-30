@@ -34,7 +34,7 @@ const INSIGHTS_X64: &[u8] = include_bytes!("../resources/winmux-insights-linux-x
 const INSIGHTS_ARM64: &[u8] = include_bytes!("../resources/winmux-insights-linux-arm64");
 
 /// A live SSH handle for the workspace (mirrors file_manager's picker).
-fn pick_handle(state: &AppState, workspace_id: &str) -> Option<Arc<SshHandle<SshClient>>> {
+pub(crate) fn pick_handle(state: &AppState, workspace_id: &str) -> Option<Arc<SshHandle<SshClient>>> {
     let sessions = state.core.sessions.lock().ok()?;
     for sess in sessions.values() {
         if let Session::Ssh(s) = sess {
@@ -47,7 +47,7 @@ fn pick_handle(state: &AppState, workspace_id: &str) -> Option<Arc<SshHandle<Ssh
 }
 
 /// Run a command on the remote and capture stdout+stderr (best-effort, timed).
-async fn exec(handle: &SshHandle<SshClient>, cmd: &str, timeout_secs: u64) -> Result<String, String> {
+pub(crate) async fn exec(handle: &SshHandle<SshClient>, cmd: &str, timeout_secs: u64) -> Result<String, String> {
     let mut ch = handle
         .channel_open_session()
         .await
@@ -71,7 +71,7 @@ async fn exec(handle: &SshHandle<SshClient>, cmd: &str, timeout_secs: u64) -> Re
     Ok(String::from_utf8_lossy(&out).to_string())
 }
 
-async fn remote_home(handle: &SshHandle<SshClient>) -> String {
+pub(crate) async fn remote_home(handle: &SshHandle<SshClient>) -> String {
     exec(handle, "printf %s \"$HOME\"", 8)
         .await
         .unwrap_or_default()
@@ -165,6 +165,13 @@ async fn run_builtin(
             )
             .await
         }
+        routines::NGINX_PROXY_DETECT => nginx_proxy_detect(handle).await,
+        routines::NGINX_PROXY_INSTALL => Err(
+            "Mobile Proxy needs a domain + Cloudflare token — install it from \
+             Monitor → Mobile."
+                .into(),
+        ),
+        routines::NGINX_PROXY_UNINSTALL => nginx_proxy_uninstall(handle).await,
         other => Err(format!("unknown builtin routine {other}")),
     }
 }
@@ -199,6 +206,198 @@ async fn sftp_upload(
     }
     let _ = sftp.close().await;
     Ok(())
+}
+
+// ─── Phase 70.A: nginx reverse proxy + Let's Encrypt (Cloudflare DNS) ─────
+
+/// Run a command on the remote feeding `stdin` to it, capturing stdout+stderr.
+/// Used to pass secrets (the Cloudflare token) over the encrypted SSH channel
+/// instead of on the command line (never ps-visible, never in the cmd string).
+async fn exec_stdin(
+    handle: &SshHandle<SshClient>,
+    cmd: &str,
+    stdin: &[u8],
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let mut ch = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("channel_open: {e}"))?;
+    ch.exec(true, cmd.as_bytes())
+        .await
+        .map_err(|e| format!("exec: {e}"))?;
+    ch.data(stdin).await.map_err(|e| format!("stdin: {e}"))?;
+    ch.eof().await.ok();
+    let mut out = Vec::new();
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                ChannelMsg::Data { ref data } => out.extend_from_slice(data),
+                ChannelMsg::ExtendedData { ref data, .. } => out.extend_from_slice(data),
+                ChannelMsg::Eof | ChannelMsg::Close | ChannelMsg::ExitStatus { .. } => break,
+                _ => {}
+            }
+        }
+    })
+    .await;
+    let _ = ch.close().await;
+    Ok(String::from_utf8_lossy(&out).to_string())
+}
+
+/// §3.1: resolve how to run a privileged command. Returns the prefix to put
+/// before the command: "" when already root, "sudo " when passwordless sudo
+/// works, otherwise a clean error (interactive sudo password is a follow-up).
+async fn resolve_privilege(handle: &SshHandle<SshClient>) -> Result<String, String> {
+    let uid = exec(handle, "id -u", 8).await.unwrap_or_default();
+    if uid.trim() == "0" {
+        return Ok(String::new());
+    }
+    let probe = exec(handle, "sudo -n true 2>&1 && echo WINMUX_SUDO_OK", 8)
+        .await
+        .unwrap_or_default();
+    if probe.contains("WINMUX_SUDO_OK") {
+        return Ok("sudo ".into());
+    }
+    Err("this server's user is not root and passwordless sudo isn't available. \
+         Connect the workspace as root, or enable NOPASSWD sudo for the user, \
+         then retry."
+        .into())
+}
+
+/// Strict domain validation before the value ever reaches a shell arg.
+/// Lowercase letters/digits/hyphens per label, dot-separated, 1–253 chars.
+fn valid_domain(d: &str) -> bool {
+    let d = d.trim();
+    if d.is_empty() || d.len() > 253 || d.starts_with('.') || d.ends_with('.') {
+        return false;
+    }
+    d.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    }) && d.contains('.')
+}
+
+/// The fixed installer script. NO untrusted interpolation: the domain arrives
+/// as $1 (validated desktop-side) and the Cloudflare token on stdin (so it's
+/// never on argv / in the command string). Idempotent: skips certbot if a
+/// live cert already exists, overwrites the site config cleanly.
+const NGINX_INSTALL_SCRIPT: &str = r#"#!/bin/bash
+set -euo pipefail
+DOMAIN="$1"
+# Cloudflare token comes on stdin (never argv).
+IFS= read -r CF_TOKEN || true
+if [ -z "$CF_TOKEN" ]; then echo "winmux: empty Cloudflare token" >&2; exit 2; fi
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq nginx certbot python3-certbot-dns-cloudflare >/dev/null
+
+install -d -m 700 /etc/winmux
+umask 177
+printf 'dns_cloudflare_api_token = %s\n' "$CF_TOKEN" > /etc/winmux/cloudflare.ini
+chmod 600 /etc/winmux/cloudflare.ini
+
+if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+  certbot certonly --dns-cloudflare \
+    --dns-cloudflare-credentials /etc/winmux/cloudflare.ini \
+    --dns-cloudflare-propagation-seconds 30 \
+    -d "$DOMAIN" --non-interactive --agree-tos \
+    --register-unsafely-without-email >/dev/null 2>&1 || {
+      echo "winmux: certbot failed — check the domain + Cloudflare token" >&2; exit 3; }
+fi
+
+SITE="/etc/nginx/sites-available/winmux-$DOMAIN"
+cat > "$SITE" <<NGINX
+server {
+  listen 443 ssl http2;
+  server_name $DOMAIN;
+  ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  add_header Strict-Transport-Security "max-age=31536000" always;
+  limit_req_zone \$binary_remote_addr zone=winmux:10m rate=20r/s;
+  location / {
+    limit_req zone=winmux burst=40 nodelay;
+    proxy_pass http://127.0.0.1:7879;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 86400;
+  }
+}
+NGINX
+ln -sf "$SITE" "/etc/nginx/sites-enabled/winmux-$DOMAIN"
+nginx -t >/dev/null 2>&1
+systemctl reload nginx || systemctl restart nginx
+
+mkdir -p /etc/letsencrypt/renewal-hooks/post
+printf '#!/bin/bash\nsystemctl reload nginx\n' > /etc/letsencrypt/renewal-hooks/post/winmux-reload-nginx.sh
+chmod +x /etc/letsencrypt/renewal-hooks/post/winmux-reload-nginx.sh
+echo "WINMUX_NGINX_OK $DOMAIN"
+"#;
+
+/// Param-driven install (called by `mobile_pairing_init`, 70.D). Validates the
+/// domain, resolves privilege (§3.1), uploads the fixed script, and runs it
+/// with the CF token piped on stdin. Returns the script's last status line.
+pub(crate) async fn nginx_proxy_install(
+    handle: &SshHandle<SshClient>,
+    home: &str,
+    domain: &str,
+    cf_token: &str,
+) -> Result<String, String> {
+    if !valid_domain(domain) {
+        return Err("invalid domain".into());
+    }
+    let prefix = resolve_privilege(handle).await?;
+    let script_path = format!("{home}/.winmux/run/nginx-install.sh");
+    let _ = exec(handle, &format!("mkdir -p \"{home}/.winmux/run\""), 8).await;
+    sftp_upload(handle, &script_path, NGINX_INSTALL_SCRIPT.as_bytes()).await?;
+    // domain is validated → safe as a quoted arg; token is on stdin only.
+    let cmd = format!("{prefix}bash \"{script_path}\" \"{domain}\"");
+    let out = exec_stdin(handle, &cmd, cf_token.as_bytes(), 180).await?;
+    let _ = exec(handle, &format!("rm -f \"{script_path}\""), 8).await;
+    if out.contains("WINMUX_NGINX_OK") {
+        Ok(format!("nginx + TLS ready for {domain}"))
+    } else {
+        Err(format!(
+            "nginx install did not confirm success: {}",
+            out.trim().lines().last().unwrap_or("(no output)")
+        ))
+    }
+}
+
+/// detect: prints the add-on version if nginx is active (non-empty ⇒ installed
+/// for the add-on framework), else empty.
+async fn nginx_proxy_detect(handle: &SshHandle<SshClient>) -> Result<String, String> {
+    let active = exec(handle, "systemctl is-active nginx 2>/dev/null || true", 8).await?;
+    if active.trim() == "active" {
+        Ok(winmux_addons::NGINX_PROXY_VERSION.to_string())
+    } else {
+        Ok(String::new())
+    }
+}
+
+/// uninstall: disable+remove winmux nginx sites and the CF credential. Leaves
+/// nginx itself installed (other services may use it).
+async fn nginx_proxy_uninstall(handle: &SshHandle<SshClient>) -> Result<String, String> {
+    let prefix = resolve_privilege(handle).await?;
+    let script = format!(
+        "set -e; \
+         rm -f /etc/nginx/sites-enabled/winmux-* /etc/nginx/sites-available/winmux-*; \
+         rm -f /etc/winmux/cloudflare.ini; \
+         (nginx -t >/dev/null 2>&1 && systemctl reload nginx) || true; \
+         echo removed"
+    );
+    exec(handle, &format!("{prefix}bash -c '{script}'"), 30).await
 }
 
 /// 68.C: install the insights daemon — arch-detect, SFTP-upload the
@@ -448,4 +647,27 @@ pub(crate) async fn addon_logs(
         _ => return Ok(String::new()),
     };
     exec(&handle, &format!("tail -n 200 \"{log}\" 2>/dev/null || true"), 10).await
+}
+
+#[cfg(test)]
+mod nginx_proxy_tests {
+    use super::valid_domain;
+
+    #[test]
+    fn accepts_real_domains() {
+        for d in ["winmux.example.com", "a.b.co", "my-server.dev", "x1.y2.example.org"] {
+            assert!(valid_domain(d), "should accept {d}");
+        }
+    }
+
+    #[test]
+    fn rejects_bad_domains() {
+        for d in [
+            "", "nodot", "no_underscores.com", "UPPER.com", ".leading.com",
+            "trailing.com.", "-hyphen.com", "spa ce.com", "a..b.com",
+            "semi;rm-rf.com", "$(whoami).com",
+        ] {
+            assert!(!valid_domain(d), "should reject {d:?}");
+        }
+    }
 }

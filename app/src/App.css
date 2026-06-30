@@ -4346,6 +4346,36 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .ins-bar-fill.danger { background: var(--w-error, #f7768e); }
 .ins-h4 { margin: 16px 0 6px; font-size: 13px; color: var(--w-text-primary, #e6edf3); }
 .ins-docker { display: flex; flex-direction: column; gap: 4px; }
+/* Phase 70.C: Metrics ↔ Mobile tabs + the Mobile pairing tab. */
+.ins-tabs { display: flex; gap: 2px; margin-left: 10px; }
+.ins-tabs button {
+  background: transparent; border: 1px solid var(--w-border, #2a2e44); color: var(--w-text-secondary, #9aa5ce);
+  border-radius: 5px; padding: 2px 9px; font-size: 12px; cursor: pointer;
+}
+.ins-tabs button.active { background: var(--w-accent, #7aa2f7); color: #0b0d16; border-color: var(--w-accent, #7aa2f7); }
+.mob-tab { display: flex; flex-direction: column; padding: 4px 2px; }
+.mob-setup { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.mob-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; flex: 1 1 220px; }
+.mob-field span { color: var(--w-text-secondary, #9aa5ce); }
+.mob-field input, .mob-pair input {
+  background: var(--w-bg-elev, #1f2335); border: 1px solid var(--w-border, #2a2e44);
+  color: var(--w-text-primary, #e6edf3); border-radius: 5px; padding: 5px 8px; font-size: 12px;
+}
+.mob-status { margin: 8px 0 4px; font-size: 12px; }
+.mob-ok { color: var(--w-success, #9ece6a); }
+.mob-warn { color: var(--w-warning, #e0af68); }
+.mob-pair { display: flex; gap: 8px; align-items: center; }
+.mob-pair input { flex: 1 1 auto; }
+.mob-qr { display: flex; gap: 14px; align-items: center; margin: 12px 0; padding: 12px;
+  border: 1px solid var(--w-border, #2a2e44); border-radius: 8px; background: var(--w-bg-elev, #1f2335); }
+.mob-qr-img { background: #fff; padding: 8px; border-radius: 6px; line-height: 0; }
+.mob-qr-img svg { width: 200px; height: 200px; display: block; }
+.mob-countdown { font-size: 16px; font-variant-numeric: tabular-nums; color: var(--w-accent, #7aa2f7); margin-top: 6px; }
+.mob-devices { display: flex; flex-direction: column; gap: 4px; }
+.mob-dev { display: grid; grid-template-columns: 1.2fr 1.6fr auto; align-items: center; gap: 8px;
+  padding: 6px 8px; border: 1px solid var(--w-border, #2a2e44); border-radius: 5px; font-size: 12px; }
+.mob-dev-actions { display: flex; gap: 4px; }
+.mob-dev-actions button, .mob-pair button { cursor: pointer; }
 .ins-cont {
   display: grid; grid-template-columns: 1.2fr 1.6fr auto; align-items: center; gap: 8px;
   padding: 6px 8px; border: 1px solid var(--w-border, #2a2e44); border-radius: 5px; font-size: 12px;

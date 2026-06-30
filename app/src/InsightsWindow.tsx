@@ -1,6 +1,7 @@
 import { createSignal, For, Show, createEffect, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { MobilePairing } from "./MobilePairing";
 import {
   clampToViewport,
   makeWindowControls,
@@ -80,6 +81,8 @@ export function InsightsWindow(p: Props) {
   const [err, setErr] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [auto, setAuto] = createSignal(false);
+  // Phase 70.C: Metrics ↔ Mobile pairing tabs.
+  const [view, setView] = createSignal<"metrics" | "mobile">("metrics");
 
   const refresh = async () => {
     if (!p.workspaceId) return;
@@ -166,18 +169,32 @@ export function InsightsWindow(p: Props) {
             📊 {t("insights.title")}
             {p.workspaceName ? ` — ${p.workspaceName}` : ""}
           </span>
-          <label class="ins-auto">
-            <input type="checkbox" checked={auto()} onChange={(e) => setAuto(e.currentTarget.checked)} />
-            <span>{t("insights.auto")}</span>
-          </label>
-          <button class="ins-refresh" onClick={() => void refresh()} title={t("insights.refresh")}>
-            {loading() ? "…" : "⟳"}
-          </button>
+          <div class="ins-tabs">
+            <button class={view() === "metrics" ? "active" : ""} onClick={() => setView("metrics")}>
+              {t("insights.tab.metrics")}
+            </button>
+            <button class={view() === "mobile" ? "active" : ""} onClick={() => setView("mobile")}>
+              📱 {t("insights.tab.mobile")}
+            </button>
+          </div>
+          <Show when={view() === "metrics"}>
+            <label class="ins-auto">
+              <input type="checkbox" checked={auto()} onChange={(e) => setAuto(e.currentTarget.checked)} />
+              <span>{t("insights.auto")}</span>
+            </label>
+            <button class="ins-refresh" onClick={() => void refresh()} title={t("insights.refresh")}>
+              {loading() ? "…" : "⟳"}
+            </button>
+          </Show>
           <button class="fm-window-x insights-x" onClick={p.onClose} title={t("common.close")}>
             ×
           </button>
         </div>
         <div class="fm-window-body insights-body">
+          <Show when={view() === "mobile"}>
+            <MobilePairing workspaceId={p.workspaceId} />
+          </Show>
+          <Show when={view() === "metrics"}>
           <Show when={err()}>
             <div class="wizard-test-result err" style="margin:10px">
               <div class="wizard-test-line">✗ {err()}</div>
@@ -278,6 +295,7 @@ export function InsightsWindow(p: Props) {
                 </div>
               </>
             )}
+          </Show>
           </Show>
         </div>
         <ResizeHandles onStart={onResizeStart} />

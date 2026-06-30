@@ -25,6 +25,7 @@
     "html2canvas": "^1.4.1",
     "markdown-it": "^14.2.0",
     "marked": "^18.0.4",
+    "qrcode-generator": "^1.4.4",
     "solid-js": "^1.9.3"
   },
   "devDependencies": {

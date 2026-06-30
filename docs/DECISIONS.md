@@ -25,6 +25,14 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-30 — Phase 69 A–D COMPLETE (branch `69-claude-chat`, NOT pushed)
+Yossi approved all 6 design points; built the whole daemon side. Daemon `winmux-insights` 1.0.1 → **1.1.0**, all in flat `package main` (deviation from the doc's `internal/claude/` — a split package would create a WS↔session↔RPC import cycle on a 6→13-file single binary; flat matches the existing daemon). Milestones (each its own commit):
+- **69.A** `4d4531f` — `chat_store.go` (chat.db: devices/sessions/replay), `chat_session.go` (SessionManager + os/exec stream-json pipe spawn, no tmux, lifecycle, fan-out hub, 24h idle sweeper), `chat_api.go` (REST CRUD + gorilla WebSocket w/ replay-on-reconnect, ping, cleared post-upgrade deadlines). gorilla/websocket dep.
+- **69.B** `02c0756` — `chat_parser.go` stream-json → normalized events (session_init/assistant/tool_use/tool_result/assistant_delta/result; unknown→raw; malformed→skip+log metadata, Rule #1). 8 unit tests.
+- **69.C** `f3de60a` — `chat_hookrpc.go`: Go **server half of the Phase 66 RPC dialect** (HMAC challenge-response over raw nonce + JSON-RPC feed.push), ported from `cli/src/main.rs`. Session identified by which per-session token validates the HMAC, cross-checked vs pane_id. gate→ask phone, auto→allow, block→deny, **deny on timeout/no-client** (§9-Q5). ZERO CLI / `hooks/claude-code.json` changes. 7 acceptance tests via a Go client replicating the CLI wire format.
+- **69.D** `88770b7` — `chat_devices.go`: admin-only device-token mint/list/revoke (sha256-at-rest, token shown once), per-device session scoping + ownership checks, 50/device + 100 global rate limits. 6 tests.
+- **Acceptance gap:** the 69.C round-trip is proven with a Go client, NOT yet a real `winmux claude-hook`. Run the real-CLI round-trip on Linux during 67.C. **Integration TODO:** rebake embedded `winmux-insights-linux-{x64,arm64}` from this source + bump the add-on's expected version to 1.1.0 (deferred to the 67.C/release step, not done on this branch to avoid binary churn). 19 daemon tests green; cross-compiles x64+arm64. **Not pushed.**
+
 ### 2026-06-30 — Phase 69 design READY for review → `docs/PHASE-69-DESIGN.md` (branch `69-claude-chat`)
 Yossi locked the **model**: mobile = Claude **chat client**, not a desktop mirror. The phone talks to the **Phase 68 daemon** (extended), which spawns its *own* independent Claude sessions via `claude --output-format stream-json` and streams structured chat events back over WebSocket. Desktop unchanged. Design doc written; **no code yet** (awaiting approval). Key design calls baked in (need Yossi's yes/no):
 - **Spawn = direct `os/exec` pipes, NOT tmux** (stream-json is a pipe protocol; tmux = the mirror we rejected). Persistence via systemd-managed daemon + Claude `--resume`.

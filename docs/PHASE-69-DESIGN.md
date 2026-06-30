@@ -1,8 +1,14 @@
 # Phase 69 — Server-side Claude Chat for Mobile (DESIGN)
 
-> Status: **planning only** (per Yossi). No code until this doc is approved.
+> Status: **69.A–D BUILT** on `69-claude-chat` (approved 2026-06-30, not
+> pushed). This doc is the contract; two deviations during the build:
+> (1) the daemon code stayed **flat `package main`** rather than
+> `internal/claude/` — a split package would create a WS↔session↔RPC import
+> cycle on a single-binary daemon, and flat matches the existing 6-file
+> daemon; (2) the 69.C hook round-trip is proven with a **Go client**
+> replicating the CLI wire format — a real `winmux claude-hook` round-trip
+> should run on Linux at 67.C integration. See `docs/DECISIONS.md`.
 > Branch: `69-claude-chat`. Nothing pushed to `main`.
-> This doc is the contract we build against.
 
 ## 1. Motivation & model
 

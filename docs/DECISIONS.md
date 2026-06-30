@@ -25,6 +25,14 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-30 — Phase 69 design READY for review → `docs/PHASE-69-DESIGN.md` (branch `69-claude-chat`)
+Yossi locked the **model**: mobile = Claude **chat client**, not a desktop mirror. The phone talks to the **Phase 68 daemon** (extended), which spawns its *own* independent Claude sessions via `claude --output-format stream-json` and streams structured chat events back over WebSocket. Desktop unchanged. Design doc written; **no code yet** (awaiting approval). Key design calls baked in (need Yossi's yes/no):
+- **Spawn = direct `os/exec` pipes, NOT tmux** (stream-json is a pipe protocol; tmux = the mirror we rejected). Persistence via systemd-managed daemon + Claude `--resume`.
+- **69.C hook reuse is the crux**: the daemon implements the **server half of the Phase 66 RPC dialect** (HMAC handshake + `feed.push`). Mobile-spawned Claude gets `WINMUX_SOCKET_ADDR`→daemon, `WINMUX_TUNNEL_TOKEN`=per-session, `WINMUX_PANE_ID=mob_<id>`, so hooks bridge to the phone with **zero CLI / `hooks/claude-code.json` changes**.
+- **Two-token split**: device bearer token (phone→REST/WS, revocable, in `chat.db`) vs per-session HMAC (CLI hook→daemon RPC, ephemeral). Insights bearer token untouched.
+- **Open Qs for Yossi** (doc §9): pipes vs tmux (rec pipes); session survives mobile disconnect + 24h idle sweeper (rec yes); desktop+mobile = **separate** sessions (rec yes); **mobile→daemon transport deferred to 67.C**; hook timeout fallback = **deny** on mobile (rec); daemon bump 1.0.1→1.1.0; add `gorilla/websocket` dep.
+- Build order: 69.A spawn+REST+raw WS → 69.B parser+normalized WS → 69.C hook RPC bridge → 69.D device tokens + 50/device rate limit. Each testable locally; nothing touches `main`/desktop until 67.C integration.
+
 ### 2026-06-29 — Phase 68 add-ons/monitor UX relocation (Yossi) — branch `v0.2.x-integration`
 Yossi: add-ons are per-server, so manage them from the **workspace right-click**, not a global Settings tab; and the monitor button belongs in the **workspace header after Files**, opening the install window when the daemon isn't there. Done:
 - **`AddonsWindow.tsx`** (new) — floating per-workspace add-ons window (wraps `AddonsTab` in `.fm-window` chrome). Opened from a new **"Add-ons…" item in the sidebar workspace context menu** (`onAction("addons")` → App resolves the workspace + opens the window). Shows what's on THAT server (hooks, Insights, cli, tmux-conf).

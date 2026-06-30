@@ -158,19 +158,39 @@ pub async fn bridge_to_pipe(
     };
 
     dlog("tunnel: bridging channel <-> pipe");
-    match tokio::io::copy_bidirectional(&mut bs, &mut pipe).await {
-        Ok((to_pipe, to_channel)) => {
-            dlog(&format!(
-                "tunnel: closed normally ({} bytes → pipe, {} bytes → channel)",
-                to_pipe, to_channel
-            ));
-        }
-        Err(e) => {
-            // Most "connection reset" errors are normal session end; not surfaced.
-            dlog(&format!("tunnel: copy_bidirectional ended: {e}"));
-        }
-    }
+    bridge_copy(bs, pipe).await;
     Ok(())
+}
+
+/// v0.3.1 (pipe-leak belt-and-suspenders): copy each direction and finish as
+/// soon as EITHER side reaches EOF, shutting down the peer's write so the other
+/// end unblocks immediately. `copy_bidirectional` waits for BOTH directions to
+/// close, which deadlocked here: the russh channel stream never surfaced the
+/// remote CLI's close, so the pipe stayed open and its rpc_server instance
+/// leaked (after 254, ERROR_PIPE_BUSY wedged every connection). Half-closing on
+/// first-EOF frees the pipe instance the moment the one-shot RPC reply is done
+/// — independent of the handler-side one-shot fix.
+async fn bridge_copy<A, B>(a: A, b: B)
+where
+    A: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    B: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let (mut ar, mut aw) = tokio::io::split(a);
+    let (mut br, mut bw) = tokio::io::split(b);
+    let a2b = async {
+        let n = tokio::io::copy(&mut ar, &mut bw).await;
+        let _ = bw.shutdown().await; // EOF → unblocks the peer's read
+        n
+    };
+    let b2a = async {
+        let n = tokio::io::copy(&mut br, &mut aw).await;
+        let _ = aw.shutdown().await;
+        n
+    };
+    tokio::select! {
+        r = a2b => dlog(&format!("tunnel: bridge done (a→b: {r:?})")),
+        r = b2a => dlog(&format!("tunnel: bridge done (b→a: {r:?})")),
+    }
 }
 
 /// Random alphanumeric token for the per-connection tunnel.
@@ -244,4 +264,65 @@ pub fn spawn_bridge(channel: Channel<russh::client::Msg>, token: std::sync::Arc<
             dlog(&format!("tunnel: bridge error: {e}"));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bridge_copy;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // v0.3.1 pipe-leak fix: when the rpc_server handler closes after sending
+    // its one-shot reply, the bridge must release PROMPTLY (not hang waiting
+    // for the channel side to also EOF, as copy_bidirectional did). Models the
+    // bridge with two in-memory duplex pipes: `cli` <-> bridge <-> `server`.
+    #[tokio::test]
+    async fn bridge_releases_when_server_closes_after_one_reply() {
+        let (mut cli, bridge_a) = tokio::io::duplex(1024);
+        let (bridge_b, mut server) = tokio::io::duplex(1024);
+        let bridge = tokio::spawn(async move { bridge_copy(bridge_a, bridge_b).await });
+
+        // CLI sends one request.
+        cli.write_all(b"REQ\n").await.unwrap();
+
+        // Server (rpc_server handler) reads it, replies once, then CLOSES.
+        let mut buf = [0u8; 4];
+        server.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"REQ\n");
+        server.write_all(b"RESP\n").await.unwrap();
+        drop(server); // one-shot handler returns → stream dropped
+
+        // CLI receives the reply, then EOF (bridge shut its write down).
+        let mut out = Vec::new();
+        cli.read_to_end(&mut out).await.unwrap();
+        assert_eq!(out, b"RESP\n");
+
+        // The bridge task must finish promptly — the whole point of the fix.
+        tokio::time::timeout(std::time::Duration::from_secs(2), bridge)
+            .await
+            .expect("bridge_copy must release after the server closed")
+            .unwrap();
+    }
+
+    // The mirror case: when the CLI side closes first (channel EOF), the bridge
+    // must shut the pipe write down so the rpc_server handler's read sees EOF.
+    #[tokio::test]
+    async fn bridge_releases_when_client_closes_first() {
+        let (cli, bridge_a) = tokio::io::duplex(1024);
+        let (bridge_b, mut server) = tokio::io::duplex(1024);
+        let bridge = tokio::spawn(async move { bridge_copy(bridge_a, bridge_b).await });
+
+        drop(cli); // remote CLI hung up
+
+        // The server side must observe EOF (read returns 0), not hang.
+        let mut buf = [0u8; 16];
+        let n = tokio::time::timeout(std::time::Duration::from_secs(2), server.read(&mut buf))
+            .await
+            .expect("server read must not hang after client close")
+            .unwrap();
+        assert_eq!(n, 0, "server should see EOF");
+        tokio::time::timeout(std::time::Duration::from_secs(2), bridge)
+            .await
+            .expect("bridge must release after client close")
+            .unwrap();
+    }
 }

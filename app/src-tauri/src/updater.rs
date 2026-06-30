@@ -20,6 +20,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
+/// A manifest URL pointing at an example/placeholder host can never resolve;
+/// treat it as "no manifest configured" so the hooks-check / updater don't log
+/// a DNS failure on every tick (v0.3.1: this spammed debug.log).
+fn is_placeholder_host(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.contains("example.com")
+        || lower.contains("example.org")
+        || lower.contains("example.net")
+        || lower.contains("your-domain")
+        || lower.contains("changeme")
+}
+
 use crate::{dlog, AppState};
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -330,6 +342,12 @@ pub(crate) async fn check_remote_hooks(
         Some(u) if !u.is_empty() => u,
         _ => return,
     };
+    // v0.3.1: a placeholder / example manifest host (e.g. winmux.example.com)
+    // can never resolve — skip silently instead of logging a DNS failure on
+    // every hooks-check tick (it spammed debug.log ~50×/session).
+    if is_placeholder_host(&manifest_url) {
+        return;
+    }
     let manifest = match fetch_manifest(&manifest_url).await {
         Ok(m) => m,
         Err(e) => {

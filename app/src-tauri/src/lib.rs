@@ -13,6 +13,7 @@ mod file_manager;
 mod local_wizard;
 mod notes;
 mod osc_notify;
+mod pairing;
 mod provisioning;
 mod remote_bootstrap;
 mod rpc_server;
@@ -5569,6 +5570,13 @@ pub fn run() {
             // Phase 68.D: Monitor — pull from the insights daemon.
             addons::insights_fetch,
             addons::insights_docker_action,
+            // Phase 70: mobile pairing (nginx + Cloudflare + Let's Encrypt).
+            pairing::mobile_pairing_init,
+            pairing::mobile_pairing_status,
+            pairing::mobile_pairing_generate_qr,
+            pairing::mobile_pairing_list_devices,
+            pairing::mobile_pairing_revoke,
+            pairing::mobile_pairing_rename,
             workspaces_load,
             workspace_create,
             workspace_update,

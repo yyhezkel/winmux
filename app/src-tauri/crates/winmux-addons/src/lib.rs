@@ -129,7 +129,7 @@ pub const NGINX_PROXY_VERSION: &str = "1.0.0";
 /// The version the `insights` daemon add-on installs. The binary itself is
 /// fetched from GitHub at install time (Yossi's call: fetch both arches,
 /// no bundling), so this is the version the fetch URL pins.
-pub const INSIGHTS_VERSION: &str = "1.0.0";
+pub const INSIGHTS_VERSION: &str = "1.2.0";
 
 /// The add-ons winmux knows about, in dependency-friendly order
 /// (winmux-cli first — everything else needs the remote CLI present).

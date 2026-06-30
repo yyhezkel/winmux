@@ -25,6 +25,16 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-06-30 — Phase 70 design READY for review → `docs/PHASE-70-DESIGN.md` (branch `70-mobile-pairing` off 69, NOT pushed)
+Yossi locked 5 decisions: Cloudflare DNS for LE, nginx reverse proxy, auto-install nginx+cert, **all scopes always**, multi-workspace pairing. Phase 70 = the answer to Phase 69 §9-Q4 (mobile→daemon transport): nginx :443 public TLS (LE via DNS-01/Cloudflare) → daemon stays localhost. Design doc written; **no code yet** — 4 blocking decisions surfaced that change the build:
+- **§3.1 sudo (the big one):** the add-on framework has NO sudo path today (`needs_sudo` is just a UI flag). nginx/apt/certbot need root. Proposed: run-as-root-if-root → else NOPASSWD sudo → else clear error; defer interactive-sudo-password. **Needs confirm.**
+- **§3.2 cert pinning bug:** the spec pins `sha256-of-cert` in the QR, but LE rotates the leaf ≤90d → would break every phone on renewal. Recommend WebPKI-only (LE is publicly trusted), fingerprint informational/optional. **Needs confirm.**
+- **§3.3 all-scopes = RCE surface:** an all-scopes device token can spawn Claude sessions (runs tools) = effectively RCE. Accepted per decision #4; mitigations = TLS + one-shot 5-min tokens + revocation + hashed-at-rest + nginx rate-limit + last_seen/ip audit. **Needs risk-accept.**
+- **§3.4 table unify:** replace 69.D `devices` with `paired_devices` (superset: status/scopes/expiry/last_seen/last_ip). **Needs confirm.**
+- §3.5 multi-workspace = client-side only (each workspace = its own server/domain; no server machinery).
+- **Version reconciliation:** at integration daemon converges 1.1.0 (chat) + 1.0.2 (docker-fix) + pairing → 1.2.0, and INSIGHTS_VERSION must track it.
+- Build order: 70.A nginx-proxy addon + sudo wrapper → 70.B pairing endpoints/schema → 70.C Mobile tab UI → 70.D Tauri cmds + DPAPI/zeroize CF token.
+
 ### 2026-06-30 — Phase 69 A–D COMPLETE (branch `69-claude-chat`, NOT pushed)
 Yossi approved all 6 design points; built the whole daemon side. Daemon `winmux-insights` 1.0.1 → **1.1.0**, all in flat `package main` (deviation from the doc's `internal/claude/` — a split package would create a WS↔session↔RPC import cycle on a 6→13-file single binary; flat matches the existing daemon). Milestones (each its own commit):
 - **69.A** `4d4531f` — `chat_store.go` (chat.db: devices/sessions/replay), `chat_session.go` (SessionManager + os/exec stream-json pipe spawn, no tmux, lifecycle, fan-out hub, 24h idle sweeper), `chat_api.go` (REST CRUD + gorilla WebSocket w/ replay-on-reconnect, ping, cleared post-upgrade deadlines). gorilla/websocket dep.

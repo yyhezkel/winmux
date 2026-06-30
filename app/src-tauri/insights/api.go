@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -89,22 +91,33 @@ func (s *server) handleHistory(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleDocker(w http.ResponseWriter, _ *http.Request) {
 	conts, err := dockerList()
-	if err != nil {
-		reason := dockerProbe()
-		if reason == "" {
-			// Socket reachable but the API call still failed (daemon down, etc.).
-			reason = "api_error"
-		}
+	if err == nil {
+		log.Printf("docker: ok — %d container(s)", len(conts))
 		writeJSON(w, map[string]any{
-			"available":  false,
-			"reason":     reason,
-			"detail":     err.Error(),
-			"socket":     dockerSockPath(),
-			"containers": []DockerContainer{},
+			"available":      true,
+			"containers":     conts,
+			"daemon_version": Version,
 		})
 		return
 	}
-	writeJSON(w, map[string]any{"available": true, "containers": conts})
+	// Classify + log so a failing server self-explains in insights.log.
+	socket, reason, detail := dockerResolve()
+	if reason == "" {
+		// Socket reachable but the API call still failed (daemon down, etc.).
+		reason = "api_error"
+		detail = err.Error()
+	}
+	logDockerUnavailable(socket, reason, detail)
+	writeJSON(w, map[string]any{
+		"available":      false,
+		"reason":         reason,
+		"detail":         detail,
+		"socket":         socket,
+		"hint":           dockerHint(reason),
+		"uid":            os.Getuid(),
+		"daemon_version": Version,
+		"containers":     []DockerContainer{},
+	})
 }
 
 func (s *server) handleDockerAction(w http.ResponseWriter, r *http.Request) {

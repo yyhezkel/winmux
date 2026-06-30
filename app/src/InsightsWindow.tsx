@@ -77,6 +77,15 @@ export function InsightsWindow(p: Props) {
   const [docker, setDocker] = createSignal<DockerContainer[]>([]);
   const [dockerOk, setDockerOk] = createSignal(false);
   const [dockerReason, setDockerReason] = createSignal<string | null>(null);
+  // Diagnostics surfaced by the daemon (Phase 68 docker patch): the resolved
+  // socket, the daemon version (so we can tell if the server is on an old
+  // build), and the daemon's own English hint.
+  const [dockerInfo, setDockerInfo] = createSignal<{
+    socket: string;
+    version: string;
+    hint: string;
+    detail: string;
+  } | null>(null);
   const [err, setErr] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [auto, setAuto] = createSignal(false);
@@ -100,15 +109,28 @@ export function InsightsWindow(p: Props) {
         const parsed = JSON.parse(d) as {
           available: boolean;
           reason?: string;
+          detail?: string;
+          socket?: string;
+          hint?: string;
+          daemon_version?: string;
           containers: DockerContainer[];
         };
         setDockerOk(parsed.available);
         setDockerReason(parsed.available ? null : parsed.reason ?? null);
         setDocker(parsed.containers ?? []);
+        setDockerInfo({
+          socket: parsed.socket ?? "",
+          version: parsed.daemon_version ?? "",
+          hint: parsed.hint ?? "",
+          detail: parsed.detail ?? "",
+        });
       } catch {
+        // Empty/failed /docker fetch — likely an old daemon that predates the
+        // endpoint, or the daemon is down. Flag it so the panel can advise.
         setDockerOk(false);
-        setDockerReason(null);
+        setDockerReason("api_error");
         setDocker([]);
+        setDockerInfo(null);
       }
     } catch (e) {
       setErr(String(e instanceof Error ? e.message : e));
@@ -232,18 +254,44 @@ export function InsightsWindow(p: Props) {
                   </div>
                 </div>
 
-                <h4 class="ins-h4">
-                  🐳 Docker ({s().docker_running}/{s().docker_total})
-                  <Show when={!dockerOk()}>
-                    <span class="settings-hint"> — {t(
-                      dockerReason() === "permission" ? "insights.dk_reason.permission"
-                      : dockerReason() === "not_installed" ? "insights.dk_reason.not_installed"
-                      : dockerReason() === "no_socket" ? "insights.dk_reason.no_socket"
-                      : dockerReason() === "api_error" ? "insights.dk_reason.api_error"
-                      : "insights.no_docker"
-                    )}</span>
-                  </Show>
-                </h4>
+                <h4 class="ins-h4">🐳 Docker ({s().docker_running}/{s().docker_total})</h4>
+                <Show when={!dockerOk()}>
+                  <div class="ins-docker-err">
+                    <div class="ins-docker-err-msg">
+                      ⚠️ {t(
+                        dockerReason() === "permission" ? "insights.dk_reason.permission"
+                        : dockerReason() === "not_installed" ? "insights.dk_reason.not_installed"
+                        : dockerReason() === "no_socket" ? "insights.dk_reason.no_socket"
+                        : dockerReason() === "api_error" ? "insights.dk_reason.api_error"
+                        : "insights.no_docker"
+                      )}
+                    </div>
+                    <Show when={dockerInfo()?.hint}>
+                      <div class="ins-docker-err-hint">{dockerInfo()?.hint}</div>
+                    </Show>
+                    <div class="ins-docker-err-diag">
+                      <Show when={dockerInfo()?.socket}>
+                        <span>socket: <code>{dockerInfo()?.socket}</code></span>
+                      </Show>
+                      <span>
+                        {t("insights.daemon_version")}:{" "}
+                        <code>{dockerInfo()?.version || t("insights.daemon_unknown")}</code>
+                      </span>
+                    </div>
+                    {/* No version field at all → the server runs a pre-patch daemon. */}
+                    <Show when={p.onInstall && !dockerInfo()?.version}>
+                      <div class="ins-docker-err-hint">{t("insights.daemon_outdated")}</div>
+                    </Show>
+                    <Show when={p.onInstall}>
+                      <button class="primary" style="margin-top:8px" onClick={() => p.onInstall?.()}>
+                        {t("insights.dk_reinstall")}
+                      </button>
+                    </Show>
+                  </div>
+                </Show>
+                <Show when={dockerOk() && docker().length === 0}>
+                  <div class="settings-hint">{t("insights.dk_no_containers")}</div>
+                </Show>
                 <div class="ins-docker">
                   <For each={docker()}>
                     {(c) => (

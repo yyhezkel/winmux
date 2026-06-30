@@ -126,9 +126,12 @@ pub mod ids {
 /// Version of the `nginx-proxy` add-on (the installer logic, not nginx itself).
 pub const NGINX_PROXY_VERSION: &str = "1.0.0";
 
-/// The version the `insights` daemon add-on installs. The binary itself is
-/// fetched from GitHub at install time (Yossi's call: fetch both arches,
-/// no bundling), so this is the version the fetch URL pins.
+/// The version the `insights` daemon add-on installs. MUST track the embedded
+/// daemon's `Version` const (app/src-tauri/insights/main.go) — the desktop's
+/// update check compares the remote's `winmux-insights --version` against this
+/// to decide if an update is available. If they drift, the desktop silently
+/// reports "up to date" and never offers the update (the 1.0.0→1.0.1 drift
+/// that left servers stuck on the old single-path Docker discovery).
 pub const INSIGHTS_VERSION: &str = "1.2.0";
 
 /// The add-ons winmux knows about, in dependency-friendly order

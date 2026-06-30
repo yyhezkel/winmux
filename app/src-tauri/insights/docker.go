@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -12,30 +13,91 @@ import (
 	"time"
 )
 
-// dockerSockPath finds the first usable Docker unix socket. The daemon runs as
-// the SSH user (systemd --user / nohup), so the standard root socket at
-// /var/run/docker.sock is often unreadable; rootless Docker exposes a per-user
-// socket under $XDG_RUNTIME_DIR instead. Probe both, honouring DOCKER_HOST.
-func dockerSockPath() string {
+// logDockerUnavailable writes a single consistent diagnostic line. Used by
+// both the /docker endpoint and the sampler so the cause is unambiguous in
+// insights.log (this patch's whole point).
+func logDockerUnavailable(socket, reason, detail string) {
+	log.Printf("docker: unavailable reason=%s socket=%s uid=%d detail=%q",
+		reason, socket, os.Getuid(), detail)
+}
+
+// dockerCandidates lists the socket paths we probe, in priority order. The
+// daemon runs as the SSH user (systemd --user / nohup), so the standard root
+// socket at /var/run/docker.sock is often unreadable; rootless Docker exposes
+// a per-user socket under $XDG_RUNTIME_DIR / /run/user/<uid> instead.
+func dockerCandidates() []string {
 	if h := os.Getenv("DOCKER_HOST"); strings.HasPrefix(h, "unix://") {
-		return strings.TrimPrefix(h, "unix://")
+		return []string{strings.TrimPrefix(h, "unix://")}
 	}
 	candidates := []string{}
 	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
 		candidates = append(candidates, xdg+"/docker.sock")
 	}
-	candidates = append(candidates,
+	return append(candidates,
 		fmt.Sprintf("/run/user/%d/docker.sock", os.Getuid()),
 		"/var/run/docker.sock",
 		"/run/docker.sock",
 	)
-	for _, c := range candidates {
+}
+
+// dockerSockPath returns the first candidate that exists on disk, falling back
+// to the standard path so error messages stay meaningful.
+func dockerSockPath() string {
+	for _, c := range dockerCandidates() {
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
 	}
-	// Fall back to the standard path so the error message is meaningful.
 	return "/var/run/docker.sock"
+}
+
+// dockerResolve picks the socket and classifies reachability in one pass,
+// returning a machine reason + a human detail. Centralises the logic so both
+// the /docker endpoint and the sampler log a consistent, actionable line —
+// the whole point of this patch: a failing server must explain itself.
+//
+// reason: "" (ok) | "not_installed" | "permission" | "no_socket".
+func dockerResolve() (socket, reason, detail string) {
+	socket = dockerSockPath()
+	info, err := os.Stat(socket)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return socket, "not_installed", "no docker socket at any known path (" +
+				strings.Join(dockerCandidates(), ", ") + ")"
+		}
+		return socket, "no_socket", err.Error()
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return socket, "no_socket", "path exists but is not a unix socket"
+	}
+	conn, err := net.DialTimeout("unix", socket, 2*time.Second)
+	if err != nil {
+		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
+			return socket, "permission", err.Error()
+		}
+		return socket, "no_socket", err.Error()
+	}
+	_ = conn.Close()
+	return socket, "", ""
+}
+
+// dockerHint is an English, actionable one-liner per reason. Sent in the API
+// response so even an old desktop UI shows guidance; the new UI localises by
+// the machine `reason`.
+func dockerHint(reason string) string {
+	switch reason {
+	case "permission":
+		return "the daemon user can't access the Docker socket — add it to the 'docker' group " +
+			"(sudo usermod -aG docker $USER) and fully reconnect the workspace so the daemon restarts " +
+			"with the new group, or run rootless Docker."
+	case "not_installed":
+		return "no Docker socket found — is Docker installed and running on this server?"
+	case "no_socket":
+		return "the Docker socket exists but isn't responding — is the Docker daemon running?"
+	case "api_error":
+		return "reached the Docker socket but the API call failed — check the daemon log."
+	}
+	return ""
 }
 
 // DockerContainer is the slim view the Monitor UI renders.
@@ -63,30 +125,6 @@ func dockerHTTP() *http.Client {
 			},
 		},
 	}
-}
-
-// dockerProbe classifies why Docker is unavailable, so the UI can guide the
-// user (not installed vs. permission vs. socket missing) instead of a generic
-// "socket not reachable".
-func dockerProbe() (reason string) {
-	sock := dockerSockPath()
-	info, err := os.Stat(sock)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "not_installed"
-		}
-		return "no_socket"
-	}
-	_ = info
-	conn, err := net.DialTimeout("unix", sock, 2*time.Second)
-	if err != nil {
-		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
-			return "permission"
-		}
-		return "no_socket"
-	}
-	_ = conn.Close()
-	return ""
 }
 
 func dockerList() ([]DockerContainer, error) {

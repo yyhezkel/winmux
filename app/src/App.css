@@ -4432,6 +4432,22 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   padding: 6px 8px; border: 1px solid var(--w-border, #2a2e44); border-radius: 5px; font-size: 12px; }
 .mob-dev-actions { display: flex; gap: 4px; }
 .mob-dev-actions button, .mob-pair button { cursor: pointer; }
+/* Phase 68 docker patch: a prominent, actionable panel instead of a tiny hint. */
+.ins-docker-err {
+  border: 1px solid var(--w-warning, #e0af68); border-radius: 6px;
+  background: color-mix(in srgb, var(--w-warning, #e0af68) 8%, transparent);
+  padding: 10px 12px; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px;
+}
+.ins-docker-err-msg { font-size: 12.5px; color: var(--w-text-primary, #e6edf3); font-weight: 600; }
+.ins-docker-err-hint { font-size: 12px; color: var(--w-text-secondary, #9aa5ce); line-height: 1.45; }
+.ins-docker-err-diag {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px;
+  color: var(--w-text-secondary, #9aa5ce);
+}
+.ins-docker-err-diag code {
+  font-family: var(--w-mono, monospace); color: var(--w-text-primary, #e6edf3);
+  background: var(--w-bg-elev, #1f2335); padding: 1px 5px; border-radius: 4px;
+}
 .ins-cont {
   display: grid; grid-template-columns: 1.2fr 1.6fr auto; align-items: center; gap: 8px;
   padding: 6px 8px; border: 1px solid var(--w-border, #2a2e44); border-radius: 5px; font-size: 12px;

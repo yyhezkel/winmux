@@ -62,13 +62,32 @@ type Snapshot struct {
 // ─── Sampler ────────────────────────────────────────────────────────────
 
 type Sampler struct {
-	mu       sync.Mutex
-	lastNet  map[string][2]uint64 // iface -> {rxBytes, txBytes}
-	lastNetT time.Time
+	mu          sync.Mutex
+	lastNet     map[string][2]uint64 // iface -> {rxBytes, txBytes}
+	lastNetT    time.Time
+	dockerLogAt time.Time // rate-limit the docker-unavailable log
 }
 
 func newSampler() *Sampler {
 	return &Sampler{lastNet: map[string][2]uint64{}}
+}
+
+// logDockerOnce logs why Docker is unavailable at most every 5 minutes, so the
+// sampler's 0/0 count is explained in insights.log without spamming it.
+func (s *Sampler) logDockerOnce() {
+	s.mu.Lock()
+	due := time.Since(s.dockerLogAt) > 5*time.Minute
+	if due {
+		s.dockerLogAt = time.Now()
+	}
+	s.mu.Unlock()
+	if due {
+		socket, reason, detail := dockerResolve()
+		if reason == "" {
+			reason = "api_error"
+		}
+		logDockerUnavailable(socket, reason, detail)
+	}
 }
 
 // Sample collects one snapshot. includeTop adds the top-processes list
@@ -128,6 +147,8 @@ func (s *Sampler) Sample(includeTop bool) *Snapshot {
 				snap.DockerRunning++
 			}
 		}
+	} else {
+		s.logDockerOnce()
 	}
 
 	if includeTop {

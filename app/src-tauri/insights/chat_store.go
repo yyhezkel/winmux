@@ -20,14 +20,22 @@ type ChatStore struct {
 	db *sql.DB
 }
 
-// DeviceRow is a registered mobile device (69.D). The bearer token is stored
-// only as a sha256 hash (Rule #2 — no plaintext secrets at rest).
-type DeviceRow struct {
-	ID        string
-	TokenHash string
-	Label     string
-	CreatedAt int64
-	RevokedAt int64 // 0 = active
+// PairedDevice is a mobile device enrolled via the Phase 70 pairing flow.
+// Supersedes 69.D's `devices`. Tokens are stored only as sha256 hashes
+// (Rule #2). A device is created `pending` with a one-shot token (ots_hash +
+// expires_at); redeeming it issues the long-term token (token_hash) and flips
+// it to `active`.
+type PairedDevice struct {
+	ID         string
+	Name       string
+	TokenHash  string // long-term bearer (after redeem)
+	OtsHash    string // one-shot (pending only; cleared on redeem)
+	Scopes     string // JSON; "all" for now (decision #4)
+	Status     string // pending | active | revoked
+	CreatedAt  int64
+	ExpiresAt  int64 // one-shot expiry (pending only)
+	LastSeen   int64
+	LastIP     string
 }
 
 // SessionRow is the durable record of a Claude chat session.
@@ -60,12 +68,17 @@ func openChatStore(path string) (*ChatStore, error) {
 		}
 	}
 	schema := `
-	CREATE TABLE IF NOT EXISTS devices (
-	  id TEXT PRIMARY KEY,
-	  token_hash TEXT NOT NULL,
-	  label TEXT,
+	CREATE TABLE IF NOT EXISTS paired_devices (
+	  device_id TEXT PRIMARY KEY,
+	  device_name TEXT,
+	  token_hash TEXT,
+	  ots_hash TEXT,
+	  scopes TEXT,
+	  status TEXT,
 	  created_at INTEGER,
-	  revoked_at INTEGER DEFAULT 0
+	  expires_at INTEGER,
+	  last_seen INTEGER,
+	  last_ip TEXT
 	);
 	CREATE TABLE IF NOT EXISTS sessions (
 	  id TEXT PRIMARY KEY,
@@ -234,44 +247,88 @@ func (s *ChatStore) getReplay(sessionID string) [][]byte {
 	return out
 }
 
-// ─── devices (69.D) ──────────────────────────────────────────────────────
+// ─── paired devices (Phase 70) ───────────────────────────────────────────
 
-func (s *ChatStore) insertDevice(d *DeviceRow) error {
+// issueDevice inserts a pending device holding a one-shot token hash + expiry.
+func (s *ChatStore) issueDevice(d *PairedDevice) error {
 	_, err := s.db.Exec(
-		`INSERT INTO devices (id, token_hash, label, created_at, revoked_at)
-		 VALUES (?,?,?,?,0)`,
-		d.ID, d.TokenHash, d.Label, d.CreatedAt)
+		`INSERT INTO paired_devices
+		   (device_id, device_name, token_hash, ots_hash, scopes, status,
+		    created_at, expires_at, last_seen, last_ip)
+		 VALUES (?,?,'',?,?,'pending',?,?,0,'')`,
+		d.ID, d.Name, d.OtsHash, d.Scopes, d.CreatedAt, d.ExpiresAt)
 	return err
 }
 
-// deviceByTokenHash returns the active (non-revoked) device for a token hash.
-func (s *ChatStore) deviceByTokenHash(hash string) (*DeviceRow, bool) {
-	d := &DeviceRow{}
+// redeemDevice exchanges a valid one-shot (pending, unexpired) for a long-term
+// token: stores the long-term hash, clears the one-shot, flips to active.
+// Returns the device id, or ok=false if the one-shot is unknown/expired/used.
+func (s *ChatStore) redeemDevice(otsHash, longTermHash string, now int64) (string, bool) {
+	d := &PairedDevice{}
 	err := s.db.QueryRow(
-		`SELECT id, token_hash, label, created_at, revoked_at
-		   FROM devices WHERE token_hash=? AND revoked_at=0`, hash).
-		Scan(&d.ID, &d.TokenHash, &d.Label, &d.CreatedAt, &d.RevokedAt)
+		`SELECT device_id, expires_at FROM paired_devices
+		   WHERE ots_hash=? AND status='pending'`, otsHash).
+		Scan(&d.ID, &d.ExpiresAt)
+	if err != nil || d.ExpiresAt < now {
+		return "", false
+	}
+	res, err := s.db.Exec(
+		`UPDATE paired_devices
+		    SET token_hash=?, ots_hash='', status='active', last_seen=?
+		  WHERE device_id=? AND status='pending'`,
+		longTermHash, now, d.ID)
+	if err != nil {
+		return "", false
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return "", false // raced with another redeem
+	}
+	return d.ID, true
+}
+
+// deviceByTokenHash returns the active device for a long-term token hash.
+func (s *ChatStore) deviceByTokenHash(hash string) (*PairedDevice, bool) {
+	if hash == "" {
+		return nil, false
+	}
+	d := &PairedDevice{}
+	err := s.db.QueryRow(
+		`SELECT device_id, device_name, scopes, status
+		   FROM paired_devices WHERE token_hash=? AND status='active'`, hash).
+		Scan(&d.ID, &d.Name, &d.Scopes, &d.Status)
 	if err != nil {
 		return nil, false
 	}
 	return d, true
 }
 
-func (s *ChatStore) revokeDevice(id string) {
-	_, _ = s.db.Exec(`UPDATE devices SET revoked_at=? WHERE id=?`, time.Now().Unix(), id)
+func (s *ChatStore) touchDevice(id, ip string) {
+	_, _ = s.db.Exec(
+		`UPDATE paired_devices SET last_seen=?, last_ip=? WHERE device_id=?`,
+		time.Now().Unix(), ip, id)
 }
 
-func (s *ChatStore) listDevices() ([]DeviceRow, error) {
+func (s *ChatStore) revokeDevice(id string) {
+	_, _ = s.db.Exec(`UPDATE paired_devices SET status='revoked' WHERE device_id=?`, id)
+}
+
+func (s *ChatStore) renameDevice(id, name string) {
+	_, _ = s.db.Exec(`UPDATE paired_devices SET device_name=? WHERE device_id=?`, name, id)
+}
+
+func (s *ChatStore) listDevices() ([]PairedDevice, error) {
 	rows, err := s.db.Query(
-		`SELECT id, token_hash, label, created_at, revoked_at FROM devices ORDER BY created_at DESC`)
+		`SELECT device_id, device_name, scopes, status, created_at, expires_at, last_seen, last_ip
+		   FROM paired_devices ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []DeviceRow
+	var out []PairedDevice
 	for rows.Next() {
-		var d DeviceRow
-		if err := rows.Scan(&d.ID, &d.TokenHash, &d.Label, &d.CreatedAt, &d.RevokedAt); err == nil {
+		var d PairedDevice
+		if err := rows.Scan(&d.ID, &d.Name, &d.Scopes, &d.Status,
+			&d.CreatedAt, &d.ExpiresAt, &d.LastSeen, &d.LastIP); err == nil {
 			out = append(out, d)
 		}
 	}

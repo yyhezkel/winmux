@@ -37,7 +37,19 @@ func (c *chatAPI) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/claude/sessions", c.guard(c.handleList))    // GET
 	mux.HandleFunc("/api/claude/session/", c.guard(c.handleItem))    // GET/DELETE {id}
 	mux.HandleFunc("/ws/claude/session/", c.handleWS)                // WS (auth inside)
-	c.registerDeviceRoutes(mux)                                      // 69.D admin-only
+	c.registerPairingRoutes(mux)                                     // Phase 70 pairing
+}
+
+// clientIP prefers nginx's forwarded headers (the daemon is behind the proxy,
+// so RemoteAddr is always 127.0.0.1).
+func clientIP(r *http.Request) string {
+	if v := r.Header.Get("X-Real-IP"); v != "" {
+		return v
+	}
+	if v := r.Header.Get("X-Forwarded-For"); v != "" {
+		return strings.TrimSpace(strings.Split(v, ",")[0])
+	}
+	return r.RemoteAddr
 }
 
 // ─── auth ────────────────────────────────────────────────────────────────
@@ -225,6 +237,9 @@ func (c *chatAPI) handleWS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+	if dev != "" {
+		c.store.touchDevice(dev, clientIP(r)) // activity log
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/ws/claude/session/")
 	id = strings.Trim(id, "/")

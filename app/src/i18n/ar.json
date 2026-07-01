@@ -501,6 +501,7 @@
   "mobile.url_copy": "نسخ",
   "mobile.url_copied": "تم النسخ ✓",
   "mobile.url_then_scan": "ثم امسح رمز QR أعلاه. الرابط غير موجود في QR عمدًا.",
+  "mobile.paired_ok": "تم إقران الجهاز ✓",
   "mobile.expires_in": "ينتهي خلال",
   "mobile.devices": "الأجهزة المقترنة",
   "mobile.no_devices": "لا توجد أجهزة مقترنة بعد.",

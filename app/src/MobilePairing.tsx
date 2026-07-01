@@ -68,7 +68,11 @@ export function MobilePairing(p: { workspaceId?: string }) {
   const [pairUrl, setPairUrl] = createSignal<string | null>(null);
   const [copied, setCopied] = createSignal(false);
   const [countdown, setCountdown] = createSignal(0);
+  // device_id of the QR currently on screen — polled so we can auto-close the
+  // QR the moment that device actually pairs (redeems), not only on expiry.
+  const [pendingDeviceId, setPendingDeviceId] = createSignal<string | null>(null);
   let countdownTimer: ReturnType<typeof setInterval> | undefined;
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
 
   const ws = () => p.workspaceId ?? "";
 
@@ -126,7 +130,23 @@ export function MobilePairing(p: { workspaceId?: string }) {
     if (countdownTimer) clearInterval(countdownTimer);
     countdownTimer = undefined;
   };
-  onCleanup(clearCountdown);
+  const clearPoll = () => {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = undefined;
+  };
+  // Tear down the QR + its timers (on expiry, on successful pair, or unmount).
+  const closeQr = () => {
+    clearCountdown();
+    clearPoll();
+    setQrSvg(null);
+    setPairUrl(null);
+    setPendingDeviceId(null);
+    setCountdown(0);
+  };
+  onCleanup(() => {
+    clearCountdown();
+    clearPoll();
+  });
 
   const generateQr = async () => {
     if (!ws()) return;
@@ -154,6 +174,7 @@ export function MobilePairing(p: { workspaceId?: string }) {
       qr.addData(JSON.stringify(qrData));
       qr.make();
       setQrSvg(qr.createSvgTag({ cellSize: 5, margin: 4 }));
+      setPendingDeviceId(issued.device_id);
       // The out-of-band URL — default port hidden (see formatDisplayUrl). The
       // Copy button uses this same clean string; redeem parses it either way.
       setPairUrl(formatDisplayUrl(issued.host, issued.port, issued.tls));
@@ -164,18 +185,31 @@ export function MobilePairing(p: { workspaceId?: string }) {
       countdownTimer = setInterval(() => {
         setCountdown((c) => {
           if (c <= 1) {
-            clearCountdown();
-            setQrSvg(null);
-            setPairUrl(null);
+            closeQr();
             void refreshDevices();
             return 0;
           }
           return c - 1;
         });
       }, 1000);
+      // Poll every 3s: the instant this device redeems (status → active),
+      // close the QR and confirm — no need to wait out the full countdown.
+      clearPoll();
+      pollTimer = setInterval(() => void pollPaired(), 3000);
       void refreshDevices();
     } catch (e) {
       setErr(String(e));
+    }
+  };
+
+  const pollPaired = async () => {
+    const id = pendingDeviceId();
+    if (!id) return;
+    await refreshDevices();
+    const d = devices().find((x) => x.device_id === id);
+    if (d && d.status === "active") {
+      closeQr();
+      setNote(t("mobile.paired_ok"));
     }
   };
 

@@ -501,6 +501,7 @@
   "mobile.url_copy": "Копировать",
   "mobile.url_copied": "Скопировано ✓",
   "mobile.url_then_scan": "Затем отсканируйте QR выше. URL намеренно отсутствует в QR.",
+  "mobile.paired_ok": "Устройство сопряжено ✓",
   "mobile.expires_in": "истекает через",
   "mobile.devices": "Привязанные устройства",
   "mobile.no_devices": "Пока нет привязанных устройств.",

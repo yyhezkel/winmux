@@ -493,6 +493,7 @@
   "mobile.url_copy": "Copy",
   "mobile.url_copied": "Copied ✓",
   "mobile.url_then_scan": "Then scan the QR above. The URL is intentionally not in the QR.",
+  "mobile.paired_ok": "Device paired ✓",
   "mobile.expires_in": "expires in",
   "mobile.devices": "Paired devices",
   "mobile.no_devices": "No paired devices yet.",

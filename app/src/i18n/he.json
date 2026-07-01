@@ -501,6 +501,7 @@
   "mobile.url_copy": "העתק",
   "mobile.url_copied": "הועתק ✓",
   "mobile.url_then_scan": "ואז סרוק את ה-QR למעלה. ה-URL בכוונה לא נמצא ב-QR.",
+  "mobile.paired_ok": "המכשיר צומד ✓",
   "mobile.expires_in": "פג בעוד",
   "mobile.devices": "מכשירים מצומדים",
   "mobile.no_devices": "אין עדיין מכשירים מצומדים.",

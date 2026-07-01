@@ -76,6 +76,15 @@ pub fn dlog(msg: &str) {
     }
 }
 
+/// User-visible debug log, tagged by subsystem so the single `debug.log` reads
+/// as organized per-service streams — e.g. `[MONITOR]`, `[MOBILE]`, `[ADDON]`,
+/// `[TUNNEL]`, `[SSH]`. The tag is uppercased for at-a-glance scanning. Prefer
+/// this over bare `dlog` for new subsystem logging. See CLAUDE.md Rule 9 for
+/// the dlog-vs-tracing audience distinction.
+pub fn dlog_tag(subsystem: &str, msg: &str) {
+    dlog(&format!("[{}] {msg}", subsystem.to_uppercase()));
+}
+
 // ─── shell escape ────────────────────────────────────────────────────
 
 /// Minimal POSIX single-quote escape. Wraps the value in single quotes

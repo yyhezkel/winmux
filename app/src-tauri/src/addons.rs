@@ -175,7 +175,7 @@ async fn run_builtin(
             .await;
             if let Ok(o) = &out {
                 if o.contains("STILL_PRESENT") {
-                    crate::dlog("addon: insights uninstall — binary STILL PRESENT after rm");
+                    crate::dlog_tag("ADDON", "insights uninstall — binary STILL PRESENT after rm");
                     return Err(
                         "could not remove the daemon binary on the server (still present after rm)"
                             .into(),
@@ -306,28 +306,46 @@ fn valid_domain(d: &str) -> bool {
 /// never on argv / in the command string). Idempotent: skips certbot if a
 /// live cert already exists, overwrites the site config cleanly.
 const NGINX_INSTALL_SCRIPT: &str = r#"#!/bin/bash
-set -euo pipefail
+set -uo pipefail
 DOMAIN="$1"
-# Cloudflare token comes on stdin (never argv).
+USERHOME="${2:-$HOME}"
+# Cloudflare token comes on stdin (never argv / never logged).
 IFS= read -r CF_TOKEN || true
-if [ -z "$CF_TOKEN" ]; then echo "winmux: empty Cloudflare token" >&2; exit 2; fi
+
+# Unified per-service log: everything below is tee'd to ~/.winmux/logs so the
+# desktop can read WHY an install failed instead of a black box. The token is
+# never echoed, so it never lands here.
+LOGDIR="$USERHOME/.winmux/logs"
+mkdir -p "$LOGDIR" 2>/dev/null || true
+LOG="$LOGDIR/mobile-install.log"
+exec > >(tee -a "$LOG") 2>&1
+echo "──────────────────────────────────────────────"
+echo "[mobile] install start domain=$DOMAIN uid=$(id -u)"
+fail() { echo "[mobile] FAILED: $1"; exit "${2:-1}"; }
+
+[ -n "$CF_TOKEN" ] || fail "empty Cloudflare token" 2
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq nginx certbot python3-certbot-dns-cloudflare >/dev/null
+echo "[mobile] apt: installing nginx + certbot + dns-cloudflare (first run can take a minute)…"
+apt-get update -qq || fail "apt-get update failed (is the user root / NOPASSWD sudo?)" 10
+apt-get install -y -qq nginx certbot python3-certbot-dns-cloudflare || fail "apt install failed (see lines above)" 11
 
 install -d -m 700 /etc/winmux
 umask 177
 printf 'dns_cloudflare_api_token = %s\n' "$CF_TOKEN" > /etc/winmux/cloudflare.ini
 chmod 600 /etc/winmux/cloudflare.ini
+echo "[mobile] wrote /etc/winmux/cloudflare.ini (600)"
 
 if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+  echo "[mobile] certbot: requesting Let's Encrypt cert for $DOMAIN via Cloudflare DNS-01…"
   certbot certonly --dns-cloudflare \
     --dns-cloudflare-credentials /etc/winmux/cloudflare.ini \
     --dns-cloudflare-propagation-seconds 30 \
     -d "$DOMAIN" --non-interactive --agree-tos \
-    --register-unsafely-without-email >/dev/null 2>&1 || {
-      echo "winmux: certbot failed — check the domain + Cloudflare token" >&2; exit 3; }
+    --register-unsafely-without-email \
+    || fail "certbot failed — check the domain is on Cloudflare and the token has Zone:DNS:Edit + Zone:Zone:Read" 3
+else
+  echo "[mobile] certbot: existing cert for $DOMAIN reused"
 fi
 
 SITE="/etc/nginx/sites-available/winmux-$DOMAIN"
@@ -355,12 +373,16 @@ server {
 }
 NGINX
 ln -sf "$SITE" "/etc/nginx/sites-enabled/winmux-$DOMAIN"
-nginx -t >/dev/null 2>&1
-systemctl reload nginx || systemctl restart nginx
+nginx -t || fail "nginx config test failed (nginx -t above)" 4
+systemctl reload nginx || systemctl restart nginx || fail "nginx reload/restart failed" 5
+echo "[mobile] nginx reloaded — proxy live on 443 → 127.0.0.1:7879"
 
 mkdir -p /etc/letsencrypt/renewal-hooks/post
 printf '#!/bin/bash\nsystemctl reload nginx\n' > /etc/letsencrypt/renewal-hooks/post/winmux-reload-nginx.sh
 chmod +x /etc/letsencrypt/renewal-hooks/post/winmux-reload-nginx.sh
+
+# Hand the log back to the (non-root) SSH user so the desktop can tail it.
+chown "$(stat -c %u:%g "$USERHOME" 2>/dev/null || echo 0:0)" "$LOG" 2>/dev/null || true
 echo "WINMUX_NGINX_OK $DOMAIN"
 "#;
 
@@ -376,20 +398,42 @@ pub(crate) async fn nginx_proxy_install(
     if !valid_domain(domain) {
         return Err("invalid domain".into());
     }
+    crate::dlog_tag("MOBILE", &format!("nginx install begin domain={domain}"));
     let prefix = resolve_privilege(handle).await?;
     let script_path = format!("{home}/.winmux/run/nginx-install.sh");
     let _ = exec(handle, &format!("mkdir -p \"{home}/.winmux/run\""), 8).await;
     sftp_upload(handle, &script_path, NGINX_INSTALL_SCRIPT.as_bytes()).await?;
-    // domain is validated → safe as a quoted arg; token is on stdin only.
-    let cmd = format!("{prefix}bash \"{script_path}\" \"{domain}\"");
-    let out = exec_stdin(handle, &cmd, cf_token.as_bytes(), 180).await?;
+    // domain + home are validated/trusted → safe as quoted args; token is on
+    // stdin only. 300s: a first-time apt install of certbot + the DNS plugin
+    // plus the DNS-01 propagation wait can legitimately exceed 3 minutes.
+    let cmd = format!("{prefix}bash \"{script_path}\" \"{domain}\" \"{home}\"");
+    let out = exec_stdin(handle, &cmd, cf_token.as_bytes(), 300).await?;
     let _ = exec(handle, &format!("rm -f \"{script_path}\""), 8).await;
+
+    // The script tees its whole transcript to us; log the tail (Rule #1/#8 safe
+    // — the token is never echoed) so debug.log explains a failure, and point
+    // at the persistent server-side log for the full detail.
+    let tail: Vec<&str> = out.lines().filter(|l| !l.trim().is_empty()).collect();
+    for l in tail.iter().rev().take(12).rev() {
+        crate::dlog_tag("MOBILE", l);
+    }
+    let log_path = format!("{home}/.winmux/logs/mobile-install.log");
     if out.contains("WINMUX_NGINX_OK") {
+        crate::dlog_tag("MOBILE", &format!("nginx install OK domain={domain}"));
         Ok(format!("nginx + TLS ready for {domain}"))
     } else {
+        // Prefer the explicit "[mobile] FAILED: …" line the script emits.
+        let reason = tail
+            .iter()
+            .rev()
+            .find(|l| l.contains("FAILED:"))
+            .and_then(|l| l.split("FAILED:").nth(1))
+            .map(str::trim)
+            .or_else(|| tail.last().copied())
+            .unwrap_or("(no output — likely a timeout during apt/certbot)");
+        crate::dlog_tag("MOBILE", &format!("nginx install FAILED domain={domain}: {reason}"));
         Err(format!(
-            "nginx install did not confirm success: {}",
-            out.trim().lines().last().unwrap_or("(no output)")
+            "nginx install failed: {reason}. Full log on the server: {log_path}"
         ))
     }
 }
@@ -595,11 +639,14 @@ async fn status_for(m: &AddonManifest, handle: &SshHandle<SshClient>, home: &str
         .as_deref()
         .map(|iv| iv != m.version)
         .unwrap_or(false);
-    crate::dlog(&format!(
-        "addon: detect id={} → installed={installed} version={}",
-        m.id,
-        installed_version.as_deref().unwrap_or("-")
-    ));
+    crate::dlog_tag(
+        "ADDON",
+        &format!(
+            "detect id={} → installed={installed} version={}",
+            m.id,
+            installed_version.as_deref().unwrap_or("-")
+        ),
+    );
     AddonStatus {
         id: m.id.clone(),
         installed,
@@ -636,7 +683,7 @@ async fn run_lifecycle(
     op: &str,
     pick: impl Fn(&AddonManifest) -> AddonAction,
 ) -> Result<AddonStatus, String> {
-    crate::dlog(&format!("addon: {op} id={id} — begin"));
+    crate::dlog_tag("ADDON", &format!("{op} id={id} — begin"));
     let m = manifest_for(id).ok_or_else(|| format!("unknown add-on {id}"))?;
     let handle =
         pick_handle(state, workspace_id).ok_or("no active SSH session for this workspace")?;
@@ -650,16 +697,13 @@ async fn run_lifecycle(
     // community-add-ons work.)
     let action = pick(&m);
     if let Err(e) = run_action(&action, &handle, &home).await {
-        crate::dlog(&format!("addon: {op} id={id} — action FAILED: {e}"));
+        crate::dlog_tag("ADDON", &format!("{op} id={id} — action FAILED: {e}"));
         let mut s = status_for(&m, &handle, &home).await;
         s.last_error = Some(e);
         return Ok(s);
     }
     let s = status_for(&m, &handle, &home).await;
-    crate::dlog(&format!(
-        "addon: {op} id={id} — done (installed={})",
-        s.installed
-    ));
+    crate::dlog_tag("ADDON", &format!("{op} id={id} — done (installed={})", s.installed));
     Ok(s)
 }
 
@@ -738,10 +782,10 @@ pub(crate) async fn insights_fetch(
         Some(i) => raw[..i].trim_end_matches('\n').to_string(),
         None => raw.clone(),
     };
-    crate::dlog(&format!(
-        "insights_fetch: path={path} http={status} body_len={}",
-        body.len()
-    ));
+    crate::dlog_tag(
+        "MONITOR",
+        &format!("fetch path={path} http={status} body_len={}", body.len()),
+    );
     match status.as_str() {
         "200" => Ok(body),
         "nocurl" => Err("curl is not installed on this server (needed to reach the daemon)".into()),
@@ -788,6 +832,7 @@ pub(crate) async fn addon_logs(
     let log = match id.as_str() {
         ids::INSIGHTS => format!("{home}/.winmux/insights/insights.log"),
         ids::HOOKS => format!("{home}/.winmux/hook-debug.log"),
+        ids::NGINX_PROXY => format!("{home}/.winmux/logs/mobile-install.log"),
         _ => return Ok(String::new()),
     };
     exec(&handle, &format!("tail -n 200 \"{log}\" 2>/dev/null || true"), 10).await

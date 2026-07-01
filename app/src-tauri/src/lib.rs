@@ -264,7 +264,8 @@ pub(crate) fn new_workspace_id() -> String {
 // callsite resolves unchanged.
 pub(crate) use winmux_core::{
     backfill_terminal_connections, collect_panes, collect_panes_with_kind, config_dir,
-    config_dir_pub, dlog, first_terminal_connection, first_terminal_connection_pub, shell_quote,
+    config_dir_pub, dlog, dlog_tag, first_terminal_connection, first_terminal_connection_pub,
+    shell_quote,
 };
 
 /// Phase 38: absolute path to the debug log, for the Settings → Logs

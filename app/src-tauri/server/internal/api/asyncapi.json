@@ -3,29 +3,204 @@
   "info": {
     "title": "winmux-server streaming",
     "version": "2.0.0",
-    "description": "WebSocket frame contract for winmux-server (PHASE-77-DESIGN §4.4). STUB in S2 — the chat + workspace channels and their per-`type` frame schemas are populated in S3. The frame_version is advertised by GET /api/version."
+    "description": "WebSocket frame contract for winmux-server (PHASE-77-DESIGN §4.4, frame_version 2). OpenAPI describes only REST, so the streaming frames are this separate, independently-versioned contract. Canonical machine schema: /api/frames.schema.json (JSON-Schema 2020-12, the SDK source). frame_version is advertised in the `hello` frame and by GET /api/version."
   },
   "defaultContentType": "application/json",
+  "servers": {
+    "tunnel": {
+      "url": "127.0.0.1:{port}",
+      "protocol": "ws",
+      "description": "localhost behind the winmux tunnel; bearer via Authorization header or ?token=.",
+      "variables": { "port": { "default": "7879" } }
+    }
+  },
   "channels": {
-    "/ws/claude/session/{id}": {
-      "description": "Chat session stream (legacy path; v2 alias in a later sprint). Frames are JSON objects discriminated by `type` — assistant_delta, tool_use, tool_result, notification, hook_request, hook_resolved, status, error (server→client) and hook_decision, user_message (client→server). Full per-type schemas land in S3.",
-      "parameters": { "id": { "schema": { "type": "string" } } }
+    "/api/v2/workspace/{workspace_id}/session/{session_id}/subscribe": {
+      "description": "Attach to a workspace session (8a multi-client) and answer blocking hooks (8b). On open the server sends `hello`, replays every event after `?cursor=N`, then streams live events; the client sends commands. Bearer token via Authorization header or ?token=.",
+      "parameters": {
+        "workspace_id": { "schema": { "type": "string" } },
+        "session_id": { "schema": { "type": "string" } }
+      },
+      "subscribe": {
+        "operationId": "receiveFrames",
+        "summary": "Server→client frames.",
+        "message": { "oneOf": [
+          { "$ref": "#/components/messages/Hello" },
+          { "$ref": "#/components/messages/HookRequest" },
+          { "$ref": "#/components/messages/HookResolved" },
+          { "$ref": "#/components/messages/UserInputEcho" },
+          { "$ref": "#/components/messages/InterruptEcho" },
+          { "$ref": "#/components/messages/AssistantText" },
+          { "$ref": "#/components/messages/ToolUse" },
+          { "$ref": "#/components/messages/ToolResult" },
+          { "$ref": "#/components/messages/Status" },
+          { "$ref": "#/components/messages/Error" },
+          { "$ref": "#/components/messages/Notification" }
+        ] }
+      },
+      "publish": {
+        "operationId": "sendCommands",
+        "summary": "Client→server commands.",
+        "message": { "oneOf": [
+          { "$ref": "#/components/messages/UserInput" },
+          { "$ref": "#/components/messages/HookDecision" },
+          { "$ref": "#/components/messages/Interrupt" },
+          { "$ref": "#/components/messages/Unsubscribe" }
+        ] }
+      }
     }
   },
   "components": {
     "messages": {
-      "Frame": {
-        "summary": "Envelope common to every frame (S3 will add per-type oneOf).",
-        "payload": {
-          "type": "object",
-          "required": ["type"],
-          "properties": {
-            "type": { "type": "string" },
-            "ts": { "type": "integer" },
-            "session_id": { "type": "string" },
-            "seq": { "type": "integer", "description": "monotonic per session; gap detection + resume" }
-          }
+      "Hello":        { "name": "hello",         "title": "Stream capability negotiation", "payload": { "$ref": "#/components/schemas/HelloFrame" } },
+      "HookRequest":  { "name": "hook_request",  "title": "Blocking permission ask (8b)",  "payload": { "$ref": "#/components/schemas/HookRequestFrame" } },
+      "HookResolved": { "name": "hook_resolved", "title": "Hook answered/timed out — broadcast", "payload": { "$ref": "#/components/schemas/HookResolvedFrame" } },
+      "UserInputEcho":{ "name": "user_input",    "title": "User message echoed to all subscribers", "payload": { "$ref": "#/components/schemas/UserInputFrame" } },
+      "InterruptEcho":{ "name": "interrupt",     "title": "Interrupt echoed to subscribers", "payload": { "$ref": "#/components/schemas/InterruptFrame" } },
+      "AssistantText":{ "name": "assistant_text","title": "Streamed assistant text (engine, §16)", "payload": { "$ref": "#/components/schemas/AssistantTextFrame" } },
+      "ToolUse":      { "name": "tool_use",       "title": "Tool invoked (engine, §16)", "payload": { "$ref": "#/components/schemas/ToolUseFrame" } },
+      "ToolResult":   { "name": "tool_result",    "title": "Tool returned (engine, §16)", "payload": { "$ref": "#/components/schemas/ToolResultFrame" } },
+      "Status":       { "name": "status",         "title": "Session state change", "payload": { "$ref": "#/components/schemas/StatusFrame" } },
+      "Error":        { "name": "error",          "title": "Stream/parse error", "payload": { "$ref": "#/components/schemas/ErrorFrame" } },
+      "Notification": { "name": "notification",   "title": "Passive lifecycle notification (drives FCM)", "payload": { "$ref": "#/components/schemas/NotificationFrame" } },
+      "UserInput":    { "name": "user_input",     "title": "Send a user message", "payload": { "$ref": "#/components/schemas/UserInputClient" } },
+      "HookDecision": { "name": "hook_decision",  "title": "Answer a pending hook", "payload": { "$ref": "#/components/schemas/HookDecisionFrame" } },
+      "Interrupt":    { "name": "interrupt",      "title": "Interrupt the session", "payload": { "$ref": "#/components/schemas/InterruptClient" } },
+      "Unsubscribe":  { "name": "unsubscribe",    "title": "Detach from the session", "payload": { "$ref": "#/components/schemas/UnsubscribeFrame" } }
+    },
+    "schemas": {
+      "HelloFrame": {
+        "type": "object", "required": ["type", "frame_version", "session_id", "client_id"],
+        "properties": {
+          "type": { "type": "string", "const": "hello" },
+          "frame_version": { "type": "integer" },
+          "session_id": { "type": "string" },
+          "client_id": { "type": "string" }
         }
+      },
+      "Envelope": {
+        "type": "object", "required": ["type", "seq", "session_id", "ts"],
+        "properties": {
+          "type": { "type": "string" },
+          "seq": { "type": "integer", "description": "monotonic per session — gap detection + cursor resume" },
+          "session_id": { "type": "string" },
+          "ts": { "type": "integer", "description": "unix seconds" }
+        }
+      },
+      "HookRequestFrame": {
+        "allOf": [{ "$ref": "#/components/schemas/Envelope" }],
+        "type": "object", "required": ["req_id"],
+        "properties": {
+          "type": { "type": "string", "const": "hook_request" },
+          "req_id": { "type": "string" },
+          "tool_name": { "type": "string" },
+          "tool_input": {},
+          "decision_required": { "type": "boolean" }
+        }
+      },
+      "HookResolvedFrame": {
+        "allOf": [{ "$ref": "#/components/schemas/Envelope" }],
+        "type": "object", "required": ["req_id", "decision", "resolved_by"],
+        "properties": {
+          "type": { "type": "string", "const": "hook_resolved" },
+          "req_id": { "type": "string" },
+          "decision": { "type": "string", "enum": ["allow", "deny"] },
+          "resolved_by": { "type": "string" }
+        }
+      },
+      "UserInputFrame": {
+        "allOf": [{ "$ref": "#/components/schemas/Envelope" }],
+        "type": "object", "required": ["content"],
+        "properties": {
+          "type": { "type": "string", "const": "user_input" },
+          "content": { "type": "string" },
+          "client_id": { "type": "string" }
+        }
+      },
+      "InterruptFrame": {
+        "allOf": [{ "$ref": "#/components/schemas/Envelope" }],
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "const": "interrupt" },
+          "client_id": { "type": "string" }
+        }
+      },
+      "AssistantTextFrame": {
+        "allOf": [{ "$ref": "#/components/schemas/Envelope" }],
+        "type": "object", "required": ["content"],
+        "properties": {
+          "type": { "type": "string", "const": "assistant_text" },
+          "content": { "type": "string" }
+        }
+      },
+      "ToolUseFrame": {
+        "allOf": [{ "$ref": "#/components/schemas/Envelope" }],
+        "type": "object", "required": ["tool_id", "tool_name"],
+        "properties": {
+          "type": { "type": "string", "const": "tool_use" },
+          "tool_id": { "type": "string" },
+          "tool_name": { "type": "string" },
+          "tool_input": {}
+        }
+      },
+      "ToolResultFrame": {
+        "allOf": [{ "$ref": "#/components/schemas/Envelope" }],
+        "type": "object", "required": ["tool_id"],
+        "properties": {
+          "type": { "type": "string", "const": "tool_result" },
+          "tool_id": { "type": "string" },
+          "content": { "type": "string" },
+          "is_error": { "type": "boolean" }
+        }
+      },
+      "StatusFrame": {
+        "allOf": [{ "$ref": "#/components/schemas/Envelope" }],
+        "type": "object", "required": ["status"],
+        "properties": {
+          "type": { "type": "string", "const": "status" },
+          "status": { "type": "string", "description": "active | waiting_input | waiting_hook | done | error" }
+        }
+      },
+      "ErrorFrame": {
+        "allOf": [{ "$ref": "#/components/schemas/Envelope" }],
+        "type": "object", "required": ["message"],
+        "properties": {
+          "type": { "type": "string", "const": "error" },
+          "message": { "type": "string" }
+        }
+      },
+      "NotificationFrame": {
+        "allOf": [{ "$ref": "#/components/schemas/Envelope" }],
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "const": "notification" },
+          "subkind": { "type": "string" },
+          "title": { "type": "string" },
+          "summary": { "type": "string" }
+        }
+      },
+      "UserInputClient": {
+        "type": "object", "required": ["type", "content"],
+        "properties": {
+          "type": { "type": "string", "const": "user_input" },
+          "content": { "type": "string" }
+        }
+      },
+      "HookDecisionFrame": {
+        "type": "object", "required": ["type", "req_id", "decision"],
+        "properties": {
+          "type": { "type": "string", "const": "hook_decision" },
+          "req_id": { "type": "string" },
+          "decision": { "type": "string", "enum": ["allow", "deny"] }
+        }
+      },
+      "InterruptClient": {
+        "type": "object", "required": ["type"],
+        "properties": { "type": { "type": "string", "const": "interrupt" } }
+      },
+      "UnsubscribeFrame": {
+        "type": "object", "required": ["type"],
+        "properties": { "type": { "type": "string", "const": "unsubscribe" } }
       }
     }
   }

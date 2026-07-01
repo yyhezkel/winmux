@@ -47,6 +47,13 @@ func NewServer(token string, port int, deps Deps) *Server {
 //go:embed asyncapi.json
 var asyncapiSpec []byte
 
+// frames.schema.json is the canonical machine schema for the WS frames
+// (JSON-Schema 2020-12) — the source the SDK generators turn into typed frame
+// unions. Served alongside the specs so clients + CI can fetch it live.
+//
+//go:embed frames.schema.json
+var framesSchema []byte
+
 func serveSpec(spec []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -73,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.HandleFunc("/api/openapi.json", serveSpec(spec))
 	mux.HandleFunc("/api/asyncapi.json", serveSpec(asyncapiSpec))
+	mux.HandleFunc("/api/frames.schema.json", serveSpec(framesSchema))
 
 	// Insights keeps its raw legacy + /api/v2 stdlib handlers behind auth
 	// (desktop Monitor surface — not part of the generated SDK spec).

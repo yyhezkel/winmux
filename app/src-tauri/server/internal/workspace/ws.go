@@ -15,8 +15,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-
-	"winmux-server/internal/core"
 )
 
 var upgrader = websocket.Upgrader{
@@ -70,9 +68,7 @@ func (s *Service) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// hello → capability negotiation for the stream (§4.4).
-	hello, _ := json.Marshal(map[string]any{
-		"type": "hello", "frame_version": core.FrameVersion, "session_id": sid, "client_id": clientID,
-	})
+	hello, _ := json.Marshal(newHello(sid, clientID))
 	if conn.WriteMessage(websocket.TextMessage, hello) != nil {
 		return
 	}
@@ -116,25 +112,20 @@ func (s *Service) readLoop(conn *websocket.Conn, sid, clientID string) {
 		if err != nil {
 			return
 		}
-		var f struct {
-			Type     string `json:"type"`
-			Content  string `json:"content"`
-			ReqID    string `json:"req_id"`
-			Decision string `json:"decision"`
-		}
+		var f clientFrame
 		if json.Unmarshal(data, &f) != nil {
 			continue
 		}
 		switch f.Type {
-		case "user_input":
-			payload, _ := json.Marshal(map[string]any{"content": f.Content, "client_id": clientID})
-			_, _ = s.mgr.Publish(sid, "user_input", payload)
-		case "hook_decision":
+		case FrameUserInput:
+			payload, _ := json.Marshal(userInputPayload{Content: f.Content, ClientID: clientID})
+			_, _ = s.mgr.Publish(sid, FrameUserInput, payload)
+		case FrameHookDecision:
 			_, _ = s.mgr.ResolveHook(f.ReqID, clientID, f.Decision)
-		case "interrupt":
-			payload, _ := json.Marshal(map[string]any{"client_id": clientID})
-			_, _ = s.mgr.Publish(sid, "interrupt", payload)
-		case "unsubscribe":
+		case FrameInterrupt:
+			payload, _ := json.Marshal(interruptPayload{ClientID: clientID})
+			_, _ = s.mgr.Publish(sid, FrameInterrupt, payload)
+		case FrameUnsubscribe:
 			_ = conn.Close() // ends the write loop too
 			return
 		}

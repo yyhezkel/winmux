@@ -281,11 +281,37 @@ their shapes as the v2 contract:
 | `status` | session state change | `status` (active/waiting_input/waiting_hook/…) |
 | `error` | stream/parse error | `message` |
 
-**Client→server frames (answering, 8b):**
+**Client→server frames (commands):**
 | `type` | effect |
 |---|---|
+| `user_input` | `{ content }` → echoed to all subscribers as a `user_input` event; fed to Claude stdin once the engine is attached |
 | `hook_decision` | `{ req_id, decision: allow\|deny }` → resolves the pending hook, broadcast to all subscribers as `hook_resolved` |
-| `user_message` | `{ text }` → fed to Claude stdin |
+| `interrupt` | `{}` → echoed to subscribers as an `interrupt` event |
+| `unsubscribe` | `{}` → detaches this connection |
+
+> **S4.3 — contract LOCKED (2026-07-02).** No client is locked, so this shape is
+> now canonical (implemented in `internal/workspace/frames.go` as typed Go
+> values; drift-guarded by `TestFrameWireShapes`). Decisions:
+> - **Discriminator `type`** (not `kind`) — idiomatic for kotlinx
+>   `@JsonClassDiscriminator`, TS tagged unions, AsyncAPI/JSON-Schema.
+> - **Flat frames** — envelope (`seq`/`session_id`/`ts`) sits beside the
+>   type-specific fields; the natural target for a kotlinx sealed base class + a
+>   TS discriminated union. Not nested under a `data` key.
+> - **snake_case everywhere** — matches the REST surface (`session_id`,
+>   `req_id`, `frame_version`, `client_id`, `tool_name`, `is_error`,
+>   `resolved_by`).
+> - **Required fields explicit** — session events require
+>   `type,seq,session_id,ts`; `hello` requires `type,frame_version,session_id,client_id`.
+> - **Three families** — control (`hello`), server→client session events,
+>   client→server commands.
+> - The Phase-69 chat content frames (`assistant_text`, `tool_use`,
+>   `tool_result`, `status`, `error`, `notification`) are carried in the schema
+>   from day one but only emitted once a Claude session is attached (§16).
+>
+> Canonical machine schema: **`frames.schema.json`** (JSON-Schema 2020-12, the
+> SDK source), published at `/api/frames.schema.json` alongside `asyncapi.json`
+> (AsyncAPI 2.6, full per-type messages + a subscribe/publish `oneOf`). Both
+> embedded + served with CORS.
 
 **Multi-client attach (8a) + broadcast (8b) semantics:**
 - A session has **N subscribers**. Every server-origin frame fans out to all

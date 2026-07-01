@@ -221,7 +221,7 @@ func (m *Manager) CreateHookRequest(sessionID, reqID string, payload json.RawMes
 	}); err != nil {
 		return err
 	}
-	_, err := m.Publish(sessionID, "hook_request", payload)
+	_, err := m.Publish(sessionID, FrameHookRequest, payload)
 	return err
 }
 
@@ -237,9 +237,7 @@ func (m *Manager) ResolveHook(reqID, clientID, decision string) (bool, error) {
 		return won, err
 	}
 	p, _ := m.store.GetPending(reqID)
-	payload, _ := json.Marshal(map[string]any{
-		"req_id": reqID, "decision": decision, "resolved_by": clientID,
-	})
-	_, err = m.Publish(p.SessionID, "hook_resolved", payload)
+	payload, _ := json.Marshal(hookResolvedPayload{ReqID: reqID, Decision: decision, ResolvedBy: clientID})
+	_, err = m.Publish(p.SessionID, FrameHookResolved, payload)
 	return true, err
 }

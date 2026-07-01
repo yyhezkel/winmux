@@ -40,7 +40,7 @@ func TestHealthAndVersionAreUnauthed(t *testing.T) {
 // The OpenAPI + AsyncAPI specs are served unauthenticated, valid JSON, with CORS.
 func TestSpecsServed(t *testing.T) {
 	h := testServer().Handler()
-	for _, path := range []string{"/api/openapi.json", "/api/asyncapi.json"} {
+	for _, path := range []string{"/api/openapi.json", "/api/asyncapi.json", "/api/frames.schema.json"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
 		if rec.Code != http.StatusOK {

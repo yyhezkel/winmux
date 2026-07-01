@@ -114,7 +114,7 @@ export function HygienePanel(p: { workspaceId?: string }) {
           </div>
         </Show>
         <div class="hyg-list">
-          <For each={data()!.port_watchers}>
+          <For each={data()!.port_watchers ?? []}>
             {(w) => (
               <div class={`hyg-row${w.duplicate ? " dup" : ""}`}>
                 <span class="hyg-main">
@@ -133,12 +133,12 @@ export function HygienePanel(p: { workspaceId?: string }) {
       {/* ── Orphan claude sessions (alert only; user decides) ── */}
       <h4 class="ins-h4">{t("hygiene.orphans")}</h4>
       <Show
-        when={data() && data()!.orphan_sessions.length > 0}
+        when={(data()?.orphan_sessions?.length ?? 0) > 0}
         fallback={<div class="settings-hint">{t("hygiene.no_orphans")}</div>}
       >
         <div class="settings-hint hyg-orphan-hint">{t("hygiene.orphan_hint")}</div>
         <div class="hyg-list">
-          <For each={data()!.orphan_sessions}>
+          <For each={data()!.orphan_sessions ?? []}>
             {(o) => (
               <div class="hyg-row dup">
                 <span class="hyg-main">⚠ {o.session_id || o.resume || `pid ${o.pid}`}</span>

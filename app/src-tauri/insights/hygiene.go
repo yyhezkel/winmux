@@ -89,8 +89,10 @@ func collectHygiene() Hygiene {
 		return Hygiene{}
 	}
 	nowUnix := time.Now().Unix()
-	var watchers []PortWatcher
-	var orphans []OrphanSession
+	// Non-nil so empty results marshal as JSON [] (not null) — a nil slice
+	// would crash the desktop's `.length` / <For>.
+	watchers := []PortWatcher{}
+	orphans := []OrphanSession{}
 	for _, p := range procs {
 		args, err := p.CmdlineSlice()
 		if err != nil || len(args) == 0 {

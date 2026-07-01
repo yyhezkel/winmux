@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -146,23 +147,32 @@ func dockerList() ([]DockerContainer, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, err
 	}
-	out := make([]DockerContainer, 0, len(raw))
-	for _, r := range raw {
+	// Build the base list, then fetch per-container stats CONCURRENTLY. The
+	// old sequential loop cost up to (4s timeout × running-containers), which
+	// could push a /current sample past the desktop's HTTP deadline; in
+	// parallel the worst case is a single stat's timeout (Phase 72.3).
+	out := make([]DockerContainer, len(raw))
+	var wg sync.WaitGroup
+	for i, r := range raw {
 		name := ""
 		if len(r.Names) > 0 {
 			name = strings.TrimPrefix(r.Names[0], "/")
 		}
-		dc := DockerContainer{
+		out[i] = DockerContainer{
 			ID: shortID(r.Id), Name: name, Image: r.Image,
 			State: r.State, Status: r.Status,
 		}
 		if r.State == "running" {
-			if cpu, mu, mp, ok := dockerStats(r.Id); ok {
-				dc.CPUPct, dc.MemUsed, dc.MemPct = cpu, mu, mp
-			}
+			wg.Add(1)
+			go func(i int, id string) {
+				defer wg.Done()
+				if cpu, mu, mp, ok := dockerStats(id); ok {
+					out[i].CPUPct, out[i].MemUsed, out[i].MemPct = cpu, mu, mp
+				}
+			}(i, r.Id)
 		}
-		out = append(out, dc)
 	}
+	wg.Wait()
 	return out, nil
 }
 

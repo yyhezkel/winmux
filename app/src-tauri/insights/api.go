@@ -68,7 +68,10 @@ func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *server) handleCurrent(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, s.sm.Sample(true))
+	// Serve the freshest ticker-produced snapshot; never collect live in the
+	// request path (Phase 72.3 — a blocking sample made the Monitor time out
+	// and report the daemon "unreachable" even while it was healthy).
+	writeJSON(w, s.sm.Current())
 }
 
 func (s *server) handleHistory(w http.ResponseWriter, r *http.Request) {

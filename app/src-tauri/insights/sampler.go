@@ -1,8 +1,10 @@
 package main
 
 import (
+	"log"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -66,10 +68,27 @@ type Sampler struct {
 	lastNet     map[string][2]uint64 // iface -> {rxBytes, txBytes}
 	lastNetT    time.Time
 	dockerLogAt time.Time // rate-limit the docker-unavailable log
+
+	// last holds the freshest snapshot produced by the background ticker.
+	// /current serves it without blocking on live collection (Phase 72.3).
+	last atomic.Pointer[Snapshot]
 }
 
 func newSampler() *Sampler {
 	return &Sampler{lastNet: map[string][2]uint64{}}
+}
+
+// Current returns the freshest cached snapshot for the /current endpoint.
+// The background ticker refreshes it every interval, so this NEVER blocks on
+// live collection — a slow docker-stats round-trip or a hung disk mount could
+// otherwise exceed the desktop's HTTP timeout and make the Monitor report the
+// daemon "unreachable" (Phase 72.3 root cause: handleCurrent ran Sample(true)
+// synchronously). Falls back to one live sample only before the first tick.
+func (s *Sampler) Current() *Snapshot {
+	if snap := s.last.Load(); snap != nil {
+		return snap
+	}
+	return s.Sample(true)
 }
 
 // logDockerOnce logs why Docker is unavailable at most every 5 minutes, so the
@@ -95,6 +114,7 @@ func (s *Sampler) logDockerOnce() {
 func (s *Sampler) Sample(includeTop bool) *Snapshot {
 	now := time.Now()
 	snap := &Snapshot{TS: now.Unix()}
+	t0 := now
 
 	// CPU: overall % since last call (non-blocking), + per-core, + load avg.
 	if pct, err := cpu.Percent(0, false); err == nil && len(pct) > 0 {
@@ -135,10 +155,13 @@ func (s *Sampler) Sample(includeTop bool) *Snapshot {
 		}
 	}
 
+	tDisk := time.Now()
+
 	// Network rates (per-iface delta since last sample + aggregate).
 	s.computeNet(snap, now)
 
-	// Docker (best-effort; skipped if the socket is unreachable).
+	// Docker (best-effort; skipped if the socket is unreachable). Bounded
+	// internally (concurrent per-container stats) so it can't stall a sample.
 	if conts, err := dockerList(); err == nil {
 		snap.Docker = conts
 		snap.DockerTotal = len(conts)
@@ -150,10 +173,22 @@ func (s *Sampler) Sample(includeTop bool) *Snapshot {
 	} else {
 		s.logDockerOnce()
 	}
+	tDocker := time.Now()
 
 	if includeTop {
 		snap.Top = topProcesses(10)
 	}
+
+	// Timing self-diagnostic: if a sample is slow, log which phase ate the
+	// budget so insights.log (served by /logs) pinpoints it. Metadata only.
+	tEnd := time.Now()
+	if d := tEnd.Sub(t0); d > 2*time.Second {
+		log.Printf("sample slow: total=%dms cpu+mem+disk=%dms docker=%dms top=%dms includeTop=%v",
+			d.Milliseconds(), tDisk.Sub(t0).Milliseconds(),
+			tDocker.Sub(tDisk).Milliseconds(), tEnd.Sub(tDocker).Milliseconds(), includeTop)
+	}
+
+	s.last.Store(snap) // publish for /current (Phase 72.3)
 	return snap
 }
 
@@ -240,7 +275,9 @@ func runSampler(store *Store, sm *Sampler, interval time.Duration, stop <-chan s
 		case <-stop:
 			return
 		case <-tick.C:
-			store.insert(sm.Sample(false))
+			// includeTop=true so the cached snapshot served by /current
+			// carries the top-processes list without a live (blocking) walk.
+			store.insert(sm.Sample(true))
 		case <-sweep.C:
 			store.sweep()
 		}

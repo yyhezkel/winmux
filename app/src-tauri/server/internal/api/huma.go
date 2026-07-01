@@ -11,6 +11,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
@@ -42,7 +43,7 @@ func (s *Server) newHumaAPI(mux *http.ServeMux) huma.API {
 	api := humago.New(mux, cfg)
 	api.UseMiddleware(bearerMiddleware(api, s.token))
 
-	registerMetaOps(api)
+	s.registerMetaOps(api)
 	if s.deps.Files != nil {
 		s.deps.Files.RegisterHuma(api)
 	}
@@ -90,17 +91,20 @@ type VersionBody struct {
 
 // HealthBody is the liveness payload.
 type HealthBody struct {
-	OK      bool   `json:"ok"`
-	Version string `json:"version"`
+	OK            bool   `json:"ok"`
+	Version       string `json:"version"`
+	UptimeSeconds int64  `json:"uptime_seconds"`
 }
 
 // registerMetaOps mounts the unauthenticated liveness + version endpoints.
-func registerMetaOps(api huma.API) {
+func (s *Server) registerMetaOps(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "health", Method: http.MethodGet, Path: "/healthz",
 		Summary: "Liveness probe (unauthenticated)", Tags: []string{"meta"},
 	}, func(_ context.Context, _ *struct{}) (*struct{ Body HealthBody }, error) {
-		return &struct{ Body HealthBody }{Body: HealthBody{OK: true, Version: core.Version}}, nil
+		return &struct{ Body HealthBody }{Body: HealthBody{
+			OK: true, Version: core.Version, UptimeSeconds: int64(time.Since(s.started).Seconds()),
+		}}, nil
 	})
 
 	huma.Register(api, huma.Operation{

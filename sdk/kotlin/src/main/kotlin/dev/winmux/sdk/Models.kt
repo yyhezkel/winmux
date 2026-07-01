@@ -66,6 +66,7 @@ data class FormFile(
 @Serializable
 data class HealthBody(
     val ok: Boolean,
+    @SerialName("uptime_seconds") val uptimeSeconds: Long,
     val version: String
 )
 

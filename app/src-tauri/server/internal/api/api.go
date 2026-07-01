@@ -4,10 +4,12 @@
 package api
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"winmux-server/internal/auth"
@@ -30,14 +32,29 @@ type Deps struct {
 
 // Server wires the subsystems into one HTTP listener.
 type Server struct {
-	token string
-	port  int
-	deps  Deps
+	token   string
+	port    int
+	deps    Deps
+	started time.Time
+	mu      sync.Mutex
+	httpSrv *http.Server // set in Run; used by Shutdown for a graceful drain
 }
 
 // NewServer builds the front door.
 func NewServer(token string, port int, deps Deps) *Server {
-	return &Server{token: token, port: port, deps: deps}
+	return &Server{token: token, port: port, deps: deps, started: time.Now()}
+}
+
+// Shutdown gracefully drains the HTTP listener (in-flight requests finish or the
+// context deadline hits). Safe to call before Run has bound (no-op).
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	srv := s.httpSrv
+	s.mu.Unlock()
+	if srv == nil {
+		return nil
+	}
+	return srv.Shutdown(ctx)
 }
 
 // asyncapi.json is the hand-authored streaming (WebSocket) contract — OpenAPI
@@ -100,7 +117,8 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// Run serves until the listener errors.
+// Run serves until the listener errors or Shutdown is called (which returns a
+// nil error here, mapping http.ErrServerClosed to a clean stop).
 func (s *Server) Run() error {
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("127.0.0.1:%d", s.port),
@@ -108,5 +126,11 @@ func (s *Server) Run() error {
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 20 * time.Second,
 	}
-	return srv.ListenAndServe()
+	s.mu.Lock()
+	s.httpSrv = srv
+	s.mu.Unlock()
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
 }

@@ -254,6 +254,8 @@ export interface components {
         };
         HealthBody: {
             ok: boolean;
+            /** Format: int64 */
+            uptime_seconds: number;
             version: string;
         };
         LineEvent: {

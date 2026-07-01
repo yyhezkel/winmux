@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -164,6 +165,15 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
-	close(stop)
-	log.Printf("winmux-server stopping")
+	log.Printf("winmux-server stopping (draining connections)")
+	close(stop) // stop samplers/janitors/sweepers
+
+	// Graceful HTTP drain so an in-flight metrics/file request isn't cut off on
+	// restart; hard-stop after the deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("winmux-server: shutdown drain: %v", err)
+	}
+	log.Printf("winmux-server stopped")
 }

@@ -36,9 +36,7 @@
       "resources/winmux-linux-x64",
       "resources/remote-manifest.json",
       "resources/winmux-cli.exe",
-      "resources/winmux-tmux.conf",
-      "resources/winmux-insights-linux-x64",
-      "resources/winmux-insights-linux-arm64"
+      "resources/winmux-tmux.conf"
     ],
     "windows": {
       "nsis": {

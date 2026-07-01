@@ -271,7 +271,12 @@ export function InsightsWindow(p: Props) {
                   </div>
                 </div>
 
-                <h4 class="ins-h4">🐳 Docker ({s().docker_running}/{s().docker_total})</h4>
+                <h4 class="ins-h4">
+                  🐳 Docker ({s().docker_running}/{s().docker_total})
+                  <Show when={dockerOk() && dockerInfo()?.socket}>
+                    <span class="settings-hint"> · <code>{dockerInfo()!.socket}</code></span>
+                  </Show>
+                </h4>
                 <Show when={!dockerOk()}>
                   <div class="ins-docker-err">
                     <div class="ins-docker-err-msg">

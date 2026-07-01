@@ -100,6 +100,7 @@ func (s *server) handleDocker(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{
 			"available":      true,
 			"containers":     conts,
+			"socket":         dockerSockPath(), // Phase 72: show which socket is live
 			"daemon_version": Version,
 		})
 		return

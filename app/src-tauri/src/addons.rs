@@ -451,7 +451,79 @@ else
 fi"#
     );
     let r = exec(handle, &start, 20).await?;
-    Ok(format!("installed; {}", r.trim().lines().last().unwrap_or("")))
+    let started = r.trim().lines().last().unwrap_or("").to_string();
+    // Phase 72: best-effort Docker-group provisioning so the Monitor's Docker
+    // panel works out-of-the-box (the daemon runs as the SSH user, which is
+    // usually NOT in the `docker` group). Never fails the install.
+    let docker = provision_docker_group(handle).await;
+    Ok(format!("installed; {started}{docker}"))
+}
+
+/// Phase 72: try to make Docker reachable by the daemon (which runs as the SSH
+/// user). Idempotent + best-effort — prints a marker we translate to guidance.
+/// Rootless Docker needs no group; otherwise add the user to `docker` via
+/// passwordless sudo if available (the group only takes effect on a fresh
+/// login, so we tell the user to reconnect). Skips cleanly when Docker is
+/// absent (also the effective no-op on non-Linux servers).
+async fn provision_docker_group(handle: &SshHandle<SshClient>) -> String {
+    let script = r#"if command -v docker >/dev/null 2>&1; then
+  U=$(id -un)
+  if [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/docker.sock" ]; then
+    echo "WINMUX_DOCKER=rootless"
+  elif getent group docker >/dev/null 2>&1; then
+    if id -nG "$U" 2>/dev/null | grep -qw docker; then
+      echo "WINMUX_DOCKER=member"
+    elif command -v sudo >/dev/null 2>&1 && sudo -n usermod -aG docker "$U" 2>/dev/null; then
+      echo "WINMUX_DOCKER=added"
+    else
+      echo "WINMUX_DOCKER=need-sudo"
+    fi
+  else
+    echo "WINMUX_DOCKER=no-group"
+  fi
+else
+  echo "WINMUX_DOCKER=no-docker"
+fi"#;
+    let out = exec(handle, script, 15).await.unwrap_or_default();
+    let marker = out
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("WINMUX_DOCKER="))
+        .unwrap_or("no-docker");
+    docker_group_message(marker)
+}
+
+/// Map a WINMUX_DOCKER=<marker> to the human suffix appended to the install
+/// status. Pure (unit-tested).
+fn docker_group_message(marker: &str) -> String {
+    match marker {
+        "member" => " · Docker group OK".to_string(),
+        "rootless" => " · rootless Docker detected (no group needed)".to_string(),
+        "added" => " · added user to the 'docker' group — RECONNECT the workspace for Docker \
+                     monitoring to activate"
+            .to_string(),
+        "need-sudo" => " · Docker needs a one-time manual step: run `sudo usermod -aG docker \
+                        $USER` on the server, then reconnect"
+            .to_string(),
+        "no-group" => " · no 'docker' group (rootless Docker?)".to_string(),
+        _ => String::new(), // no-docker → say nothing
+    }
+}
+
+#[cfg(test)]
+mod docker_group_tests {
+    use super::docker_group_message;
+
+    #[test]
+    fn maps_markers_to_guidance() {
+        assert!(docker_group_message("member").contains("OK"));
+        assert!(docker_group_message("rootless").contains("rootless"));
+        assert!(docker_group_message("added").contains("RECONNECT"));
+        assert!(docker_group_message("need-sudo").contains("usermod -aG docker"));
+        assert!(docker_group_message("no-group").contains("docker"));
+        // no-docker (and anything unknown) → silent.
+        assert_eq!(docker_group_message("no-docker"), "");
+        assert_eq!(docker_group_message("weird"), "");
+    }
 }
 
 /// Strip winmux hook entries from settings.json + hooks.json (best-effort).

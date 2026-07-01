@@ -425,84 +425,97 @@ async fn insights_install(handle: &SshHandle<SshClient>, home: &str) -> Result<S
         10,
     )
     .await;
-    // Prefer a user systemd unit (auto-restart, survives logout if lingering
-    // is on); fall back to nohup where systemd --user isn't usable.
+    // Phase 72.1: one script that (a) ensures the daemon user can reach Docker
+    // and (b) starts the daemon so it actually HAS that access. The daemon
+    // runs as this user, but a systemd --user service does NOT inherit the
+    // login session's supplementary groups — so even a user already in the
+    // `docker` group gets EACCES on the socket. Fix: ensure group membership
+    // (usermod via passwordless sudo if needed), then launch the daemon under
+    // `sg docker`, which reads /etc/group directly and grants the group
+    // immediately — NO reconnect required. Best-effort; never fails install.
     let start = format!(
-        r#"mkdir -p "{home}/.config/systemd/user"
-cat > "{home}/.config/systemd/user/winmux-insights.service" <<'UNIT'
+        r#"DAEMON="{final_path}"
+U=$(id -un)
+NOTE="no-docker"
+WRAP=""
+if command -v docker >/dev/null 2>&1; then
+  if [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/docker.sock" ]; then
+    NOTE="rootless"
+  elif getent group docker >/dev/null 2>&1; then
+    if id -nG "$U" 2>/dev/null | grep -qw docker; then
+      NOTE="member"
+    elif command -v sudo >/dev/null 2>&1 && sudo -n usermod -aG docker "$U" 2>/dev/null; then
+      NOTE="added"
+    else
+      NOTE="need-sudo"
+    fi
+    if id -nG "$U" 2>/dev/null | grep -qw docker && command -v sg >/dev/null 2>&1; then
+      WRAP="sg"
+    fi
+  else
+    NOTE="no-group"
+  fi
+fi
+SG=$(command -v sg 2>/dev/null)
+if [ "$WRAP" = "sg" ] && [ -n "$SG" ]; then
+  EXECSTART="$SG docker -c \"exec $DAEMON serve\""
+else
+  EXECSTART="$DAEMON serve"
+fi
+mkdir -p "$HOME/.config/systemd/user"
+cat > "$HOME/.config/systemd/user/winmux-insights.service" <<UNIT
 [Unit]
 Description=winmux insights daemon
 After=network.target
 [Service]
-ExecStart={final_path} serve
+ExecStart=$EXECSTART
 Restart=on-failure
 RestartSec=5
 [Install]
 WantedBy=default.target
 UNIT
 if command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload 2>/dev/null; then
-  systemctl --user enable winmux-insights 2>&1 >/dev/null
-  # restart (not just start) so an update picks up the new binary
-  systemctl --user restart winmux-insights 2>&1 && echo "started (systemd --user)"
+  systemctl --user enable winmux-insights >/dev/null 2>&1
+  systemctl --user restart winmux-insights >/dev/null 2>&1 && echo "started (systemd --user)"
 else
-  pkill -f 'winmux-insights serve' 2>/dev/null
-  nohup "{final_path}" serve >/dev/null 2>&1 &
-  echo "started (nohup)"
-fi"#
-    );
-    let r = exec(handle, &start, 20).await?;
-    let started = r.trim().lines().last().unwrap_or("").to_string();
-    // Phase 72: best-effort Docker-group provisioning so the Monitor's Docker
-    // panel works out-of-the-box (the daemon runs as the SSH user, which is
-    // usually NOT in the `docker` group). Never fails the install.
-    let docker = provision_docker_group(handle).await;
-    Ok(format!("installed; {started}{docker}"))
-}
-
-/// Phase 72: try to make Docker reachable by the daemon (which runs as the SSH
-/// user). Idempotent + best-effort — prints a marker we translate to guidance.
-/// Rootless Docker needs no group; otherwise add the user to `docker` via
-/// passwordless sudo if available (the group only takes effect on a fresh
-/// login, so we tell the user to reconnect). Skips cleanly when Docker is
-/// absent (also the effective no-op on non-Linux servers).
-async fn provision_docker_group(handle: &SshHandle<SshClient>) -> String {
-    let script = r#"if command -v docker >/dev/null 2>&1; then
-  U=$(id -un)
-  if [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/docker.sock" ]; then
-    echo "WINMUX_DOCKER=rootless"
-  elif getent group docker >/dev/null 2>&1; then
-    if id -nG "$U" 2>/dev/null | grep -qw docker; then
-      echo "WINMUX_DOCKER=member"
-    elif command -v sudo >/dev/null 2>&1 && sudo -n usermod -aG docker "$U" 2>/dev/null; then
-      echo "WINMUX_DOCKER=added"
-    else
-      echo "WINMUX_DOCKER=need-sudo"
-    fi
+  pkill -x winmux-insights 2>/dev/null; pkill -f 'winmux-insights serve' 2>/dev/null
+  sleep 1
+  if [ "$WRAP" = "sg" ] && [ -n "$SG" ]; then
+    nohup "$SG" docker -c "exec $DAEMON serve" >/dev/null 2>&1 &
   else
-    echo "WINMUX_DOCKER=no-group"
+    nohup "$DAEMON" serve >/dev/null 2>&1 &
   fi
-else
-  echo "WINMUX_DOCKER=no-docker"
-fi"#;
-    let out = exec(handle, script, 15).await.unwrap_or_default();
-    let marker = out
+  echo "started (nohup)"
+fi
+echo "WINMUX_DOCKER=$NOTE"
+"#
+    );
+    let r = exec(handle, &start, 25).await?;
+    let started = r
+        .lines()
+        .find(|l| l.trim_start().starts_with("started ("))
+        .map(|l| l.trim().to_string())
+        .unwrap_or_default();
+    let marker = r
         .lines()
         .find_map(|l| l.trim().strip_prefix("WINMUX_DOCKER="))
         .unwrap_or("no-docker");
-    docker_group_message(marker)
+    Ok(format!("installed; {started}{}", docker_group_message(marker)))
 }
 
 /// Map a WINMUX_DOCKER=<marker> to the human suffix appended to the install
 /// status. Pure (unit-tested).
 fn docker_group_message(marker: &str) -> String {
     match marker {
-        "member" => " · Docker group OK".to_string(),
-        "rootless" => " · rootless Docker detected (no group needed)".to_string(),
-        "added" => " · added user to the 'docker' group — RECONNECT the workspace for Docker \
-                     monitoring to activate"
+        // member/added: the daemon is (re)started under `sg docker`, so it has
+        // the group right now — no reconnect needed.
+        "member" => " · Docker group OK (daemon runs under sg docker)".to_string(),
+        "added" => " · added user to the 'docker' group and (re)started the daemon under it \
+                     — Docker monitoring should work now"
             .to_string(),
+        "rootless" => " · rootless Docker detected (no group needed)".to_string(),
         "need-sudo" => " · Docker needs a one-time manual step: run `sudo usermod -aG docker \
-                        $USER` on the server, then reconnect"
+                        $USER` on the server, then reinstall this add-on"
             .to_string(),
         "no-group" => " · no 'docker' group (rootless Docker?)".to_string(),
         _ => String::new(), // no-docker → say nothing
@@ -515,9 +528,9 @@ mod docker_group_tests {
 
     #[test]
     fn maps_markers_to_guidance() {
-        assert!(docker_group_message("member").contains("OK"));
+        assert!(docker_group_message("member").contains("sg docker"));
         assert!(docker_group_message("rootless").contains("rootless"));
-        assert!(docker_group_message("added").contains("RECONNECT"));
+        assert!(docker_group_message("added").contains("work now"));
         assert!(docker_group_message("need-sudo").contains("usermod -aG docker"));
         assert!(docker_group_message("no-group").contains("docker"));
         // no-docker (and anything unknown) → silent.

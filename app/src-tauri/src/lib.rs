@@ -2598,6 +2598,15 @@ async fn setup_workspace_reverse_tunnel(
     remote_port
 }
 
+/// Guard for interpolating a workspace id into a remote shell command
+/// (Rule #3). Ids are internally generated as `w_<hex>`; accept only
+/// `[A-Za-z0-9_-]` so a malformed id can never inject shell/regex syntax.
+fn is_safe_workspace_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 /// Phase 47: spawn the remote `winmux port-watch` for a workspace.
 /// Deduplicated via `state.core.port_watchers` — calling twice in a row is
 /// a no-op the second time. Stores the spawned task's JoinHandle in
@@ -2659,6 +2668,28 @@ async fn spawn_port_watcher(
             .lock()
             .unwrap()
             .insert(workspace_id.to_string());
+    }
+    // Phase JJ.2 (leak fix): the desktop-side dedup above only knows about
+    // watchers THIS app process launched. A remote `winmux port-watch` does
+    // NOT die when its SSH channel closes, so every desktop restart / reconnect
+    // orphaned another one — Yossi's server had 49 of them for one workspace,
+    // pinning the CPU. Before launching a fresh watcher, reap any stale remote
+    // ones for THIS workspace so exactly one runs server-side. The `[-]` glob
+    // trick keeps pkill from matching (and killing) its own launching shell.
+    if is_safe_workspace_id(workspace_id) {
+        if let Ok(mut kchan) = handle.channel_open_session().await {
+            let kill = format!(
+                "pkill -f 'port-watch [-]-workspace {workspace_id}' 2>/dev/null; true"
+            );
+            if kchan.exec(true, kill.as_str()).await.is_ok() {
+                loop {
+                    match kchan.wait().await {
+                        Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+                        _ => {}
+                    }
+                }
+            }
+        }
     }
     let mut wchan = match handle.channel_open_session().await {
         Ok(c) => c,

@@ -348,6 +348,13 @@ else
   echo "[mobile] certbot: existing cert for $DOMAIN reused"
 fi
 
+# limit_req_zone is an http-context directive — it MUST live outside any
+# server{} block. Define it once in conf.d (loaded once at http level, so it
+# is shared across every winmux vhost and can't collide as "already bound").
+cat > /etc/nginx/conf.d/winmux-ratelimit.conf <<'RL'
+limit_req_zone $binary_remote_addr zone=winmux:10m rate=20r/s;
+RL
+
 SITE="/etc/nginx/sites-available/winmux-$DOMAIN"
 cat > "$SITE" <<NGINX
 server {
@@ -357,7 +364,6 @@ server {
   ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
   ssl_protocols TLSv1.2 TLSv1.3;
   add_header Strict-Transport-Security "max-age=31536000" always;
-  limit_req_zone \$binary_remote_addr zone=winmux:10m rate=20r/s;
   location / {
     limit_req zone=winmux burst=40 nodelay;
     proxy_pass http://127.0.0.1:7879;
@@ -456,6 +462,7 @@ async fn nginx_proxy_uninstall(handle: &SshHandle<SshClient>) -> Result<String, 
     let script = format!(
         "set -e; \
          rm -f /etc/nginx/sites-enabled/winmux-* /etc/nginx/sites-available/winmux-*; \
+         rm -f /etc/nginx/conf.d/winmux-ratelimit.conf; \
          rm -f /etc/winmux/cloudflare.ini; \
          (nginx -t >/dev/null 2>&1 && systemctl reload nginx) || true; \
          echo removed"

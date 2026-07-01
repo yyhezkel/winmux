@@ -475,3 +475,22 @@ to be the thing that doc pins against.
   a `TODO(S2/S3)` doc) so the tree and `api` wiring exist without behavior.
 - Metrics routes keep serving at their **legacy paths** (`/current`, …) AND new
   `/api/v2/insights/*`, sharing one handler, for the compat window.
+
+### 15.1 S1.d migration decisions (locked)
+- **Binary + symlink:** the installer uploads `winmux-server`, chmods it, and
+  symlinks `winmux-insights → winmux-server` so any old reference resolves.
+- **systemd:** installs `winmux-server.service`; disables + removes the old
+  `winmux-insights.service`.
+- **Data dir stays `~/.winmux/insights`** for S1 (the binary's default) so an
+  in-place 1.x→2.x upgrade preserves the token + metrics.db + chat.db +
+  paired_devices — **paired phones keep working**. The rename to
+  `~/.winmux/server` is deferred to **S5** (data-move on first 2.x boot) to keep
+  S1 low-risk. `INSIGHTS_VERSION = "2.0.0"` (lockstep with `core.Version`).
+- **Detect** tries `winmux-server --version`, falling back to the
+  `winmux-insights` name (symlink / pre-2.x install) during the upgrade window.
+  **Uninstall** tears down both names (unit, binary, symlink).
+- **Superseded, delete after review:** the old `app/src-tauri/insights/` Go
+  source + `resources/winmux-insights-linux-*` binaries are no longer referenced
+  by the desktop (addons.rs now embeds `winmux-server-linux-*`). Left in place
+  on-branch so the S1 diff stays a pure add + a small addons.rs delta; removed as
+  a cleanup once Yossi has reviewed the module split.

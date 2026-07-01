@@ -5,6 +5,7 @@ import type { Font } from "./Font";
 import type { Hooks } from "./Hooks";
 import type { HooksUpdates } from "./HooksUpdates";
 import type { I18n } from "./I18n";
+import type { LogsSettings } from "./LogsSettings";
 import type { MigrationFlags } from "./MigrationFlags";
 import type { Notifications } from "./Notifications";
 import type { Shortcuts } from "./Shortcuts";
@@ -81,4 +82,9 @@ sidebar_mode: string,
  * Float / Pop-out / Pane. `#[serde(default)]` so older settings.json
  * loads with both kinds defaulting to Float (current behavior).
  */
-floating_windows: FloatingWindows, };
+floating_windows: FloatingWindows, 
+/**
+ * Phase 75: debug-log hygiene (retention). `#[serde(default)]` so older
+ * settings.json files load with the built-in defaults.
+ */
+logs: LogsSettings, };

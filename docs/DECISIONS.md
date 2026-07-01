@@ -25,6 +25,13 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-07-01 — Phase 75 — debug.log hygiene (size cap + age retention + Clear button)
+The client `debug.log` had NO rotation — it grew unbounded (the v0.3.1 pipe-leak made ~936k lines). Yossi asked for convenient logs that auto-delete after X days so they can't pile up.
+- `winmux_core::dlog` now rotates `debug.log` → `debug.log.1` once it passes **5 MB** (bounded to ~10 MB total). `prune_logs(retention_days)` runs at `setup()`: deletes a stale `debug.log.1` and truncates a `debug.log` untouched for > retention (app idle a while). `clear_debug_log()` for the manual button. `0` = keep forever.
+- New `Settings.logs.retention_days` (default **7**, serde-default so old settings load clean). Settings → Logs gains a retention number field + **Clear logs now** button (`clear_debug_log_cmd`). TS `LogsSettings` added.
+- Server-side logs already bounded: daemon `insights.log` rotates at 1 MB on boot; mobile-install.log is small. Deferred: a matching age-prune server-side (low value — those are tiny).
+- cargo check + tsc green. Debug exe refreshed. On `72-docker-group`, not pushed.
+
 ### 2026-07-01 — Phase 73 — unified subsystem-tagged logging + mobile-install black box fixed
 Yossi hit `✗ nginx install did not confirm success: (no output)` and asked for one organized log place with per-service tags (best practice: `MONITOR` / `INSTALL` / `TUNNEL` …) instead of scattered, swallowed output.
 - **Root cause of "(no output)":** the nginx install script ran every step with `>/dev/null 2>&1` and `set -e`, so on any failure (or the 180s timeout during a first-time `apt install` of certbot + the DNS plugin) it exited with an empty channel — a total black box.

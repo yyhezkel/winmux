@@ -263,9 +263,9 @@ pub(crate) fn new_workspace_id() -> String {
 // `crate::first_terminal_connection_pub` / `crate::backfill_terminal_connections`
 // callsite resolves unchanged.
 pub(crate) use winmux_core::{
-    backfill_terminal_connections, collect_panes, collect_panes_with_kind, config_dir,
-    config_dir_pub, dlog, dlog_tag, first_terminal_connection, first_terminal_connection_pub,
-    shell_quote,
+    backfill_terminal_connections, clear_debug_log, collect_panes, collect_panes_with_kind,
+    config_dir, config_dir_pub, dlog, dlog_tag, first_terminal_connection,
+    first_terminal_connection_pub, prune_logs, shell_quote,
 };
 
 /// Phase 38: absolute path to the debug log, for the Settings → Logs
@@ -308,6 +308,15 @@ fn read_log_tail(n: usize) -> Result<String, String> {
         &lines[..]
     };
     Ok(tail.join("\n"))
+}
+
+/// Phase 75: clear the debug log now (Settings → Logs "Clear" button).
+/// Truncates debug.log and removes the rotated debug.log.1.
+#[tauri::command]
+fn clear_debug_log_cmd() -> Result<(), String> {
+    clear_debug_log()?;
+    dlog_tag("LOGS", "debug.log cleared by user");
+    Ok(())
 }
 
 fn config_path() -> Result<PathBuf, String> {
@@ -5395,6 +5404,11 @@ pub fn run() {
                     dlog(&format!("setup: settings load failed: {e} (using defaults)"));
                 }
             }
+            // Phase 75: prune stale debug logs so they can't accumulate.
+            {
+                let days = state.settings.lock().unwrap().logs.retention_days;
+                prune_logs(days);
+            }
             // Phase 39.B: one-time migration. Workspaces created before
             // Phase 39 flipped the auto_port_forward default still have
             // `true` saved and keep auto-forwarding on every connect
@@ -5590,6 +5604,7 @@ pub fn run() {
             list_detected_ports,
             log_dir_path,
             read_log_tail,
+            clear_debug_log_cmd,
             pane_set_identity,
             pane_set_smart_bidi,
             workspace_browser::workspace_browser_show,

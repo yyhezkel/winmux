@@ -210,6 +210,13 @@ export interface Settings {
   sidebar_mode?: SidebarMode;
   // Phase 63: per-kind floating-window state (Browser / FileManager).
   floating_windows?: FloatingWindows;
+  // Phase 75: debug-log retention.
+  logs?: LogsSettings;
+}
+
+// Phase 75: debug.log hygiene.
+export interface LogsSettings {
+  retention_days: number;
 }
 
 // Phase 65.P: dropped "hidden" — only full / icons. Old persisted

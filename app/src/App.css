@@ -3959,6 +3959,10 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 /* Phase 38/39: Settings → Logs section + tab. */
 .settings-logs-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
 .settings-logs-label { color: var(--w-text-secondary, #7d8590); }
+.settings-logs-retention {
+  width: 72px; background: var(--w-bg-elev, #1f2335); border: 1px solid var(--w-border, #2a2e44);
+  color: var(--w-text-primary, #e6edf3); border-radius: 5px; padding: 4px 6px; font-size: 12.5px;
+}
 .settings-logs-viewer {
   height: 400px;
   overflow: auto;

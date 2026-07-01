@@ -53,6 +53,15 @@ export function SettingsModal(p: Props) {
       console.warn("read_log_tail failed", e);
     }
   };
+  // Phase 75: clear the debug log now, then refresh the viewer.
+  const clearLogs = async () => {
+    try {
+      await invoke("clear_debug_log_cmd");
+      await refreshLogTail();
+    } catch (e) {
+      console.warn("clear_debug_log_cmd failed", e);
+    }
+  };
   // Phase 48-C: /doctor snapshot — paste-friendly JSON for bug reports.
   const [doctorJson, setDoctorJson] = createSignal<string>("");
   const runDoctor = async () => {
@@ -793,6 +802,27 @@ export function SettingsModal(p: Props) {
                     <button onClick={() => void onCopyLogPath()} disabled={!logPath()}>
                       {logCopied() ? t("settings.updates.logs.copied") : t("settings.updates.logs.copyPath")}
                     </button>
+                  </div>
+                  {/* Phase 75: retention + clear. */}
+                  <hr class="modal-sep" />
+                  <div class="settings-logs-row">
+                    <span class="settings-logs-label">{t("settings.logs.retention")}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="365"
+                      class="settings-logs-retention"
+                      value={p.settings.logs?.retention_days ?? 7}
+                      onChange={(e) =>
+                        update("logs", {
+                          retention_days: Math.max(0, Math.min(365, parseInt(e.currentTarget.value || "0", 10) || 0)),
+                        })
+                      }
+                    />
+                  </div>
+                  <div class="settings-hint">{t("settings.logs.retention_hint")}</div>
+                  <div class="settings-logs-actions">
+                    <button onClick={() => void clearLogs()}>{t("settings.logs.clear")}</button>
                   </div>
                   {/* Phase 48-C: /doctor diagnostic snapshot for bug reports. */}
                   <hr class="modal-sep" />

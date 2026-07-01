@@ -488,10 +488,36 @@ pub(crate) struct Settings {
     /// loads with both kinds defaulting to Float (current behavior).
     #[serde(default)]
     pub floating_windows: FloatingWindows,
+    /// Phase 75: debug-log hygiene (retention). `#[serde(default)]` so older
+    /// settings.json files load with the built-in defaults.
+    #[serde(default)]
+    pub logs: LogsSettings,
 }
 
 fn default_sidebar_mode() -> String {
     "full".to_string()
+}
+
+/// Phase 75: debug.log retention. The log auto-rotates at a size cap and is
+/// pruned on startup once older than `retention_days`.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct LogsSettings {
+    /// Delete debug logs untouched for this many days (0 = keep forever).
+    #[serde(default = "default_log_retention_days")]
+    pub retention_days: u32,
+}
+
+fn default_log_retention_days() -> u32 {
+    7
+}
+
+impl Default for LogsSettings {
+    fn default() -> Self {
+        Self {
+            retention_days: default_log_retention_days(),
+        }
+    }
 }
 
 /// Phase 63: display mode for a per-workspace Browser / File-Manager
@@ -740,6 +766,7 @@ impl Default for Settings {
             stt: SttSettings::default(),
             sidebar_mode: default_sidebar_mode(),
             floating_windows: FloatingWindows::default(),
+            logs: LogsSettings::default(),
         }
     }
 }

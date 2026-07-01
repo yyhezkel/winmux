@@ -58,9 +58,21 @@ pub fn config_dir_pub() -> Result<PathBuf, String> {
 /// `<config_dir>/debug.log`. Errors are intentionally swallowed —
 /// logging must never crash the caller. See CLAUDE.md Rule 9 for the
 /// dlog-vs-tracing audience distinction.
+/// Size cap for `debug.log` before it rotates to `debug.log.1`. Bounds the
+/// on-disk footprint to ~2× this (current + one rotation) so a chatty session
+/// can't balloon the log — the v0.3.1 pipe-leak produced ~936k lines.
+pub const DEBUG_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
 pub fn dlog(msg: &str) {
     if let Ok(dir) = config_dir() {
         let p = dir.join("debug.log");
+        // Rotate once the active log passes the cap (cheap: one stat per line;
+        // dlog already does an open/write/close per call).
+        if let Ok(meta) = std::fs::metadata(&p) {
+            if meta.len() > DEBUG_LOG_MAX_BYTES {
+                let _ = std::fs::rename(&p, dir.join("debug.log.1"));
+            }
+        }
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -83,6 +95,52 @@ pub fn dlog(msg: &str) {
 /// the dlog-vs-tracing audience distinction.
 pub fn dlog_tag(subsystem: &str, msg: &str) {
     dlog(&format!("[{}] {msg}", subsystem.to_uppercase()));
+}
+
+/// Phase 75: prune debug logs so they can't accumulate. Deletes the rotated
+/// `debug.log.1` once it's older than `retention_days`, and if the primary
+/// `debug.log` itself hasn't been touched within the window (app unused for a
+/// while), clears it for a fresh start. `retention_days == 0` disables pruning
+/// (keep forever). Called once at startup. Best-effort — never fails the boot.
+pub fn prune_logs(retention_days: u32) {
+    if retention_days == 0 {
+        return;
+    }
+    let dir = match config_dir() {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let cutoff = match std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(u64::from(retention_days) * 86_400))
+    {
+        Some(c) => c,
+        None => return,
+    };
+    let stale = |p: &std::path::Path| -> bool {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .map(|mt| mt < cutoff)
+            .unwrap_or(false)
+    };
+    // Rotated file older than the window → delete outright.
+    let rotated = dir.join("debug.log.1");
+    if rotated.exists() && stale(&rotated) {
+        let _ = std::fs::remove_file(&rotated);
+    }
+    // Primary log untouched for > retention (a stale session) → truncate fresh.
+    let primary = dir.join("debug.log");
+    if primary.exists() && stale(&primary) {
+        let _ = std::fs::write(&primary, b"");
+    }
+}
+
+/// Phase 75: clear the debug log now (Settings → Logs "Clear" button).
+/// Truncates `debug.log` and removes the rotated `debug.log.1`.
+pub fn clear_debug_log() -> Result<(), String> {
+    let dir = config_dir()?;
+    std::fs::write(dir.join("debug.log"), b"").map_err(|e| format!("clear debug.log: {e}"))?;
+    let _ = std::fs::remove_file(dir.join("debug.log.1"));
+    Ok(())
 }
 
 // ─── shell escape ────────────────────────────────────────────────────

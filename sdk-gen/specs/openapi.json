@@ -217,13 +217,18 @@
           "ok": {
             "type": "boolean"
           },
+          "uptime_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
           "version": {
             "type": "string"
           }
         },
         "required": [
           "ok",
-          "version"
+          "version",
+          "uptime_seconds"
         ],
         "type": "object"
       },

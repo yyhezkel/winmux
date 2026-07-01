@@ -1,13 +1,32 @@
-# Phase 74 (proposed: **Phase 77**) — `winmux-server` as a First-Class Component
+# Phase 77 — `winmux-server` as a First-Class Component
 
-> **STATUS: DESIGN / PLANNING ONLY. No code until Yossi approves this doc.**
->
-> **⚠ Phase-number collision.** "Phase 74" is already taken — it shipped today as
-> the split-QR pairing work (commit `2ebb645`, `feat(mobile): Phase 74 — split-QR
-> pairing`). CLAUDE.md forbids reusing phase numbers. This document keeps the
-> filename you asked for (`PHASE-74-DESIGN.md`) but I recommend the phase be
-> renumbered to **Phase 77** (next free; 73/74/75/76 are all used this week).
-> Decision left to Yossi — see Open Questions Q0.
+> **STATUS: APPROVED — in implementation (Sprint 1).** Yossi approved the design
+> and chose to enter S1 directly, updating this doc in-flight. Renamed from
+> `PHASE-74-DESIGN.md` (74 was taken by split-QR pairing, commit `2ebb645`).
+
+## 0. Resolved decisions (Yossi's answers)
+- **Q0 — Number:** **Phase 77** (74 taken). ✓
+- **Q1 — Location:** inside the winmux repo at **`app/src-tauri/server/`**. ✓
+- **Q3 — Workspace shared state:** = **active sessions + subscribers-per-session
+  + pending requests.** Two use-cases: **8a Multi-client attach** (several
+  clients on the *same* Claude session see the same chat / tool-use progression
+  / hook requests) and **8b Notification broadcast** (a client gets a "Claude
+  needs input" notification and can answer — approve/deny hook, send message —
+  the answer reaches Claude and every other subscribed client sees it). ✓
+- **Q4 — OpenAPI framework:** implementer's choice; **`huma` recommended**. The
+  framework decision is **deferred to S4** — S1 keeps stdlib `net/http` behind
+  the `api` package so it doesn't block the module split. ✓
+- **Q5 — `workspace_id` authority:** **server-authoritative UUID**, minted at
+  workspace creation, handed to mobile at pairing/redeem; mobile never invents
+  one. ✓
+- **Mobile contract:** `docs/PHASE-77-MOBILE-API-EXPECTATIONS.md` is expected
+  from the mobile session (not in the repo as of S1 start) — fold its
+  requirements in as they land. See §4.4, §8, §14.
+
+> **⚠ Streaming-contract risk (from the mobile session — matters in S1):**
+> **OpenAPI does not describe WebSocket frames.** The real risk is the **WS
+> frame contract**, not the REST framework choice. S1 pins the streaming frame
+> schemas up front — see **§4.4 Streaming contract**.
 
 ---
 
@@ -228,6 +247,60 @@ GET /api/openapi.json        → generated OpenAPI 3.1 spec
   (This is where the deferred Phase-74-QR "scopes checkboxes" finally land —
   server-enforced, not cosmetic.)
 
+### 4.4 Streaming contract (WebSocket frames) — **pinned in S1**
+> The mobile session flagged the real risk: **OpenAPI 3.1 describes REST, not
+> WebSocket frames.** A generated REST SDK gives clients zero guarantees about
+> the stream. So the WS frame schema is a **first-class, separately-versioned
+> contract**, pinned now (S1) — not discovered later.
+
+**Approach.** Every WS frame is a JSON object with a required discriminator
+`"type"`; each `type` has a JSON-Schema. The set of schemas is published as an
+**AsyncAPI 2.6** document (`asyncapi.json`, alongside `openapi.json`) and, for
+clients that don't consume AsyncAPI, as a plain `frames.schema.json`
+(`oneOf` keyed on `type`). SDK generation emits typed frame unions for both
+Kotlin and TS from these schemas. CI drift-guards them like the REST spec.
+
+**Frame envelope (all frames):**
+```jsonc
+{ "type": "<discriminator>", "ts": 1782900000, "session_id": "<uuid>",
+  "seq": 42, /* monotonic per session, for gap detection + resume */ ...type-specific }
+```
+
+**Chat stream frames (existing behavior, now contract-pinned)** — the current
+`chat_parser.go` already normalizes Claude stream-json into these; S1 freezes
+their shapes as the v2 contract:
+
+| `type` | when | key fields |
+|---|---|---|
+| `assistant_delta` | streamed assistant text | `text` |
+| `tool_use` | Claude invokes a tool | `tool_name`, `tool_input`, `tool_id` |
+| `tool_result` | tool returns | `tool_id`, `content`, `is_error` |
+| `notification` | passive lifecycle hook | `subkind`, `title`, `summary` |
+| `hook_request` | **8b** blocking permission ask | `req_id`, `subkind`, `tool_name`, `tool_input`, `decision_required` |
+| `hook_resolved` | a client answered / timed out | `req_id`, `decision`, `reason` |
+| `status` | session state change | `status` (active/waiting_input/waiting_hook/…) |
+| `error` | stream/parse error | `message` |
+
+**Client→server frames (answering, 8b):**
+| `type` | effect |
+|---|---|
+| `hook_decision` | `{ req_id, decision: allow\|deny }` → resolves the pending hook, broadcast to all subscribers as `hook_resolved` |
+| `user_message` | `{ text }` → fed to Claude stdin |
+
+**Multi-client attach (8a) + broadcast (8b) semantics:**
+- A session has **N subscribers**. Every server-origin frame fans out to all
+  subscribers (they see identical chat/tool progression).
+- A `hook_request` is **pending** until the *first* `hook_decision` from *any*
+  subscriber (or timeout); the resolution is broadcast to all as
+  `hook_resolved` so late/other clients converge. (Maps directly onto the
+  existing `pendingHooks[req_id] chan` in `chat_hookrpc.go`.)
+- `seq` lets a reconnecting client detect gaps; **replay/resume** (buffer last
+  K frames per session) is an S3 item, not S1.
+
+**Versioning.** Frame contract version travels in the WS open response
+(`{"type":"hello","frame_version":2}`); a client refusing an unknown
+`frame_version` is a hard, visible failure — never silent drift.
+
 ---
 
 ## 5. Data & config (`internal/config`)
@@ -353,28 +426,20 @@ independently of the new features. Each later sprint ships as a 2.x MINOR.
 
 ---
 
-## 12. Open questions for Yossi (blockers marked ⛔)
+## 12. Open questions
 
-- **Q0 — Phase number.** Renumber to **Phase 77** (recommended, avoids clash
-  with the shipped split-QR "Phase 74")? Or keep 74 and accept the collision?
-- **Q1 ⛔ — Directory location.** New tree `app/src-tauri/server/` inside the
-  Tauri app (matches today), or a top-level `server/` in the repo root? The
-  latter reads more "first-class" but changes embedding/build paths.
+**Resolved** (see §0): Q0 (Phase 77), Q1 (`app/src-tauri/server/`), Q3 (workspace
+= sessions+subscribers+pending, 8a+8b), Q4 (huma, deferred to S4), Q5 (server
+UUID). **Still open** (non-blocking for S1):
+
 - **Q2 — Files API scope.** Is the "shared folder" a single configured root, or
   should it expose the whole filesystem like the desktop file manager (with the
   same guards)? Single root is safer; full-FS is more powerful for mobile.
-- **Q3 ⛔ — Workspace shared state.** What is it concretely? Candidates: shared
-  cursor/presence, shared notes, a shared task queue, mirrored terminal state?
-  This defines S3 entirely — needs a one-paragraph spec before S3.
-- **Q4 — OpenAPI toolchain.** OK to adopt **huma** (typed Go → OpenAPI 3.1) as
-  the handler framework, or prefer annotation-based `swaggo` to avoid a handler
-  rewrite? huma is cleaner long-term but touches every handler in S1/S4.
-- **Q5 — Desktop SDK.** Keep the desktop on its Rust-over-SSH calls (validated
-  by contract tests), or eventually move it to the generated TS SDK? Affects how
-  much of the desktop transport we touch.
+  *(S2 decision, not S1.)*
 - **Q6 — Scopes model.** Confirm the per-device scope set (e.g. `insights:read`,
   `chat`, `files:read`, `files:write`, `hygiene:kill`, `workspace`). This is the
-  home for the deferred QR "scopes checkboxes."
+  home for the deferred QR "scopes checkboxes." *(auth lands the enum in S1; the
+  concrete set can firm up through S2/S3.)*
 - **Q7 — Hooks over HTTP?** The hook bridge is a separate localhost TCP RPC
   today. Fold it under `/api/v2/hooks/*` for uniformity, or leave it as-is
   (it's desktop↔server-local, never mobile)? Leaving it is less work.
@@ -383,13 +448,30 @@ independently of the new features. Each later sprint ships as a 2.x MINOR.
 
 ---
 
-## 13. Relationship to the parked work
+## 13. Relationship to the parked work — RESOLVED
+The `72-docker-group` stack **shipped as v0.4.2** (merged to `main`, tagged,
+released, manifest updated). Phase 77 now proceeds on a **fresh `77-winmux-server`
+branch off the updated `main`**, exactly as recommended. No unmerged-stack
+merge risk.
 
-The `72-docker-group` branch currently holds a large **unmerged** stack
-(72.3 `/current`, addon uninstall/reinstall, mobile RTL + CF docs, Phase 73
-tagged logs, nginx `limit_req_zone` fix, Phase 74 QR-split, Phase 75/75.1 log
-hygiene, Phase 76/76.1 process hygiene, FM logging + streaming download,
-port-watch reap). **Recommendation:** land that stack as **v0.4.2 first**
-(it's tested and self-contained), *then* start Phase 77 on a fresh branch off
-the updated `main`. Doing the refactor on top of an unmerged stack multiplies
-merge risk. Confirm in Q-review.
+## 14. Mobile contract dependency
+`docs/PHASE-77-MOBILE-API-EXPECTATIONS.md` (owned by the mobile session) is the
+authoritative list of what the Kotlin client needs. **Not present in the repo as
+of S1 start.** Action: when it lands, reconcile it against §4 (REST) and §4.4
+(WS frames) and log any deltas in DECISIONS. The §4.4 frame contract is written
+to be the thing that doc pins against.
+
+## 15. S1 module-boundary decisions (locked for implementation)
+- **`internal/chat` owns the hook RPC *protocol*** (`HandleHookConn`) because it
+  is inseparable from session state (per-session HMAC token, `pendingHooks`,
+  `emit`). **`internal/hooks`** is reduced to the **thin TCP listener** that
+  accepts connections and hands each to a `core.HookConnHandler` — this is the
+  concrete break of the Phase-69 WS↔session↔RPC cycle: `hooks → core`,
+  `chat → core`, `cmd` wires `hooks.Start(sessionManager)`.
+- **`internal/core`** holds only interfaces + shared value types (no logic, no
+  sibling imports): `HookConnHandler`, `AddrSink` (S1); `EventBus`,
+  `SessionRouter` reserved for S3 workspace.
+- **`files` / `logs` / `workspace`** are **compile-only stubs** in S1 (package +
+  a `TODO(S2/S3)` doc) so the tree and `api` wiring exist without behavior.
+- Metrics routes keep serving at their **legacy paths** (`/current`, …) AND new
+  `/api/v2/insights/*`, sharing one handler, for the compat window.

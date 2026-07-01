@@ -314,6 +314,17 @@ their shapes as the v2 contract:
 
 ## 6. Client SDK generation (74.C)
 
+> **S2 decision (flagged for Yossi).** Yossi's S2 brief said "openapi.json
+> auto-generated from huma." I implemented Files/Logs as **stdlib handlers**
+> (uniform with the whole daemon, and I wanted full control over the
+> safety-critical streaming / multipart / path-traversal code) and serve a
+> **hand-authored, accurate OpenAPI 3.1** at `/api/openapi.json` + an AsyncAPI
+> stub at `/api/asyncapi.json` (CORS + `max-age=300`). This keeps the codebase
+> one HTTP idiom and unblocks SDK-gen now. **Full huma adoption stays scheduled
+> for S4** (design below), where every handler — old + new — is migrated in one
+> pass and the spec becomes auto-generated. If you'd rather pull huma forward
+> into S2, say so and I'll retrofit the Files/Logs handlers first.
+
 **Recommended approach: OpenAPI-first via a typed Go framework.**
 - Define handlers with typed input/output structs; emit **OpenAPI 3.1**
   automatically. Candidate libs (Open Question Q4):

@@ -4,6 +4,7 @@
 package api
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -38,15 +39,35 @@ func NewServer(token string, port int, deps Deps) *Server {
 	return &Server{token: token, port: port, deps: deps}
 }
 
+// API specs served at /api/openapi.json + /api/asyncapi.json. Hand-authored in
+// S2 (kept accurate to the handlers); huma auto-generation is scheduled for S4.
+//
+//go:embed openapi.json
+var openapiSpec []byte
+
+//go:embed asyncapi.json
+var asyncapiSpec []byte
+
+func serveSpec(spec []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		_, _ = w.Write(spec)
+	}
+}
+
 // Handler builds the fully-wired mux (exported so tests can exercise routes via
 // httptest without binding a port).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	authMW := auth.Bearer(s.token)
 
-	// Unauthenticated: liveness + version negotiation (PHASE-77-DESIGN §4).
+	// Unauthenticated: liveness + version negotiation + API specs (§4, §4.4).
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/api/version", s.handleVersion)
+	mux.HandleFunc("/api/openapi.json", serveSpec(openapiSpec))
+	mux.HandleFunc("/api/asyncapi.json", serveSpec(asyncapiSpec))
 
 	// Subsystems mount their own legacy + /api/v2 routes behind auth.
 	if s.deps.Insights != nil {

@@ -1,0 +1,32 @@
+{
+  "asyncapi": "2.6.0",
+  "info": {
+    "title": "winmux-server streaming",
+    "version": "2.0.0",
+    "description": "WebSocket frame contract for winmux-server (PHASE-77-DESIGN §4.4). STUB in S2 — the chat + workspace channels and their per-`type` frame schemas are populated in S3. The frame_version is advertised by GET /api/version."
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "/ws/claude/session/{id}": {
+      "description": "Chat session stream (legacy path; v2 alias in a later sprint). Frames are JSON objects discriminated by `type` — assistant_delta, tool_use, tool_result, notification, hook_request, hook_resolved, status, error (server→client) and hook_decision, user_message (client→server). Full per-type schemas land in S3.",
+      "parameters": { "id": { "schema": { "type": "string" } } }
+    }
+  },
+  "components": {
+    "messages": {
+      "Frame": {
+        "summary": "Envelope common to every frame (S3 will add per-type oneOf).",
+        "payload": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "type": "string" },
+            "ts": { "type": "integer" },
+            "session_id": { "type": "string" },
+            "seq": { "type": "integer", "description": "monotonic per session; gap detection + resume" }
+          }
+        }
+      }
+    }
+  }
+}

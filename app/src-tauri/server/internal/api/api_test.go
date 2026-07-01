@@ -37,6 +37,25 @@ func TestHealthAndVersionAreUnauthed(t *testing.T) {
 	}
 }
 
+// The OpenAPI + AsyncAPI specs are served unauthenticated, valid JSON, with CORS.
+func TestSpecsServed(t *testing.T) {
+	h := testServer().Handler()
+	for _, path := range []string{"/api/openapi.json", "/api/asyncapi.json"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: want 200 got %d", path, rec.Code)
+		}
+		if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+			t.Fatalf("%s: missing CORS header", path)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+			t.Fatalf("%s: invalid JSON: %v", path, err)
+		}
+	}
+}
+
 // Backward compat: both the legacy path and the new /api/v2 path are registered
 // and both require the bearer token.
 func TestMetricsRoutesRequireToken(t *testing.T) {

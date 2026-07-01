@@ -15,10 +15,72 @@ use std::time::SystemTime;
 use russh::client::Handle as SshHandle;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{AppState, Session, SshClient};
+
+/// Phase 75.3: progress tick for an in-flight download, emitted to the
+/// frontend so a large transfer shows movement instead of a frozen pane.
+#[derive(Clone, Serialize)]
+struct DownloadProgress {
+    path: String,
+    done: u64,
+    total: u64, // 0 if the remote size couldn't be stat'd
+}
+
+/// Stream a remote file to `local` in chunks, emitting throttled
+/// `fm-download-progress` events. Returns bytes written. Avoids buffering the
+/// whole file in RAM (the old read_to_end) — important for multi-GB files —
+/// and gives the UI a live byte/percent readout.
+async fn stream_download(
+    app: &AppHandle,
+    sftp: &SftpSession,
+    remote_path: &str,
+    local: &std::path::Path,
+) -> Result<u64, String> {
+    let total = sftp
+        .metadata(remote_path)
+        .await
+        .ok()
+        .and_then(|m| m.size)
+        .unwrap_or(0);
+    crate::dlog_tag("FM", &format!("download begin remote={remote_path} size={total}"));
+    let mut file = sftp
+        .open(remote_path)
+        .await
+        .map_err(|e| format!("sftp open {remote_path}: {e}"))?;
+    let mut out = tokio::fs::File::create(local)
+        .await
+        .map_err(|e| format!("create {local:?}: {e}"))?;
+    let emit = |done: u64, total: u64| {
+        let _ = app.emit(
+            "fm-download-progress",
+            DownloadProgress { path: remote_path.to_string(), done, total },
+        );
+    };
+    let mut done: u64 = 0;
+    let mut chunk = vec![0u8; 256 * 1024];
+    let mut last = std::time::Instant::now();
+    let mut last_done = 0u64;
+    loop {
+        let n = file.read(&mut chunk).await.map_err(|e| format!("read: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        out.write_all(&chunk[..n]).await.map_err(|e| format!("write: {e}"))?;
+        done += n as u64;
+        // Throttle emits: ~every 300 ms or every 4 MB, whichever first.
+        if last.elapsed().as_millis() >= 300 || done - last_done >= 4 * 1024 * 1024 {
+            emit(done, total);
+            last = std::time::Instant::now();
+            last_done = done;
+        }
+    }
+    out.flush().await.ok();
+    emit(done, total.max(done)); // final 100% tick
+    Ok(done)
+}
 
 /// Phase 75.2: log a file-manager op's outcome to debug.log under `[FM]` so a
 /// failed transfer/mutation is diagnosable instead of vanishing behind a
@@ -555,6 +617,7 @@ pub(crate) async fn file_upload(
 
 #[tauri::command]
 pub(crate) async fn file_download(
+    app: AppHandle,
     state: State<'_, AppState>,
     workspace_id: String,
     remote_path: String,
@@ -575,18 +638,9 @@ pub(crate) async fn file_download(
                 }
             }
             let sftp = open_sftp(&handle).await?;
-            let mut file = sftp
-                .open(&remote_path)
-                .await
-                .map_err(|e| format!("sftp open {remote_path}: {e}"))?;
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)
-                .await
-                .map_err(|e| format!("read: {e}"))?;
-            drop(file);
-            std::fs::write(&local, &buf).map_err(|e| format!("write {local:?}: {e}"))?;
+            let n = stream_download(&app, &sftp, &remote_path, &local).await?;
             let _ = sftp.close().await;
-            Ok(buf.len() as u64)
+            Ok(n)
         }
         .await,
     )
@@ -600,6 +654,7 @@ pub(crate) async fn file_download(
 /// folder and returns the local destination (shown in a toast).
 #[tauri::command]
 pub(crate) async fn download_remote_file_via_osc(
+    app: AppHandle,
     state: State<'_, AppState>,
     workspace_id: String,
     remote_path: String,
@@ -623,16 +678,7 @@ pub(crate) async fn download_remote_file_via_osc(
             std::fs::create_dir_all(&downloads).map_err(|e| format!("mkdir Downloads: {e}"))?;
             let local = downloads.join(&base);
             let sftp = open_sftp(&handle).await?;
-            let mut file = sftp
-                .open(&remote_path)
-                .await
-                .map_err(|e| format!("sftp open {remote_path}: {e}"))?;
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)
-                .await
-                .map_err(|e| format!("read: {e}"))?;
-            drop(file);
-            std::fs::write(&local, &buf).map_err(|e| format!("write {local:?}: {e}"))?;
+            stream_download(&app, &sftp, &remote_path, &local).await?;
             let _ = sftp.close().await;
             Ok(local.to_string_lossy().to_string())
         }

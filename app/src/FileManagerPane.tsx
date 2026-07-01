@@ -1,5 +1,6 @@
 import { createSignal, For, Show, onMount, onCleanup, createMemo } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { t } from "./i18n";
 import { FileEditor } from "./FileEditor";
@@ -207,6 +208,24 @@ export function FileManagerPane(p: Props) {
       setRemoteEntries([]);
     }
   };
+
+  // Phase 75.3: live download progress — a large transfer now shows a
+  // percent/size readout in the status line instead of an idle-looking pane.
+  let unlistenProgress: (() => void) | undefined;
+  onMount(async () => {
+    unlistenProgress = await listen<{ path: string; done: number; total: number }>(
+      "fm-download-progress",
+      (e) => {
+        const { done, total } = e.payload;
+        if (total > 0) {
+          setStatus(`↧ ${Math.floor((done / total) * 100)}% · ${fmtSize(done)} / ${fmtSize(total)}`);
+        } else {
+          setStatus(`↧ ${fmtSize(done)}`);
+        }
+      },
+    );
+  });
+  onCleanup(() => unlistenProgress?.());
 
   onMount(async () => {
     try {

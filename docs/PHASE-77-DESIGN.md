@@ -505,3 +505,33 @@ to be the thing that doc pins against.
   by the desktop (addons.rs now embeds `winmux-server-linux-*`). Left in place
   on-branch so the S1 diff stays a pure add + a small addons.rs delta; removed as
   a cleanup once Yossi has reviewed the module split.
+
+## 16. S3 — Workspace shared state (implemented)
+State model (`internal/workspace`): **Workspace** (server UUID `ws_…`) → **Session**
+(`sess_…`) → an append-only **Event** log (monotonic `seq` per session) + live
+**subscribers** + **PendingRequest**s. All in `workspace.db` (SQLite,
+`SetMaxOpenConns(1)` → race-free seq).
+
+- **8a multi-attach:** `Subscribe(session, client, cursor)` replays every event
+  after the cursor, then the client streams live frames (dedup by `seq`). Every
+  `Publish` fans out to all subscriber channels. Proven: 2 WS clients on one
+  session both receive a published event.
+- **8b broadcast + answer:** a `hook_request` event reaches all subscribers; the
+  FIRST `hook_decision` wins via an atomic `UPDATE … WHERE resolved_by=''`
+  (idempotent per req_id); a `hook_resolved` event is broadcast with
+  `resolved_by`. Proven: 10 concurrent deciders → exactly one winner; over WS,
+  A decides and B sees the resolution.
+- **Frames (§4.4):** flat JSON keyed on `type`; the WS `hello` advertises
+  `frame_version`. Client→server: `user_input`, `hook_decision`, `interrupt`,
+  `unsubscribe`.
+- **FCM (§7, deferred):** `core.NotificationSender` with `NoopSender` shipped;
+  real FCM (register token + push on hook timeout with a minimal payload) is a
+  later sprint — the interface + the pending-request timeout field are in place.
+- **S3.d legacy integration (safe path):** a stable `ws_default` workspace is
+  ensured at boot; legacy `/api/claude/*` + `/ws/claude/*` keep serving existing
+  paired devices **unchanged** (no breaking changes — the primary compat goal).
+  The deeper unification (routing chat's own session/hook flow through the
+  workspace event log so a chat session IS a workspace session) is **deferred**
+  to a focused follow-up: chat already implements its own 8a/8b, and rewriting it
+  in the same sprint would risk the working device flow right before review. The
+  new workspace API implements 8a/8b independently and is fully tested.

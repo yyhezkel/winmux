@@ -126,6 +126,12 @@ func main() {
 	} else {
 		defer wstore.Close()
 		wmgr := workspace.NewManager(wstore, nil) // NoopSender until FCM lands
+		// Backward-compat: a stable "default" workspace so legacy chat sessions
+		// (still served at /api/claude/*) have a home in the workspace model as
+		// the deeper chat↔workspace merge lands in a later sprint.
+		if _, e := wmgr.EnsureWorkspace("ws_default", "default"); e != nil {
+			log.Printf("workspace: ensure default failed: %v", e)
+		}
 		wsSvc = workspace.NewService(wmgr, token)
 		log.Printf("workspace: API enabled")
 	}

@@ -4456,6 +4456,19 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .mob-qr-img { background: #fff; padding: 8px; border-radius: 6px; line-height: 0; }
 .mob-qr-img svg { width: 200px; height: 200px; display: block; }
 .mob-countdown { font-size: 16px; font-variant-numeric: tabular-nums; color: var(--w-accent, #7aa2f7); margin-top: 6px; }
+/* Phase 74: out-of-band URL card shown beneath the QR (URL is not in the QR). */
+.mob-url-card {
+  margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--w-border, #2a2e44);
+  border-radius: 8px; background: var(--w-bg-elev, #1f2335); display: flex; flex-direction: column; gap: 6px;
+}
+.mob-url-title { font-size: 12.5px; font-weight: 600; color: var(--w-text-primary, #e6edf3); }
+.mob-url-row { display: flex; gap: 8px; align-items: center; }
+.mob-url-input {
+  flex: 1 1 auto; background: var(--w-bg, #1a1b26); border: 1px solid var(--w-border, #2a2e44);
+  color: var(--w-text-primary, #e6edf3); border-radius: 5px; padding: 6px 8px;
+  font-family: var(--w-mono, ui-monospace, monospace); font-size: 12.5px;
+}
+.mob-url-row button { cursor: pointer; white-space: nowrap; }
 .mob-devices { display: flex; flex-direction: column; gap: 4px; }
 .mob-dev { display: grid; grid-template-columns: 1.2fr 1.6fr auto; align-items: center; gap: 8px;
   padding: 6px 8px; border: 1px solid var(--w-border, #2a2e44); border-radius: 5px; font-size: 12px; }

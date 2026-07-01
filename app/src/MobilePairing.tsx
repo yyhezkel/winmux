@@ -12,14 +12,25 @@ interface PairStatus {
   nginx_active: boolean;
   configured: boolean;
 }
-interface QrPayload {
-  version: number;
+// What the daemon-backed command hands us (unchanged, API-stable). The host /
+// port are used ONLY to render the URL card — Phase 74 deliberately keeps them
+// OUT of the QR so a photographed/intercepted QR carries no server address.
+interface IssuedPairing {
   host: string;
   port: number;
-  tls: boolean;
   device_id: string;
   token: string;
-  expires_at: number;
+  expires_at: number; // unix seconds (used for the countdown)
+}
+
+// The v2 QR payload — tokens only, no host/port/tls. `version: 2` tells the
+// mobile parser this is the split-URL shape (v1 = legacy, carried host/port).
+interface QrPayloadV2 {
+  version: 2;
+  device_id: string;
+  token: string;
+  expires_at: string; // ISO-8601, per the agreed v2 schema
+  fingerprint?: string;
 }
 interface PairedDevice {
   device_id: string;
@@ -45,6 +56,8 @@ export function MobilePairing(p: { workspaceId?: string }) {
   const [devices, setDevices] = createSignal<PairedDevice[]>([]);
   const [pairName, setPairName] = createSignal("");
   const [qrSvg, setQrSvg] = createSignal<string | null>(null);
+  const [pairUrl, setPairUrl] = createSignal<string | null>(null);
+  const [copied, setCopied] = createSignal(false);
   const [countdown, setCountdown] = createSignal(0);
   let countdownTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -110,20 +123,34 @@ export function MobilePairing(p: { workspaceId?: string }) {
     if (!ws()) return;
     setErr(null);
     setQrSvg(null);
+    setPairUrl(null);
+    setCopied(false);
     try {
-      const payload = JSON.parse(
+      const issued = JSON.parse(
         await invoke<string>("mobile_pairing_generate_qr", {
           workspaceId: ws(),
           deviceName: pairName().trim() || "device",
         }),
-      ) as QrPayload;
-      // Render the QR locally from the payload JSON (typeNumber 0 = auto-size).
+      ) as IssuedPairing;
+      // Phase 74: the QR carries ONLY tokens — no host/port/tls. The user types
+      // the server URL by hand (shown in the card below), so a leaked QR alone
+      // is useless.
+      const qrData: QrPayloadV2 = {
+        version: 2,
+        device_id: issued.device_id,
+        token: issued.token,
+        expires_at: new Date(issued.expires_at * 1000).toISOString(),
+      };
       const qr = qrcode(0, "M");
-      qr.addData(JSON.stringify(payload));
+      qr.addData(JSON.stringify(qrData));
       qr.make();
       setQrSvg(qr.createSvgTag({ cellSize: 5, margin: 4 }));
-      // 5-min countdown from the token's expiry.
-      const secs = Math.max(0, payload.expires_at - Math.floor(Date.now() / 1000));
+      // The out-of-band URL (443 is implied for https, shown only if custom).
+      setPairUrl(
+        issued.port === 443 ? `https://${issued.host}` : `https://${issued.host}:${issued.port}`,
+      );
+      // 5-min countdown from the token's expiry (numeric unix seconds).
+      const secs = Math.max(0, issued.expires_at - Math.floor(Date.now() / 1000));
       setCountdown(secs);
       clearCountdown();
       countdownTimer = setInterval(() => {
@@ -131,6 +158,7 @@ export function MobilePairing(p: { workspaceId?: string }) {
           if (c <= 1) {
             clearCountdown();
             setQrSvg(null);
+            setPairUrl(null);
             void refreshDevices();
             return 0;
           }
@@ -140,6 +168,18 @@ export function MobilePairing(p: { workspaceId?: string }) {
       void refreshDevices();
     } catch (e) {
       setErr(String(e));
+    }
+  };
+
+  const copyUrl = async () => {
+    const u = pairUrl();
+    if (!u) return;
+    try {
+      await navigator.clipboard.writeText(u);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      console.warn("clipboard write failed", e);
     }
   };
 
@@ -255,6 +295,20 @@ export function MobilePairing(p: { workspaceId?: string }) {
             <div class="mob-countdown">{t("mobile.expires_in")} {mm(countdown())}</div>
           </div>
         </div>
+        {/* Phase 74: the server URL travels out-of-band — user types it into the
+            mobile app manually; it is intentionally absent from the QR above. */}
+        <Show when={pairUrl()}>
+          <div class="mob-url-card">
+            <div class="mob-url-title">📱 {t("mobile.url_enter")}</div>
+            <div class="mob-url-row">
+              <input class="mob-url-input" type="text" readOnly dir="ltr" value={pairUrl()!} />
+              <button class="primary" onClick={() => void copyUrl()}>
+                {copied() ? t("mobile.url_copied") : t("mobile.url_copy")}
+              </button>
+            </div>
+            <div class="settings-hint">{t("mobile.url_then_scan")}</div>
+          </div>
+        </Show>
       </Show>
 
       {/* ── Devices / activity ── */}

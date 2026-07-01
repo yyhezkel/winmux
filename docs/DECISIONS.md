@@ -25,6 +25,15 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-07-01 — Phase 74/**77** — `winmux-server` first-class (monorepo refactor) — DESIGN, awaiting Yossi review
+Yossi decided to pause immediate fixes and refactor the daemon properly: `winmux-insights` → **`winmux-server` 2.0.0**, clean `internal/*` module boundaries, normalized versioned API (`/api/v2/*`), auto-generated OpenAPI → Kotlin+TS SDKs, per-client auth scoping, zero-downtime migration. **Monorepo** (no repo split until iOS/overhead justifies). Full design in [`docs/PHASE-74-DESIGN.md`](PHASE-74-DESIGN.md).
+- **Numbering clash flagged:** "Phase 74" already shipped today (split-QR pairing, `2ebb645`). Recommended **Phase 77**; kept the filename Yossi specified. → Q0.
+- **Key design calls:** (a) a leaf `core` package of interfaces breaks the known WS↔session↔hookRPC import cycle that forced the current flat `package main` (the Phase 69 note); (b) legacy route aliases kept ≥3 minor versions for rollout; (c) binary/systemd rename with a `winmux-insights` symlink + data move `~/.winmux/insights/`→`~/.winmux/server/` preserving device tokens.
+- **Plan:** S1 rename+module-boundaries (3–4d) → S2 files+logs API (3d) → S3 workspace/shared-state (4–5d, needs Q3) → S4 SDK gen (3–4d) → S5 migration+polish (3–4d). **~16–21 sprint-days.**
+- **Blockers for Yossi (⛔):** Q1 dir location (`app/src-tauri/server/` vs repo-root `server/`), Q3 what "workspace shared state" actually is, Q4 OpenAPI toolchain (recommend `huma`). Plus Q0/Q2/Q5–Q8 in the doc.
+- **Strong recommendation:** land the parked `72-docker-group` stack as **v0.4.2 first**, then start Phase 77 off fresh `main` — refactoring atop an unmerged stack multiplies merge risk.
+- **State:** design only, no code written (per instruction). Awaiting Yossi's review of the doc.
+
 ### 2026-07-01 — Phase 76 — Monitor "Cleanup" tab: reap duplicate port-watchers + flag orphan sessions (daemon 1.2.6)
 The `port-watch reap-on-spawn` fix (previous commit) only cleans a workspace when it next reconnects; Yossi still had 4 duplicate watchers for a workspace that hadn't reconnected in 3 days (296h+308h CPU), plus a 9-day orphan `claude` fork session. He asked for the Monitor to detect + kill these.
 - **Daemon (1.2.5→1.2.6):** `hygiene.go` walks the process table (gopsutil) → `GET /hygiene` returns port-watchers (grouped, all-but-newest-per-workspace flagged `duplicate`) + orphan claude sessions (heuristic: `tty=="" && has --session-id/--resume && etime>24h` — flagged, never auto-killed, per Yossi). `POST /hygiene/kill {pids}` SIGTERMs via gopsutil, but only PIDs the daemon itself currently classifies as killable (safety — can't kill an arbitrary PID). `markDuplicates`/`argAfter` unit-tested.

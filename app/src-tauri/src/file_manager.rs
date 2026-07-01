@@ -20,6 +20,18 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{AppState, Session, SshClient};
 
+/// Phase 75.2: log a file-manager op's outcome to debug.log under `[FM]` so a
+/// failed transfer/mutation is diagnosable instead of vanishing behind a
+/// corner toast. Wrap the op's Result: `fm_log("download", &detail, res)`.
+/// Only paths + sizes are logged (metadata — Rule #1 safe); never file bytes.
+fn fm_log<T>(op: &str, detail: &str, res: Result<T, String>) -> Result<T, String> {
+    match &res {
+        Ok(_) => crate::dlog_tag("FM", &format!("{op} ok — {detail}")),
+        Err(e) => crate::dlog_tag("FM", &format!("{op} FAILED — {detail}: {e}")),
+    }
+    res
+}
+
 // ─── data shapes ───────────────────────────────────────────────────────────
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -303,7 +315,7 @@ pub(crate) async fn file_delete_remote(
         Err(_) => recurse_rm(&sftp, &path).await,
     };
     let _ = sftp.close().await;
-    result
+    fm_log("delete", &format!("path={path}"), result)
 }
 
 async fn recurse_rm(sftp: &SftpSession, path: &str) -> Result<(), String> {
@@ -354,7 +366,7 @@ pub(crate) async fn file_rename_remote(
         .await
         .map_err(|e| format!("rename {old_path} -> {new_path}: {e}"));
     let _ = sftp.close().await;
-    r
+    fm_log("rename", &format!("{old_path} → {new_path}"), r)
 }
 
 #[tauri::command]
@@ -371,7 +383,7 @@ pub(crate) async fn file_mkdir_remote(
         .await
         .map_err(|e| format!("mkdir {path}: {e}"));
     let _ = sftp.close().await;
-    r
+    fm_log("mkdir", &format!("path={path}"), r)
 }
 
 /// Phase 23: create a new empty file on the remote via SFTP. Refuses
@@ -422,22 +434,30 @@ pub(crate) async fn file_upload_bytes(
     remote_path: String,
     bytes: Vec<u8>,
 ) -> Result<u64, String> {
-    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
-        .ok_or_else(|| "no active SSH session".to_string())?;
-    let sftp = open_sftp(&handle).await?;
-    let mut file = sftp
-        .create(&remote_path)
-        .await
-        .map_err(|e| format!("sftp create {remote_path}: {e}"))?;
-    file.write_all(&bytes)
-        .await
-        .map_err(|e| format!("write: {e}"))?;
-    file.flush().await.ok();
-    file.shutdown().await.ok();
-    let n = bytes.len() as u64;
-    drop(file);
-    let _ = sftp.close().await;
-    Ok(n)
+    let detail = format!("remote={remote_path} bytes={}", bytes.len());
+    fm_log(
+        "upload",
+        &detail,
+        async {
+            let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+                .ok_or_else(|| "no active SSH session".to_string())?;
+            let sftp = open_sftp(&handle).await?;
+            let mut file = sftp
+                .create(&remote_path)
+                .await
+                .map_err(|e| format!("sftp create {remote_path}: {e}"))?;
+            file.write_all(&bytes)
+                .await
+                .map_err(|e| format!("write: {e}"))?;
+            file.flush().await.ok();
+            file.shutdown().await.ok();
+            let n = bytes.len() as u64;
+            drop(file);
+            let _ = sftp.close().await;
+            Ok(n)
+        }
+        .await,
+    )
 }
 
 /// Phase 49-A: drag-drop into a Terminal pane. For SSH workspaces the
@@ -505,24 +525,32 @@ pub(crate) async fn file_upload(
     local_path: String,
     remote_path: String,
 ) -> Result<u64, String> {
-    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
-        .ok_or_else(|| "no active SSH session".to_string())?;
-    let local = PathBuf::from(expand_path(&local_path));
-    let bytes = std::fs::read(&local).map_err(|e| format!("read {local:?}: {e}"))?;
-    let sftp = open_sftp(&handle).await?;
-    let mut file = sftp
-        .create(&remote_path)
-        .await
-        .map_err(|e| format!("sftp create {remote_path}: {e}"))?;
-    file.write_all(&bytes)
-        .await
-        .map_err(|e| format!("write: {e}"))?;
-    file.flush().await.ok();
-    file.shutdown().await.ok();
-    let n = bytes.len() as u64;
-    drop(file);
-    let _ = sftp.close().await;
-    Ok(n)
+    let detail = format!("local={local_path} → remote={remote_path}");
+    fm_log(
+        "upload",
+        &detail,
+        async {
+            let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+                .ok_or_else(|| "no active SSH session".to_string())?;
+            let local = PathBuf::from(expand_path(&local_path));
+            let bytes = std::fs::read(&local).map_err(|e| format!("read {local:?}: {e}"))?;
+            let sftp = open_sftp(&handle).await?;
+            let mut file = sftp
+                .create(&remote_path)
+                .await
+                .map_err(|e| format!("sftp create {remote_path}: {e}"))?;
+            file.write_all(&bytes)
+                .await
+                .map_err(|e| format!("write: {e}"))?;
+            file.flush().await.ok();
+            file.shutdown().await.ok();
+            let n = bytes.len() as u64;
+            drop(file);
+            let _ = sftp.close().await;
+            Ok(n)
+        }
+        .await,
+    )
 }
 
 #[tauri::command]
@@ -532,27 +560,36 @@ pub(crate) async fn file_download(
     remote_path: String,
     local_path: String,
 ) -> Result<u64, String> {
-    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
-        .ok_or_else(|| "no active SSH session".to_string())?;
-    let local = PathBuf::from(expand_path(&local_path));
-    if let Some(parent) = local.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("mkdir parent {parent:?}: {e}"))?;
+    let detail = format!("remote={remote_path} → local={local_path}");
+    fm_log(
+        "download",
+        &detail,
+        async {
+            let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+                .ok_or_else(|| "no active SSH session".to_string())?;
+            let local = PathBuf::from(expand_path(&local_path));
+            if let Some(parent) = local.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("mkdir parent {parent:?}: {e}"))?;
+                }
+            }
+            let sftp = open_sftp(&handle).await?;
+            let mut file = sftp
+                .open(&remote_path)
+                .await
+                .map_err(|e| format!("sftp open {remote_path}: {e}"))?;
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf)
+                .await
+                .map_err(|e| format!("read: {e}"))?;
+            drop(file);
+            std::fs::write(&local, &buf).map_err(|e| format!("write {local:?}: {e}"))?;
+            let _ = sftp.close().await;
+            Ok(buf.len() as u64)
         }
-    }
-    let sftp = open_sftp(&handle).await?;
-    let mut file = sftp
-        .open(&remote_path)
-        .await
-        .map_err(|e| format!("sftp open {remote_path}: {e}"))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)
-        .await
-        .map_err(|e| format!("read: {e}"))?;
-    drop(file);
-    std::fs::write(&local, &buf).map_err(|e| format!("write {local:?}: {e}"))?;
-    let _ = sftp.close().await;
-    Ok(buf.len() as u64)
+        .await,
+    )
 }
 
 /// Phase 62.B (item J): download a file referenced by an OSC 8 hyperlink
@@ -567,34 +604,40 @@ pub(crate) async fn download_remote_file_via_osc(
     workspace_id: String,
     remote_path: String,
 ) -> Result<String, String> {
-    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
-        .ok_or_else(|| "no active SSH session for this workspace".to_string())?;
-    // Basename of a POSIX remote path; fall back to a generic name.
-    let base = remote_path
-        .rsplit('/')
-        .find(|s| !s.is_empty())
-        .unwrap_or("download")
-        .to_string();
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .map_err(|_| "cannot resolve home directory".to_string())?;
-    let downloads = std::path::Path::new(&home).join("Downloads");
-    std::fs::create_dir_all(&downloads)
-        .map_err(|e| format!("mkdir Downloads: {e}"))?;
-    let local = downloads.join(&base);
-    let sftp = open_sftp(&handle).await?;
-    let mut file = sftp
-        .open(&remote_path)
-        .await
-        .map_err(|e| format!("sftp open {remote_path}: {e}"))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)
-        .await
-        .map_err(|e| format!("read: {e}"))?;
-    drop(file);
-    std::fs::write(&local, &buf).map_err(|e| format!("write {local:?}: {e}"))?;
-    let _ = sftp.close().await;
-    Ok(local.to_string_lossy().to_string())
+    fm_log(
+        "download-osc",
+        &format!("remote={remote_path}"),
+        async {
+            let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+                .ok_or_else(|| "no active SSH session for this workspace".to_string())?;
+            // Basename of a POSIX remote path; fall back to a generic name.
+            let base = remote_path
+                .rsplit('/')
+                .find(|s| !s.is_empty())
+                .unwrap_or("download")
+                .to_string();
+            let home = std::env::var("USERPROFILE")
+                .or_else(|_| std::env::var("HOME"))
+                .map_err(|_| "cannot resolve home directory".to_string())?;
+            let downloads = std::path::Path::new(&home).join("Downloads");
+            std::fs::create_dir_all(&downloads).map_err(|e| format!("mkdir Downloads: {e}"))?;
+            let local = downloads.join(&base);
+            let sftp = open_sftp(&handle).await?;
+            let mut file = sftp
+                .open(&remote_path)
+                .await
+                .map_err(|e| format!("sftp open {remote_path}: {e}"))?;
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf)
+                .await
+                .map_err(|e| format!("read: {e}"))?;
+            drop(file);
+            std::fs::write(&local, &buf).map_err(|e| format!("write {local:?}: {e}"))?;
+            let _ = sftp.close().await;
+            Ok(local.to_string_lossy().to_string())
+        }
+        .await,
+    )
 }
 
 // ─── Phase 17: Open with OS default app ────────────────────────────────────

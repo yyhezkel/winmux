@@ -33,6 +33,20 @@ func main() {
 			// desktop's version probe keeps working across the rename.
 			fmt.Printf("winmux-server %s\n", core.Version)
 			return
+		case "openapi":
+			// Emit the generated OpenAPI spec to stdout and exit. The SDK
+			// pipeline (sdk-gen/) and its CI drift-guard use this — no running
+			// server or data dir needed (nil providers; handlers never run).
+			srv := api.NewServer("", 0, api.Deps{
+				Files: files.NewService(nil),
+				Logs:  logs.NewService(nil),
+			})
+			b, err := srv.OpenAPISpec()
+			if err != nil {
+				log.Fatalf("openapi: %v", err)
+			}
+			_, _ = os.Stdout.Write(b)
+			return
 		}
 	}
 

@@ -5,14 +5,13 @@ package api
 
 import (
 	_ "embed"
-	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"winmux-server/internal/auth"
 	"winmux-server/internal/chat"
-	"winmux-server/internal/core"
 	"winmux-server/internal/files"
 	"winmux-server/internal/insights"
 	"winmux-server/internal/logs"
@@ -41,12 +40,10 @@ func NewServer(token string, port int, deps Deps) *Server {
 	return &Server{token: token, port: port, deps: deps}
 }
 
-// API specs served at /api/openapi.json + /api/asyncapi.json. Hand-authored in
-// S2 (kept accurate to the handlers); huma auto-generation is scheduled for S4.
+// asyncapi.json is the hand-authored streaming (WebSocket) contract — OpenAPI
+// doesn't describe WS frames, so the frame schema lives here (PHASE-77-DESIGN
+// §4.4). The REST openapi.json is now generated from the huma handlers (S4).
 //
-//go:embed openapi.json
-var openapiSpec []byte
-
 //go:embed asyncapi.json
 var asyncapiSpec []byte
 
@@ -65,22 +62,24 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	authMW := auth.Bearer(s.token)
 
-	// Unauthenticated: liveness + version negotiation + API specs (§4, §4.4).
-	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/api/version", s.handleVersion)
-	mux.HandleFunc("/api/openapi.json", serveSpec(openapiSpec))
+	// The huma-hosted surface: liveness + version negotiation (public) and the
+	// Files + Logs operations (bearer-gated by huma middleware). huma reflects
+	// these into the OpenAPI we serve below, so the spec tracks the handlers.
+	hapi := s.newHumaAPI(mux)
+	spec, err := hapi.OpenAPI().MarshalJSON()
+	if err != nil {
+		log.Printf("api: OpenAPI marshal failed: %v", err) // serve an empty doc rather than crash
+		spec = []byte("{}")
+	}
+	mux.HandleFunc("/api/openapi.json", serveSpec(spec))
 	mux.HandleFunc("/api/asyncapi.json", serveSpec(asyncapiSpec))
 
-	// Subsystems mount their own legacy + /api/v2 routes behind auth.
+	// Insights keeps its raw legacy + /api/v2 stdlib handlers behind auth
+	// (desktop Monitor surface — not part of the generated SDK spec).
 	if s.deps.Insights != nil {
 		s.deps.Insights.RegisterRoutes(mux, authMW)
 	}
-	if s.deps.Files != nil {
-		s.deps.Files.RegisterRoutes(mux, authMW)
-	}
-	if s.deps.Logs != nil {
-		s.deps.Logs.RegisterRoutes(mux, authMW)
-	}
+	// Files + Logs are already registered on the huma API above.
 	if s.deps.Workspace != nil {
 		s.deps.Workspace.RegisterRoutes(mux, authMW)
 	}
@@ -102,24 +101,4 @@ func (s *Server) Run() error {
 		WriteTimeout: 20 * time.Second,
 	}
 	return srv.ListenAndServe()
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"ok": true, "version": core.Version})
-}
-
-// handleVersion lets a client negotiate: which API majors + WS frame version
-// this server speaks (PHASE-77-DESIGN §4, §4.4).
-func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{
-		"name":          "winmux-server",
-		"version":       core.Version,
-		"api_versions":  []int{2},
-		"frame_version": core.FrameVersion,
-	})
 }

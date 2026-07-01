@@ -314,16 +314,36 @@ their shapes as the v2 contract:
 
 ## 6. Client SDK generation (74.C)
 
-> **S2 decision (flagged for Yossi).** Yossi's S2 brief said "openapi.json
-> auto-generated from huma." I implemented Files/Logs as **stdlib handlers**
-> (uniform with the whole daemon, and I wanted full control over the
-> safety-critical streaming / multipart / path-traversal code) and serve a
-> **hand-authored, accurate OpenAPI 3.1** at `/api/openapi.json` + an AsyncAPI
-> stub at `/api/asyncapi.json` (CORS + `max-age=300`). This keeps the codebase
-> one HTTP idiom and unblocks SDK-gen now. **Full huma adoption stays scheduled
-> for S4** (design below), where every handler — old + new — is migrated in one
-> pass and the spec becomes auto-generated. If you'd rather pull huma forward
-> into S2, say so and I'll retrofit the Files/Logs handlers first.
+> **S4.1 DONE (2026-07-02) — huma adopted, scoped to the client-SDK surface.**
+> The client-facing HTTP surface — **version/health negotiation + Files (5) +
+> Logs (3)** — is now **typed huma operations** (`internal/api/huma.go`,
+> `internal/files/huma.go`, `internal/logs/huma.go`). `/api/openapi.json` is
+> **generated from the handlers** (huma reflection, OpenAPI 3.1) — the
+> hand-authored `openapi.json` is deleted. Contract preserved byte-for-byte
+> (same params/status/headers/JSON); every pre-existing test passes unchanged.
+> Emit the spec with `winmux-server openapi` (nil providers, no running server)
+> — the SDK pipeline + CI drift-guard consume that.
+>
+> **Scope decision:** **Insights stays on raw stdlib handlers and is excluded
+> from the generated SDK spec.** It is a desktop-internal Monitor API — dynamic
+> `map[string]any` metric/docker/process payloads consumed by the desktop's
+> **Rust** client (`insights_fetch` over SSH), never by a generated Kotlin/TS
+> SDK. Freezing those loose maps into huma types would be churn with no SDK
+> consumer. The SDK spec therefore describes exactly the client contract; the
+> Insights API is documented separately (`docs/winmux-server/API.md`).
+>
+> **Binary/streaming/multipart** kept identical via huma's native mechanisms:
+> Files read/download → `huma.StreamResponse` (raw octet-stream + custom
+> headers), upload → `huma.MultipartFormFiles`, Logs stream → `huma/sse`
+> (`event: line`, plus an `error` event for a bad id — SSE carries errors as
+> events since the 200 stream is already open; the S2 pre-stream 400 is the only
+> intentional wire delta, on an untested convenience endpoint). The `$schema`
+> link transformer is disabled (`CreateHooks = nil`) so response bodies stay
+> clean.
+>
+> **Compat shim:** each subsystem keeps `RegisterRoutes(mux, auth)` (builds a
+> local huma API over the mux) so its own unit tests mount unchanged; production
+> calls `RegisterHuma(sharedAPI)` on the one server-wide API that backs the spec.
 
 **Recommended approach: OpenAPI-first via a typed Go framework.**
 - Define handlers with typed input/output structs; emit **OpenAPI 3.1**

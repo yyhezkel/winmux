@@ -10,21 +10,22 @@ import (
 	"time"
 
 	"winmux-server/internal/auth"
+	"winmux-server/internal/chat"
 	"winmux-server/internal/core"
 	"winmux-server/internal/insights"
 )
 
-// Server wires the subsystems into one HTTP listener. Chat is added in S1.c.
+// Server wires the subsystems into one HTTP listener.
 type Server struct {
 	token    string
 	port     int
 	insights *insights.Service
+	chat     *chat.ChatAPI // nil if the chat subsystem is disabled
 }
 
-// NewServer builds the front door. More subsystems join the signature as they
-// migrate (chat in S1.c).
-func NewServer(token string, port int, ins *insights.Service) *Server {
-	return &Server{token: token, port: port, insights: ins}
+// NewServer builds the front door. chatAPI may be nil (chat disabled).
+func NewServer(token string, port int, ins *insights.Service, chatAPI *chat.ChatAPI) *Server {
+	return &Server{token: token, port: port, insights: ins, chat: chatAPI}
 }
 
 // Handler builds the fully-wired mux (exported so tests can exercise routes via
@@ -39,6 +40,12 @@ func (s *Server) Handler() http.Handler {
 
 	// Subsystems mount their own legacy + /api/v2 routes behind auth.
 	s.insights.RegisterRoutes(mux, authMW)
+	if s.chat != nil {
+		// Chat brings its own auth (device tokens + shared bearer) and registers
+		// its legacy /api/claude/* + /ws/claude/* routes. v2 chat aliases land in
+		// a later sprint; legacy paths keep existing clients working (S1 compat).
+		s.chat.RegisterRoutes(mux)
+	}
 	return mux
 }
 

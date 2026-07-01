@@ -13,7 +13,7 @@ import (
 // routing + auth, since /healthz and /api/version don't touch them and an
 // unauthorized request is rejected before any handler runs.
 func testServer() *Server {
-	return NewServer("secret", 0, insights.NewService(nil, nil, ""))
+	return NewServer("secret", 0, insights.NewService(nil, nil, ""), nil)
 }
 
 func TestHealthAndVersionAreUnauthed(t *testing.T) {

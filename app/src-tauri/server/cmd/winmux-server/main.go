@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"winmux-server/internal/api"
+	"winmux-server/internal/chat"
 	"winmux-server/internal/config"
 	"winmux-server/internal/core"
+	"winmux-server/internal/hooks"
 	"winmux-server/internal/insights"
 )
 
@@ -76,10 +78,23 @@ func main() {
 	go insights.PortWatchReaper(stop)
 
 	svc := insights.NewService(store, sm, logPath)
-	srv := api.NewServer(token, *port, svc)
 
-	// TODO(S1.c): open chat store, build SessionManager + ChatAPI, start the
-	// hooks.Listener, and mount chat routes on the api server.
+	// Phase 69 — mobile Claude chat subsystem (separate chat.db). On any setup
+	// error we log and continue serving metrics; chat just stays off.
+	var chatAPI *chat.ChatAPI
+	chatStore, cerr := chat.OpenChatStore(filepath.Join(*base, "chat.db"))
+	if cerr != nil {
+		log.Printf("chat: open store failed, chat disabled: %v", cerr)
+	} else {
+		defer chatStore.Close()
+		mgr := chat.NewSessionManager(chatStore)
+		chatAPI = chat.NewChatAPI(mgr, chatStore, token)
+		hooks.Start(mgr) // thin listener → SessionManager.HandleHookConn (cycle-safe)
+		go chat.RunSessionSweeper(mgr, stop)
+		log.Printf("chat: Claude chat subsystem enabled")
+	}
+
+	srv := api.NewServer(token, *port, svc, chatAPI)
 
 	go func() {
 		if err := srv.Run(); err != nil {

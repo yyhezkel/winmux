@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://winmux.dev/schemas/frames.schema.json",
+  "title": "WinmuxFrame",
+  "description": "winmux-server WebSocket frame contract (PHASE-77-DESIGN §4.4, frame_version 2). Every frame is a flat JSON object discriminated by `type`. Envelope fields (seq, session_id, ts) sit alongside the type-specific fields. snake_case throughout, matching the REST surface. SDK generators turn this into a Kotlin sealed interface / TS tagged union.",
+  "oneOf": [
+    { "$ref": "#/$defs/HelloFrame" },
+    { "$ref": "#/$defs/UserInputFrame" },
+    { "$ref": "#/$defs/HookDecisionFrame" },
+    { "$ref": "#/$defs/InterruptFrame" },
+    { "$ref": "#/$defs/UnsubscribeFrame" },
+    { "$ref": "#/$defs/HookRequestFrame" },
+    { "$ref": "#/$defs/HookResolvedFrame" },
+    { "$ref": "#/$defs/AssistantTextFrame" },
+    { "$ref": "#/$defs/ToolUseFrame" },
+    { "$ref": "#/$defs/ToolResultFrame" },
+    { "$ref": "#/$defs/StatusFrame" },
+    { "$ref": "#/$defs/ErrorFrame" },
+    { "$ref": "#/$defs/NotificationFrame" }
+  ],
+  "$defs": {
+    "SessionEventEnvelope": {
+      "type": "object",
+      "description": "Common fields on every server→client session event. Not a frame on its own.",
+      "required": ["type", "seq", "session_id", "ts"],
+      "properties": {
+        "type": { "type": "string" },
+        "seq": { "type": "integer", "description": "monotonic per session — gap detection + cursor resume" },
+        "session_id": { "type": "string" },
+        "ts": { "type": "integer", "description": "unix seconds" }
+      }
+    },
+
+    "HelloFrame": {
+      "type": "object",
+      "description": "First server→client frame: stream capability negotiation. Carries no seq/ts (not a logged event).",
+      "required": ["type", "frame_version", "session_id", "client_id"],
+      "properties": {
+        "type": { "const": "hello" },
+        "frame_version": { "type": "integer" },
+        "session_id": { "type": "string" },
+        "client_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "UserInputFrame": {
+      "type": "object",
+      "description": "A user message. Client→server it carries only content; the server echoes it back to every subscriber with the originating client_id and envelope fields.",
+      "required": ["type", "content"],
+      "properties": {
+        "type": { "const": "user_input" },
+        "content": { "type": "string" },
+        "client_id": { "type": "string" },
+        "seq": { "type": "integer" },
+        "session_id": { "type": "string" },
+        "ts": { "type": "integer" }
+      }
+    },
+    "HookDecisionFrame": {
+      "type": "object",
+      "description": "Client→server: answer a pending hook_request. First decision from any subscriber wins.",
+      "required": ["type", "req_id", "decision"],
+      "properties": {
+        "type": { "const": "hook_decision" },
+        "req_id": { "type": "string" },
+        "decision": { "type": "string", "enum": ["allow", "deny"] }
+      },
+      "additionalProperties": false
+    },
+    "InterruptFrame": {
+      "type": "object",
+      "description": "Interrupt the running session. Client→server carries no body; echoed to subscribers with client_id + envelope.",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "interrupt" },
+        "client_id": { "type": "string" },
+        "seq": { "type": "integer" },
+        "session_id": { "type": "string" },
+        "ts": { "type": "integer" }
+      }
+    },
+    "UnsubscribeFrame": {
+      "type": "object",
+      "description": "Client→server: detach this connection from the session.",
+      "required": ["type"],
+      "properties": { "type": { "const": "unsubscribe" } },
+      "additionalProperties": false
+    },
+
+    "HookRequestFrame": {
+      "type": "object",
+      "description": "Server→client: a blocking permission ask. Pending until the first hook_decision (or timeout).",
+      "allOf": [{ "$ref": "#/$defs/SessionEventEnvelope" }],
+      "properties": {
+        "type": { "const": "hook_request" },
+        "req_id": { "type": "string" },
+        "tool_name": { "type": "string" },
+        "tool_input": {},
+        "decision_required": { "type": "boolean" }
+      },
+      "required": ["req_id"]
+    },
+    "HookResolvedFrame": {
+      "type": "object",
+      "description": "Server→client: a hook was answered (or timed out); broadcast to all subscribers so late clients converge.",
+      "allOf": [{ "$ref": "#/$defs/SessionEventEnvelope" }],
+      "properties": {
+        "type": { "const": "hook_resolved" },
+        "req_id": { "type": "string" },
+        "decision": { "type": "string", "enum": ["allow", "deny"] },
+        "resolved_by": { "type": "string" }
+      },
+      "required": ["req_id", "decision", "resolved_by"]
+    },
+
+    "AssistantTextFrame": {
+      "type": "object",
+      "description": "Server→client: streamed assistant text. Emitted once a Claude session is attached (design §16).",
+      "allOf": [{ "$ref": "#/$defs/SessionEventEnvelope" }],
+      "properties": {
+        "type": { "const": "assistant_text" },
+        "content": { "type": "string" }
+      },
+      "required": ["content"]
+    },
+    "ToolUseFrame": {
+      "type": "object",
+      "description": "Server→client: Claude invoked a tool.",
+      "allOf": [{ "$ref": "#/$defs/SessionEventEnvelope" }],
+      "properties": {
+        "type": { "const": "tool_use" },
+        "tool_id": { "type": "string" },
+        "tool_name": { "type": "string" },
+        "tool_input": {}
+      },
+      "required": ["tool_id", "tool_name"]
+    },
+    "ToolResultFrame": {
+      "type": "object",
+      "description": "Server→client: a tool returned.",
+      "allOf": [{ "$ref": "#/$defs/SessionEventEnvelope" }],
+      "properties": {
+        "type": { "const": "tool_result" },
+        "tool_id": { "type": "string" },
+        "content": { "type": "string" },
+        "is_error": { "type": "boolean" }
+      },
+      "required": ["tool_id"]
+    },
+    "StatusFrame": {
+      "type": "object",
+      "description": "Server→client: session state change.",
+      "allOf": [{ "$ref": "#/$defs/SessionEventEnvelope" }],
+      "properties": {
+        "type": { "const": "status" },
+        "status": { "type": "string", "description": "active | waiting_input | waiting_hook | done | error" }
+      },
+      "required": ["status"]
+    },
+    "ErrorFrame": {
+      "type": "object",
+      "description": "Server→client: stream or parse error.",
+      "allOf": [{ "$ref": "#/$defs/SessionEventEnvelope" }],
+      "properties": {
+        "type": { "const": "error" },
+        "message": { "type": "string" }
+      },
+      "required": ["message"]
+    },
+    "NotificationFrame": {
+      "type": "object",
+      "description": "Server→client: passive lifecycle notification (drives FCM push when no client is attached).",
+      "allOf": [{ "$ref": "#/$defs/SessionEventEnvelope" }],
+      "properties": {
+        "type": { "const": "notification" },
+        "subkind": { "type": "string" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" }
+      }
+    }
+  }
+}

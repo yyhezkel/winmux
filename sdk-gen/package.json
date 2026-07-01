@@ -1,0 +1,17 @@
+{
+  "name": "winmux-sdk-gen",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Generates the winmux-server client SDKs (TypeScript + Kotlin) from the server's OpenAPI + WS frame schema. Versions are pinned so a drift-guard diff is reproducible.",
+  "type": "module",
+  "scripts": {
+    "specs": "node emit-specs.mjs",
+    "gen:ts": "node gen-typescript.mjs",
+    "gen:kotlin": "node gen-kotlin.mjs",
+    "gen": "npm run specs && npm run gen:ts && npm run gen:kotlin"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "15.0.4",
+    "openapi-typescript": "7.13.0"
+  }
+}

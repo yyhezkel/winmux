@@ -1,5 +1,6 @@
 import { createSignal, For, Show, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import qrcode from "qrcode-generator";
 import { t } from "./i18n";
 
@@ -175,8 +176,11 @@ export function MobilePairing(p: { workspaceId?: string }) {
       <div class="mob-setup">
         <label class="mob-field">
           <span>{t("mobile.domain")}</span>
+          {/* dir="auto": a normal (latin) domain aligns LTR, but a full Hebrew/
+              Arabic IDN aligns RTL by its own content. */}
           <input
             type="text"
+            dir="auto"
             placeholder="winmux.example.com"
             value={domain()}
             onInput={(e) => setDomain(e.currentTarget.value)}
@@ -184,8 +188,11 @@ export function MobilePairing(p: { workspaceId?: string }) {
         </label>
         <label class="mob-field">
           <span>{t("mobile.cf_token")}</span>
+          {/* The token is always an opaque LTR string — force LTR even in an
+              RTL app so it doesn't render reversed. */}
           <input
             type="password"
+            dir="ltr"
             placeholder="cloudflare API token"
             value={cfToken()}
             onInput={(e) => setCfToken(e.currentTarget.value)}
@@ -194,6 +201,27 @@ export function MobilePairing(p: { workspaceId?: string }) {
         <button class="primary" disabled={busy() || !domain().trim() || !cfToken().trim()} onClick={() => void install()}>
           {busy() ? t("mobile.installing") : t("mobile.install")}
         </button>
+      </div>
+
+      {/* Cloudflare token requirements — what scopes to grant when creating it. */}
+      <div class="mob-cf-help">
+        <div class="mob-cf-title">{t("mobile.cf_help_title")}</div>
+        <ul class="mob-cf-perms">
+          <li><code>Zone</code> · <code>DNS</code> · <code>Edit</code></li>
+          <li><code>Zone</code> · <code>Zone</code> · <code>Read</code></li>
+          <li>{t("mobile.cf_perm_scope")}</li>
+        </ul>
+        <div class="settings-hint">{t("mobile.cf_domain_note")}</div>
+        <a
+          class="mob-cf-link"
+          href="https://dash.cloudflare.com/profile/api-tokens"
+          onClick={(e) => {
+            e.preventDefault();
+            void openUrl("https://dash.cloudflare.com/profile/api-tokens").catch(() => {});
+          }}
+        >
+          {t("mobile.cf_open_tokens")} →
+        </a>
       </div>
       <div class="mob-status">
         <Show when={status()} fallback={<span class="settings-hint">{t("mobile.not_configured")}</span>}>

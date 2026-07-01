@@ -4431,6 +4431,21 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: var(--w-bg-elev, #1f2335); border: 1px solid var(--w-border, #2a2e44);
   color: var(--w-text-primary, #e6edf3); border-radius: 5px; padding: 5px 8px; font-size: 12px;
 }
+/* Cloudflare token help — required scopes + link to create the token. */
+.mob-cf-help {
+  margin: 8px 0 4px; padding: 8px 10px; font-size: 12px; line-height: 1.5;
+  border: 1px solid var(--w-border, #2a2e44); border-radius: 6px;
+  background: var(--w-bg-elev, #1f2335); color: var(--w-text-secondary, #9aa5ce);
+}
+.mob-cf-title { color: var(--w-text-primary, #e6edf3); font-weight: 600; margin-bottom: 4px; }
+.mob-cf-perms { margin: 4px 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 2px; }
+.mob-cf-perms code {
+  background: var(--w-bg, #1a1b26); border: 1px solid var(--w-border, #2a2e44);
+  border-radius: 3px; padding: 0 4px; font-size: 11px; color: var(--w-accent, #7aa2f7);
+  direction: ltr; unicode-bidi: isolate;
+}
+.mob-cf-link { display: inline-block; margin-top: 6px; color: var(--w-accent, #7aa2f7); cursor: pointer; text-decoration: none; }
+.mob-cf-link:hover { text-decoration: underline; }
 .mob-status { margin: 8px 0 4px; font-size: 12px; }
 .mob-ok { color: var(--w-success, #9ece6a); }
 .mob-warn { color: var(--w-warning, #e0af68); }

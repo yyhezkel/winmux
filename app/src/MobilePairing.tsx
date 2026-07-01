@@ -18,9 +18,18 @@ interface PairStatus {
 interface IssuedPairing {
   host: string;
   port: number;
+  tls: boolean;
   device_id: string;
   token: string;
   expires_at: number; // unix seconds (used for the countdown)
+}
+
+// Human-facing URL: omit the default port (443 for https, 80 for http) since a
+// reverse proxy almost always terminates on the default — `:443` is just noise.
+function formatDisplayUrl(host: string, port: number, tls: boolean): string {
+  const scheme = tls ? "https" : "http";
+  const defaultPort = tls ? 443 : 80;
+  return port === defaultPort ? `${scheme}://${host}` : `${scheme}://${host}:${port}`;
 }
 
 // The v2 QR payload — tokens only, no host/port/tls. `version: 2` tells the
@@ -145,10 +154,9 @@ export function MobilePairing(p: { workspaceId?: string }) {
       qr.addData(JSON.stringify(qrData));
       qr.make();
       setQrSvg(qr.createSvgTag({ cellSize: 5, margin: 4 }));
-      // The out-of-band URL (443 is implied for https, shown only if custom).
-      setPairUrl(
-        issued.port === 443 ? `https://${issued.host}` : `https://${issued.host}:${issued.port}`,
-      );
+      // The out-of-band URL — default port hidden (see formatDisplayUrl). The
+      // Copy button uses this same clean string; redeem parses it either way.
+      setPairUrl(formatDisplayUrl(issued.host, issued.port, issued.tls));
       // 5-min countdown from the token's expiry (numeric unix seconds).
       const secs = Math.max(0, issued.expires_at - Math.floor(Date.now() / 1000));
       setCountdown(secs);

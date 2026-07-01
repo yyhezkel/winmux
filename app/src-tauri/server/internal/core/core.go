@@ -39,12 +39,29 @@ type AddrSink interface {
 
 // EventBus is the fan-out surface for multi-client attach (use-case 8a) and
 // notification broadcast (8b): many subscribers per session, every
-// server-origin frame delivered to all of them. To be implemented across
-// chat + workspace in Sprint 3.
+// server-origin frame delivered to all of them. Implemented by
+// internal/workspace in Sprint 3.
 type EventBus interface {
 	Publish(sessionID string, frame []byte)
 	Subscribe(sessionID string) (frames <-chan []byte, cancel func())
 }
+
+// NotificationSender delivers an out-of-band push (e.g. FCM) to a paired device
+// when a session needs input and no live WS subscriber is attached (use-case
+// 8b). Sprint 3 ships NoopSender; a real FCM sender is a later sprint
+// (PHASE-77-DESIGN §7).
+type NotificationSender interface {
+	// Notify pushes a minimal payload; the device fetches full detail via the
+	// API after the user taps. A nil/empty return means "delivered (or dropped
+	// silently)".
+	Notify(deviceID string, payload map[string]any) error
+}
+
+// NoopSender is the default NotificationSender — it drops pushes (no FCM yet).
+type NoopSender struct{}
+
+// Notify does nothing (returns nil).
+func (NoopSender) Notify(string, map[string]any) error { return nil }
 
 // ─── Files API (S2, PHASE-77-DESIGN §4.2) ────────────────────────────────────
 

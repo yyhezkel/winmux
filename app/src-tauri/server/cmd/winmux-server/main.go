@@ -22,6 +22,7 @@ import (
 	"winmux-server/internal/hooks"
 	"winmux-server/internal/insights"
 	"winmux-server/internal/logs"
+	"winmux-server/internal/workspace"
 )
 
 func main() {
@@ -117,8 +118,20 @@ func main() {
 		log.Printf("logs: API enabled")
 	}
 
+	// Workspace API (S3) — shared-state model (sessions + subscribers + pending)
+	// in its own workspace.db.
+	var wsSvc *workspace.Service
+	if wstore, werr := workspace.OpenStore(filepath.Join(*base, "workspace.db")); werr != nil {
+		log.Printf("workspace: open store failed, Workspace API disabled: %v", werr)
+	} else {
+		defer wstore.Close()
+		wmgr := workspace.NewManager(wstore, nil) // NoopSender until FCM lands
+		wsSvc = workspace.NewService(wmgr)
+		log.Printf("workspace: API enabled")
+	}
+
 	srv := api.NewServer(token, *port, api.Deps{
-		Insights: svc, Chat: chatAPI, Files: filesSvc, Logs: logsSvc,
+		Insights: svc, Chat: chatAPI, Files: filesSvc, Logs: logsSvc, Workspace: wsSvc,
 	})
 
 	go func() {

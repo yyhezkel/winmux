@@ -87,6 +87,7 @@
   "settings.addons.not_installed": "not installed",
   "settings.addons.install": "Install",
   "settings.addons.uninstall": "Remove",
+  "settings.addons.reinstall": "Reinstall",
   "settings.addons.update": "Update",
   "settings.addons.logs": "Logs",
   "settings.addons.refresh": "Refresh",

@@ -87,6 +87,7 @@
   "settings.addons.not_installed": "не установлено",
   "settings.addons.install": "Установить",
   "settings.addons.uninstall": "Удалить",
+  "settings.addons.reinstall": "Переустановить",
   "settings.addons.update": "Обновить",
   "settings.addons.logs": "Логи",
   "settings.addons.refresh": "Обновить список",

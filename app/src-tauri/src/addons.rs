@@ -154,16 +154,35 @@ async fn run_builtin(
         }
         routines::INSIGHTS_INSTALL => insights_install(handle, home).await,
         routines::INSIGHTS_UNINSTALL => {
-            exec(
+            // Stop the service (any launch shape), drop the unit file so a stale
+            // one can't relaunch it, remove the binary, then VERIFY the binary
+            // is gone — a leftover would make `detect` still report installed,
+            // hiding the Install button so the user can't reinstall.
+            let out = exec(
                 handle,
                 &format!(
                     "systemctl --user disable --now winmux-insights 2>/dev/null; \
+                     systemctl --user stop winmux-insights 2>/dev/null; \
+                     pkill -x winmux-insights 2>/dev/null; \
                      pkill -f 'winmux-insights serve' 2>/dev/null; \
-                     rm -f \"{home}/.winmux/bin/winmux-insights\"; echo removed"
+                     rm -f \"{home}/.winmux/bin/winmux-insights\"; \
+                     rm -f \"$HOME/.config/systemd/user/winmux-insights.service\"; \
+                     systemctl --user daemon-reload 2>/dev/null; \
+                     if [ -e \"{home}/.winmux/bin/winmux-insights\" ]; then echo STILL_PRESENT; else echo removed; fi"
                 ),
                 15,
             )
-            .await
+            .await;
+            if let Ok(o) = &out {
+                if o.contains("STILL_PRESENT") {
+                    crate::dlog("addon: insights uninstall — binary STILL PRESENT after rm");
+                    return Err(
+                        "could not remove the daemon binary on the server (still present after rm)"
+                            .into(),
+                    );
+                }
+            }
+            out
         }
         routines::NGINX_PROXY_DETECT => nginx_proxy_detect(handle).await,
         routines::NGINX_PROXY_INSTALL => Err(
@@ -576,6 +595,11 @@ async fn status_for(m: &AddonManifest, handle: &SshHandle<SshClient>, home: &str
         .as_deref()
         .map(|iv| iv != m.version)
         .unwrap_or(false);
+    crate::dlog(&format!(
+        "addon: detect id={} → installed={installed} version={}",
+        m.id,
+        installed_version.as_deref().unwrap_or("-")
+    ));
     AddonStatus {
         id: m.id.clone(),
         installed,
@@ -609,8 +633,10 @@ async fn run_lifecycle(
     state: &AppState,
     workspace_id: &str,
     id: &str,
+    op: &str,
     pick: impl Fn(&AddonManifest) -> AddonAction,
 ) -> Result<AddonStatus, String> {
+    crate::dlog(&format!("addon: {op} id={id} — begin"));
     let m = manifest_for(id).ok_or_else(|| format!("unknown add-on {id}"))?;
     let handle =
         pick_handle(state, workspace_id).ok_or("no active SSH session for this workspace")?;
@@ -624,11 +650,17 @@ async fn run_lifecycle(
     // community-add-ons work.)
     let action = pick(&m);
     if let Err(e) = run_action(&action, &handle, &home).await {
+        crate::dlog(&format!("addon: {op} id={id} — action FAILED: {e}"));
         let mut s = status_for(&m, &handle, &home).await;
         s.last_error = Some(e);
         return Ok(s);
     }
-    Ok(status_for(&m, &handle, &home).await)
+    let s = status_for(&m, &handle, &home).await;
+    crate::dlog(&format!(
+        "addon: {op} id={id} — done (installed={})",
+        s.installed
+    ));
+    Ok(s)
 }
 
 #[tauri::command]
@@ -637,7 +669,7 @@ pub(crate) async fn addon_install(
     workspace_id: String,
     id: String,
 ) -> Result<AddonStatus, String> {
-    run_lifecycle(&state, &workspace_id, &id, |m| m.install.clone()).await
+    run_lifecycle(&state, &workspace_id, &id, "install", |m| m.install.clone()).await
 }
 
 #[tauri::command]
@@ -646,7 +678,7 @@ pub(crate) async fn addon_uninstall(
     workspace_id: String,
     id: String,
 ) -> Result<AddonStatus, String> {
-    run_lifecycle(&state, &workspace_id, &id, |m| m.uninstall.clone()).await
+    run_lifecycle(&state, &workspace_id, &id, "uninstall", |m| m.uninstall.clone()).await
 }
 
 #[tauri::command]
@@ -655,7 +687,7 @@ pub(crate) async fn addon_update(
     workspace_id: String,
     id: String,
 ) -> Result<AddonStatus, String> {
-    run_lifecycle(&state, &workspace_id, &id, |m| m.update.clone()).await
+    run_lifecycle(&state, &workspace_id, &id, "update", |m| m.update.clone()).await
 }
 
 // ─── Phase 68.D: Monitor — pull from the insights daemon over the tunnel ──

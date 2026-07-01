@@ -87,6 +87,7 @@
   "settings.addons.not_installed": "غير مثبّت",
   "settings.addons.install": "تثبيت",
   "settings.addons.uninstall": "إزالة",
+  "settings.addons.reinstall": "إعادة التثبيت",
   "settings.addons.update": "تحديث",
   "settings.addons.logs": "السجلات",
   "settings.addons.refresh": "تحديث القائمة",

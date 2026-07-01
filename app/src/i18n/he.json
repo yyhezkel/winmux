@@ -87,6 +87,7 @@
   "settings.addons.not_installed": "לא מותקן",
   "settings.addons.install": "התקן",
   "settings.addons.uninstall": "הסר",
+  "settings.addons.reinstall": "התקן מחדש",
   "settings.addons.update": "עדכן",
   "settings.addons.logs": "לוגים",
   "settings.addons.refresh": "רענן",

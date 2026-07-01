@@ -92,6 +92,12 @@ export function AddonsTab(p: { workspaceId?: string }) {
                     </button>
                   </Show>
                   <Show when={r.installed}>
+                    {/* Reinstall is always available while installed — a safety
+                        net if detect wrongly reports installed, or to push a
+                        rebuilt daemon without the uninstall→install dance. */}
+                    <button disabled={busy() === r.id} onClick={() => void act("addon_install", r.id)}>
+                      {busy() === r.id ? "…" : t("settings.addons.reinstall")}
+                    </button>
                     <button disabled={busy() === r.id} onClick={() => void act("addon_uninstall", r.id)}>
                       {t("settings.addons.uninstall")}
                     </button>

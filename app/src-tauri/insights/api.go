@@ -32,7 +32,9 @@ func (s *server) run() error {
 	mux.HandleFunc("/docker", s.auth(s.handleDocker))
 	mux.HandleFunc("/docker/", s.auth(s.handleDockerAction)) // /docker/{id}/action
 	mux.HandleFunc("/processes", s.auth(s.handleProcesses))
-	mux.HandleFunc("/logs", s.auth(s.handleLogs)) // Phase 72.2
+	mux.HandleFunc("/logs", s.auth(s.handleLogs))          // Phase 72.2
+	mux.HandleFunc("/hygiene", s.auth(s.handleHygiene))    // Phase 76
+	mux.HandleFunc("/hygiene/kill", s.auth(s.handleHygieneKill))
 	if s.chat != nil {
 		s.chat.registerRoutes(mux) // Phase 69 — /api/claude/* + /ws/claude/*
 	}
@@ -156,6 +158,28 @@ func (s *server) handleProcesses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"processes": topProcesses(limit)})
+}
+
+// handleHygiene (Phase 76) reports duplicate port-watchers + orphan claude
+// sessions so the desktop Monitor can show + reap them.
+func (s *server) handleHygiene(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, collectHygiene())
+}
+
+// handleHygieneKill (Phase 76) SIGTERMs the requested PIDs — but only ones the
+// daemon itself currently classifies as killable (duplicate watcher / orphan
+// session), so the endpoint can't be used to kill an arbitrary process.
+func (s *server) handleHygieneKill(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Pids []int32 `json:"pids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	killed := killPids(body.Pids)
+	log.Printf("hygiene: kill requested=%d killed=%d", len(body.Pids), len(killed))
+	writeJSON(w, map[string]any{"killed": killed})
 }
 
 // handleLogs (Phase 72.2) returns the last `tail` lines of the daemon's own

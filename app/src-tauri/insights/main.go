@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const Version = "1.2.5"
+const Version = "1.2.6"
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {

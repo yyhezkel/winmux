@@ -2,6 +2,7 @@ import { createSignal, For, Show, createEffect, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
 import { MobilePairing } from "./MobilePairing";
+import { HygienePanel } from "./HygienePanel";
 import {
   clampToViewport,
   makeWindowControls,
@@ -91,7 +92,7 @@ export function InsightsWindow(p: Props) {
   const [loading, setLoading] = createSignal(false);
   const [auto, setAuto] = createSignal(false);
   // Phase 70.C: Metrics ↔ Mobile pairing tabs.
-  const [view, setView] = createSignal<"metrics" | "mobile" | "logs">("metrics");
+  const [view, setView] = createSignal<"metrics" | "mobile" | "logs" | "health">("metrics");
   // Phase 72.2: daemon log viewer.
   const [logLines, setLogLines] = createSignal<string[]>([]);
   const [logPath, setLogPath] = createSignal("");
@@ -246,6 +247,9 @@ export function InsightsWindow(p: Props) {
             <button class={view() === "logs" ? "active" : ""} onClick={() => setView("logs")}>
               📄 {t("insights.tab.logs")}
             </button>
+            <button class={view() === "health" ? "active" : ""} onClick={() => setView("health")}>
+              🧹 {t("insights.tab.health")}
+            </button>
           </div>
           <Show when={view() === "metrics"}>
             <label class="ins-auto">
@@ -263,6 +267,9 @@ export function InsightsWindow(p: Props) {
         <div class="fm-window-body insights-body">
           <Show when={view() === "mobile"}>
             <MobilePairing workspaceId={p.workspaceId} />
+          </Show>
+          <Show when={view() === "health"}>
+            <HygienePanel workspaceId={p.workspaceId} />
           </Show>
           <Show when={view() === "logs"}>
             <div class="ins-logs">

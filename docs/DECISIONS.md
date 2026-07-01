@@ -25,6 +25,12 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-07-01 — Phase 76 — Monitor "Cleanup" tab: reap duplicate port-watchers + flag orphan sessions (daemon 1.2.6)
+The `port-watch reap-on-spawn` fix (previous commit) only cleans a workspace when it next reconnects; Yossi still had 4 duplicate watchers for a workspace that hadn't reconnected in 3 days (296h+308h CPU), plus a 9-day orphan `claude` fork session. He asked for the Monitor to detect + kill these.
+- **Daemon (1.2.5→1.2.6):** `hygiene.go` walks the process table (gopsutil) → `GET /hygiene` returns port-watchers (grouped, all-but-newest-per-workspace flagged `duplicate`) + orphan claude sessions (heuristic: `tty=="" && has --session-id/--resume && etime>24h` — flagged, never auto-killed, per Yossi). `POST /hygiene/kill {pids}` SIGTERMs via gopsutil, but only PIDs the daemon itself currently classifies as killable (safety — can't kill an arbitrary PID). `markDuplicates`/`argAfter` unit-tested.
+- **Desktop:** `insights_hygiene_kill` command (POST, pid-list validated). New Monitor 🧹 **Cleanup** tab (`HygienePanel.tsx`): lists watchers (dups highlighted) with "Kill duplicates", and orphan sessions with a per-session Kill + a "review first" hint. i18n en/he/ar/ru + CSS.
+- Together with the reap-on-spawn fix this closes the port-watch CPU leak from both ends (prevention + on-demand cleanup). cargo + go tests green; embedded x64+arm64 rebuilt @ 1.2.6. On `72-docker-group`, not pushed.
+
 ### 2026-07-01 — Phase 75 — debug.log hygiene (size cap + age retention + Clear button)
 The client `debug.log` had NO rotation — it grew unbounded (the v0.3.1 pipe-leak made ~936k lines). Yossi asked for convenient logs that auto-delete after X days so they can't pile up.
 - `winmux_core::dlog` now rotates `debug.log` → `debug.log.1` once it passes **5 MB** (bounded to ~10 MB total). `prune_logs(retention_days)` runs at `setup()`: deletes a stale `debug.log.1` and truncates a `debug.log` untouched for > retention (app idle a while). `clear_debug_log()` for the manual button. `0` = keep forever.

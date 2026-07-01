@@ -5616,6 +5616,7 @@ pub fn run() {
             // Phase 68.D: Monitor — pull from the insights daemon.
             addons::insights_fetch,
             addons::insights_docker_action,
+            addons::insights_hygiene_kill,
             // Phase 70: mobile pairing (nginx + Cloudflare + Let's Encrypt).
             pairing::mobile_pairing_init,
             pairing::mobile_pairing_status,

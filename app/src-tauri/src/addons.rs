@@ -827,6 +827,38 @@ pub(crate) async fn insights_docker_action(
     exec(&handle, &cmd, 12).await
 }
 
+/// Phase 76: ask the daemon to SIGTERM the given PIDs (duplicate port-watchers
+/// / orphan claude sessions). The daemon only kills PIDs it itself classifies
+/// as killable, so a bad PID list is a safe no-op. `pids` are validated as
+/// positive integers before they touch the remote command (Rule #3).
+#[tauri::command]
+pub(crate) async fn insights_hygiene_kill(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    pids: Vec<i32>,
+) -> Result<String, String> {
+    if pids.is_empty() || pids.len() > 200 || pids.iter().any(|&p| p <= 0) {
+        return Err("invalid pid list".into());
+    }
+    let list = pids
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let handle = pick_handle(&state, &workspace_id)
+        .ok_or("no active SSH session for this workspace")?;
+    let home = remote_home(&handle).await;
+    let cmd = format!(
+        "curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
+         -H \"Authorization: Bearer $(cat '{home}/.winmux/insights/token' 2>/dev/null)\" \
+         -d '{{\"pids\":[{list}]}}' \
+         'http://127.0.0.1:7879/hygiene/kill'"
+    );
+    let out = exec(&handle, &cmd, 12).await?;
+    crate::dlog_tag("MONITOR", &format!("hygiene kill pids={} → {}", pids.len(), out.trim()));
+    Ok(out)
+}
+
 #[tauri::command]
 pub(crate) async fn addon_logs(
     state: State<'_, AppState>,

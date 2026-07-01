@@ -18,6 +18,7 @@ import (
 	"winmux-server/internal/chat"
 	"winmux-server/internal/config"
 	"winmux-server/internal/core"
+	"winmux-server/internal/files"
 	"winmux-server/internal/hooks"
 	"winmux-server/internal/insights"
 )
@@ -43,6 +44,7 @@ func main() {
 	port := fs.Int("port", 7879, "localhost TCP port for the API")
 	base := fs.String("dir", defBase, "data directory (db, token, log)")
 	interval := fs.Int("interval", 5, "sample interval, seconds")
+	filesRoot := fs.String("files-root", home, "sandbox root for the Files API (default $HOME)")
 	args := os.Args[1:]
 	if len(args) > 0 && args[0] == "serve" {
 		args = args[1:]
@@ -94,7 +96,16 @@ func main() {
 		log.Printf("chat: Claude chat subsystem enabled")
 	}
 
-	srv := api.NewServer(token, *port, svc, chatAPI)
+	// Files API (S2) — sandboxed to --files-root ($HOME by default).
+	var filesSvc *files.Service
+	if fp, ferr := files.NewLocalFiles(*filesRoot, 0); ferr != nil {
+		log.Printf("files: init failed, Files API disabled: %v", ferr)
+	} else {
+		filesSvc = files.NewService(fp)
+		log.Printf("files: API enabled (root=%s)", fp.Root())
+	}
+
+	srv := api.NewServer(token, *port, api.Deps{Insights: svc, Chat: chatAPI, Files: filesSvc})
 
 	go func() {
 		if err := srv.Run(); err != nil {

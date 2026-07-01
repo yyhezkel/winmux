@@ -26,7 +26,7 @@ func realService(t *testing.T) *insights.Service {
 }
 
 func TestCurrentRoundTripLegacyAndV2(t *testing.T) {
-	h := NewServer("secret", 0, realService(t), nil).Handler()
+	h := NewServer("secret", 0, Deps{Insights: realService(t)}).Handler()
 
 	for _, path := range []string{"/current", "/api/v2/insights/current"} {
 		req := httptest.NewRequest("GET", path, nil)

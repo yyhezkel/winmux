@@ -5,7 +5,10 @@
 // the old daemon into one flat `package main` (see PHASE-77-DESIGN §15).
 package core
 
-import "net"
+import (
+	"io"
+	"net"
+)
 
 // Version is the winmux-server release version. Major 2 marks the API-stability
 // guarantee introduced in Phase 77. One constant, shared by every package + cmd.
@@ -41,4 +44,37 @@ type AddrSink interface {
 type EventBus interface {
 	Publish(sessionID string, frame []byte)
 	Subscribe(sessionID string) (frames <-chan []byte, cancel func())
+}
+
+// ─── Files API (S2, PHASE-77-DESIGN §4.2) ────────────────────────────────────
+
+// FileEntry is one item in a directory listing.
+type FileEntry struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"` // "dir" | "file"
+	Size     int64  `json:"size"`
+	Modified int64  `json:"modified"` // unix seconds
+}
+
+// FilesProvider is the sandboxed filesystem surface behind /api/v2/files/*.
+// Every path is interpreted relative to a provider-owned root and MUST stay
+// inside it (traversal + symlink-escape rejected) — see internal/files.
+// Abstracting it as an interface keeps the HTTP layer testable with a mock and
+// lets a future provider (e.g. an object store) drop in.
+type FilesProvider interface {
+	// List returns the resolved cwd and the entries at path (depth 1 = the dir
+	// itself; depth 2 = one level of children flattened, name carrying the
+	// relative sub-path).
+	List(path string, depth int) (cwd string, entries []FileEntry, err error)
+	// Read returns up to maxBytes of a file; truncated is true if the file was
+	// larger than maxBytes.
+	Read(path string, maxBytes int64) (content []byte, truncated bool, err error)
+	// Write creates/overwrites a file and returns its sha256 (hex) + size.
+	Write(path string, data []byte) (sha256Hex string, size int64, err error)
+	// Delete removes a file (not a non-empty directory).
+	Delete(path string) error
+	// Open streams a file for download; caller closes the ReadCloser.
+	Open(path string) (rc io.ReadCloser, size int64, err error)
+	// Root is the absolute sandbox root (for diagnostics).
+	Root() string
 }

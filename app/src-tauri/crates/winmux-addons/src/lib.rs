@@ -132,7 +132,7 @@ pub const NGINX_PROXY_VERSION: &str = "1.0.0";
 /// to decide if an update is available. If they drift, the desktop silently
 /// reports "up to date" and never offers the update (the 1.0.0→1.0.1 drift
 /// that left servers stuck on the old single-path Docker discovery).
-pub const INSIGHTS_VERSION: &str = "1.2.4";
+pub const INSIGHTS_VERSION: &str = "1.2.5";
 
 /// The add-ons winmux knows about, in dependency-friendly order
 /// (winmux-cli first — everything else needs the remote CLI present).

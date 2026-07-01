@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const Version = "1.2.4"
+const Version = "1.2.5"
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
@@ -71,6 +71,7 @@ func main() {
 	sm := newSampler()
 	stop := make(chan struct{})
 	go runSampler(store, sm, time.Duration(*interval)*time.Second, stop)
+	go logJanitor(logPath, home, stop) // Phase 75: bound all server-side logs
 
 	srv := newServer(store, sm, token, *port, logPath)
 
@@ -102,10 +103,71 @@ func main() {
 }
 
 // rotateIfBig renames the log to .1 when it exceeds max bytes (cheap, no
-// external rotation dep).
+// external rotation dep). Used at boot, before the log fd is opened.
 func rotateIfBig(path string, max int64) {
 	if fi, err := os.Stat(path); err == nil && fi.Size() > max {
 		_ = os.Rename(path, path+".1")
+	}
+}
+
+// rotateCopyTruncate bounds a log WITHOUT breaking an open append fd: it copies
+// the current contents to <path>.1 then truncates the original in place. Safe
+// for a file the daemon (or the hook CLI) holds open with O_APPEND — unlike a
+// rename, which would leave writers appending to the rotated-away inode.
+func rotateCopyTruncate(path string, max int64) {
+	fi, err := os.Stat(path)
+	if err != nil || fi.Size() <= max {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(path+".1", data, 0o644); err != nil {
+		return
+	}
+	_ = os.Truncate(path, 0)
+}
+
+// pruneIfOld deletes a log file untouched for longer than maxAge.
+func pruneIfOld(path string, maxAge time.Duration) {
+	if fi, err := os.Stat(path); err == nil && time.Since(fi.ModTime()) > maxAge {
+		_ = os.Remove(path)
+	}
+}
+
+// logJanitor keeps EVERY winmux server-side log bounded so they can't
+// accumulate — the server-side mirror of the desktop's debug.log hygiene
+// (Phase 75). The daemon is the natural janitor: it's the one long-running
+// process, and every log lives under the same user's ~/.winmux tree. Runs at
+// boot then every 30 min: size-caps insights.log (its own), the hook CLI's
+// hook-debug.log, and mobile-install.log via copy-truncate, and age-prunes any
+// that have gone stale.
+func logJanitor(insightsLog, home string, stop <-chan struct{}) {
+	const sizeCap = 1 << 20            // 1 MB
+	const maxAge = 7 * 24 * time.Hour // delete stale logs after a week
+	hookLog := filepath.Join(home, ".winmux", "hook-debug.log")
+	installLog := filepath.Join(home, ".winmux", "logs", "mobile-install.log")
+	sweep := func() {
+		rotateCopyTruncate(insightsLog, sizeCap)
+		rotateCopyTruncate(hookLog, sizeCap)
+		rotateCopyTruncate(installLog, 512<<10)
+		for _, p := range []string{
+			insightsLog + ".1", hookLog, hookLog + ".1", installLog, installLog + ".1",
+		} {
+			pruneIfOld(p, maxAge)
+		}
+	}
+	sweep()
+	t := time.NewTicker(30 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			sweep()
+		}
 	}
 }
 

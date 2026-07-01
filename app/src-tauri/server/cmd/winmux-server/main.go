@@ -21,6 +21,7 @@ import (
 	"winmux-server/internal/files"
 	"winmux-server/internal/hooks"
 	"winmux-server/internal/insights"
+	"winmux-server/internal/logs"
 )
 
 func main() {
@@ -105,7 +106,20 @@ func main() {
 		log.Printf("files: API enabled (root=%s)", fp.Root())
 	}
 
-	srv := api.NewServer(token, *port, api.Deps{Insights: svc, Chat: chatAPI, Files: filesSvc})
+	// Logs API (S2) — per-client log tree under <dir>/logs, plus the "server"
+	// pseudo-client that surfaces this daemon's own log.
+	var logsSvc *logs.Service
+	if lstore, lerr := logs.NewStore(*base, logPath); lerr != nil {
+		log.Printf("logs: init failed, Logs API disabled: %v", lerr)
+	} else {
+		logsSvc = logs.NewService(lstore)
+		go lstore.RunJanitor(stop)
+		log.Printf("logs: API enabled")
+	}
+
+	srv := api.NewServer(token, *port, api.Deps{
+		Insights: svc, Chat: chatAPI, Files: filesSvc, Logs: logsSvc,
+	})
 
 	go func() {
 		if err := srv.Run(); err != nil {

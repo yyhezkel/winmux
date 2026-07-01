@@ -14,14 +14,16 @@ import (
 	"winmux-server/internal/core"
 	"winmux-server/internal/files"
 	"winmux-server/internal/insights"
+	"winmux-server/internal/logs"
 )
 
 // Deps is the set of subsystems the front door mounts. Any field may be nil to
-// disable that subsystem. Grows as subsystems migrate (logs in S2.b).
+// disable that subsystem.
 type Deps struct {
 	Insights *insights.Service
 	Chat     *chat.ChatAPI  // nil if chat disabled
 	Files    *files.Service // nil if files disabled
+	Logs     *logs.Service  // nil if logs disabled
 }
 
 // Server wires the subsystems into one HTTP listener.
@@ -52,6 +54,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.deps.Files != nil {
 		s.deps.Files.RegisterRoutes(mux, authMW)
+	}
+	if s.deps.Logs != nil {
+		s.deps.Logs.RegisterRoutes(mux, authMW)
 	}
 	if s.deps.Chat != nil {
 		// Chat brings its own auth (device tokens + shared bearer) and registers

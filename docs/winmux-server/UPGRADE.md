@@ -10,11 +10,15 @@ data directory does not move.
    `winmux-insights` symlink at it (so version probes keep working).
 2. Disables + removes the old `winmux-insights` systemd unit; installs and starts
    `winmux-server` (see [DEPLOYMENT.md](DEPLOYMENT.md)).
-3. Leaves the data dir **`~/.winmux/insights/`** exactly where it is — `token`,
-   `metrics.db`, `chat.db`, `paired_devices` (in `chat.db`), `workspace.db`, and
-   `logs/` all carry over untouched.
+3. On its first boot the 2.0 daemon **migrates the data dir
+   `~/.winmux/insights/` → `~/.winmux/server/`** — an atomic whole-directory
+   move (both under `~/.winmux`, same filesystem). `token`, `metrics.db`,
+   `chat.db`, `paired_devices` (in `chat.db`), `workspace.db`, and `logs/` all
+   carry over. The migration is idempotent + guarded: it runs only when
+   `insights/` has a `token` and `server/` doesn't yet, so a re-run or a fresh
+   install is a no-op. An explicit `--dir` opts out entirely.
 
-No manual migration is required.
+No manual steps are required.
 
 ## Behavioural changes to know
 
@@ -30,14 +34,13 @@ No manual migration is required.
 
 ## Rollback
 
-The 2.0 binary reads the same data dir as 1.x, so a rollback is just
-re-installing the previous version (Settings → Updates → install an earlier
-release) — no data conversion happened, so nothing needs undoing. Keep a copy of
-the old `winmux-insights` binary if you want a manual fallback:
-`cp ~/.winmux/bin/winmux-server ~/.winmux/bin/winmux-server.bak` before upgrading.
+The 2.0 daemon moved the data dir to `~/.winmux/server/`. To roll back to a 1.x
+release (which reads `~/.winmux/insights/`), move the data back first:
 
-## Data-directory name
+```sh
+mv ~/.winmux/server ~/.winmux/insights   # then install the older winmux release
+```
 
-The data dir is still called `insights/` (not `server/`). Renaming it is a
-cosmetic, deployment-coupled change deferred intentionally — see DECISIONS.md.
-Nothing functional depends on the name.
+A 1.x binary started without this move would create a fresh, empty
+`~/.winmux/insights/` (losing the paired devices + token), so do the move before
+downgrading. If you never downgrade, nothing is needed — 2.0 owns `server/`.

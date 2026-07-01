@@ -494,14 +494,15 @@ async fn insights_install(handle: &SshHandle<SshClient>, home: &str) -> Result<S
     };
     let _ = exec(
         handle,
-        &format!("mkdir -p \"{home}/.winmux/bin\" \"{home}/.winmux/insights\""),
+        &format!("mkdir -p \"{home}/.winmux/bin\" \"{home}/.winmux/server\""),
         8,
     )
     .await;
     // Phase 77: install as `winmux-server`; keep a `winmux-insights` symlink so
-    // anything referencing the old name still resolves. The data dir stays
-    // ~/.winmux/insights (the binary's default) so an in-place 1.x→2.x upgrade
-    // preserves the token + chat.db + paired_devices (paired phones keep working).
+    // anything referencing the old name still resolves. Data dir is
+    // ~/.winmux/server (the 2.0 binary's default); on an in-place 1.x→2.x upgrade
+    // the daemon migrates ~/.winmux/insights → ~/.winmux/server on first boot,
+    // preserving the token + chat.db + paired_devices (paired phones keep working).
     let final_path = format!("{home}/.winmux/bin/winmux-server");
     let legacy_link = format!("{home}/.winmux/bin/winmux-insights");
     let tmp = format!("{final_path}.tmp");
@@ -798,7 +799,7 @@ pub(crate) async fn insights_fetch(
     // clean, and dlog the outcome (Rule #1: status + length only, never body).
     let cmd = format!(
         "curl -s --max-time 6 \
-         -H \"Authorization: Bearer $(cat '{home}/.winmux/insights/token' 2>/dev/null)\" \
+         -H \"Authorization: Bearer $(cat '{home}/.winmux/server/token' 2>/dev/null)\" \
          -w '\\nWINMUX_HTTP=%{{http_code}}' \
          'http://127.0.0.1:7879{path}' 2>/dev/null; \
          command -v curl >/dev/null 2>&1 || echo 'WINMUX_HTTP=nocurl'"
@@ -845,7 +846,7 @@ pub(crate) async fn insights_docker_action(
     let home = remote_home(&handle).await;
     let cmd = format!(
         "curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
-         -H \"Authorization: Bearer $(cat '{home}/.winmux/insights/token' 2>/dev/null)\" \
+         -H \"Authorization: Bearer $(cat '{home}/.winmux/server/token' 2>/dev/null)\" \
          -d '{{\"cmd\":\"{action}\"}}' \
          'http://127.0.0.1:7879/docker/{container_id}/action'"
     );
@@ -875,7 +876,7 @@ pub(crate) async fn insights_hygiene_kill(
     let home = remote_home(&handle).await;
     let cmd = format!(
         "curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
-         -H \"Authorization: Bearer $(cat '{home}/.winmux/insights/token' 2>/dev/null)\" \
+         -H \"Authorization: Bearer $(cat '{home}/.winmux/server/token' 2>/dev/null)\" \
          -d '{{\"pids\":[{list}]}}' \
          'http://127.0.0.1:7879/hygiene/kill'"
     );
@@ -894,7 +895,7 @@ pub(crate) async fn addon_logs(
         .ok_or("no active SSH session for this workspace")?;
     let home = remote_home(&handle).await;
     let log = match id.as_str() {
-        ids::INSIGHTS => format!("{home}/.winmux/insights/insights.log"),
+        ids::INSIGHTS => format!("{home}/.winmux/server/insights.log"),
         ids::HOOKS => format!("{home}/.winmux/hook-debug.log"),
         ids::NGINX_PROXY => format!("{home}/.winmux/logs/mobile-install.log"),
         _ => return Ok(String::new()),

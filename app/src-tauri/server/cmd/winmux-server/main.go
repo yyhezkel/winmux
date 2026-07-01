@@ -52,10 +52,11 @@ func main() {
 	}
 
 	home, _ := os.UserHomeDir()
-	// Backward compat: still read the existing ~/.winmux/insights data dir
-	// (token, metrics.db) so an in-place 1.x→2.x upgrade preserves state. The
-	// rename to ~/.winmux/server is an S1.d migration step.
-	defBase := filepath.Join(home, ".winmux", "insights")
+	// Phase 77 S5: the data dir is ~/.winmux/server. A 1.x install kept it at
+	// ~/.winmux/insights; the daemon migrates it in place on first boot (below),
+	// preserving token + chat.db (paired devices) + workspace/metrics DBs + logs.
+	defBase := filepath.Join(home, ".winmux", "server")
+	legacyBase := filepath.Join(home, ".winmux", "insights")
 
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 7879, "localhost TCP port for the API")
@@ -67,6 +68,15 @@ func main() {
 		args = args[1:]
 	}
 	_ = fs.Parse(args)
+
+	// Migrate only when using the default dir (an explicit --dir opts out).
+	if *base == defBase {
+		if migrated, err := config.MigrateDataDir(legacyBase, defBase); err != nil {
+			log.Printf("data-dir migration %s → %s failed: %v (continuing)", legacyBase, defBase, err)
+		} else if migrated {
+			log.Printf("migrated data dir %s → %s", legacyBase, defBase)
+		}
+	}
 
 	if err := os.MkdirAll(*base, 0o755); err != nil {
 		log.Fatalf("mkdir %s: %v", *base, err)

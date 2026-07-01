@@ -538,19 +538,30 @@ to be the thing that doc pins against.
   symlinks `winmux-insights → winmux-server` so any old reference resolves.
 - **systemd:** installs `winmux-server.service`; disables + removes the old
   `winmux-insights.service`.
-- **Data dir stays `~/.winmux/insights`** for S1 (the binary's default) so an
+- **Data dir was `~/.winmux/insights` for S1** (the binary's default) so an
   in-place 1.x→2.x upgrade preserves the token + metrics.db + chat.db +
-  paired_devices — **paired phones keep working**. The rename to
-  `~/.winmux/server` is deferred to **S5** (data-move on first 2.x boot) to keep
-  S1 low-risk. `INSIGHTS_VERSION = "2.0.0"` (lockstep with `core.Version`).
+  paired_devices. `INSIGHTS_VERSION = "2.0.0"` (lockstep with `core.Version`).
 - **Detect** tries `winmux-server --version`, falling back to the
   `winmux-insights` name (symlink / pre-2.x install) during the upgrade window.
   **Uninstall** tears down both names (unit, binary, symlink).
-- **Superseded, delete after review:** the old `app/src-tauri/insights/` Go
-  source + `resources/winmux-insights-linux-*` binaries are no longer referenced
-  by the desktop (addons.rs now embeds `winmux-server-linux-*`). Left in place
-  on-branch so the S1 diff stays a pure add + a small addons.rs delta; removed as
-  a cleanup once Yossi has reviewed the module split.
+
+### 15.1a S5 data-dir rename — DONE (Yossi approved 2026-07-02)
+- **Data dir is now `~/.winmux/server`** (the 2.0 binary's default). On first
+  boot the daemon **migrates `~/.winmux/insights` → `~/.winmux/server`**
+  (`config.MigrateDataDir`, `cmd/winmux-server/main.go`): atomic whole-dir
+  rename (same filesystem), with a per-entry move fallback for the case where
+  the installer pre-created an empty `server/`. **Guarded + idempotent** — runs
+  only when `insights/token` exists and `server/token` doesn't; an explicit
+  `--dir` opts out. Preserves token + chat.db (paired devices) + workspace.db +
+  metrics.db + logs. Tested (`config/migrate_test.go`: whole-dir, pre-created
+  empty, already-initialized skip, fresh-install no-op).
+- **Installer updated:** `addons.rs` mkdir + token-read + log-path now use
+  `~/.winmux/server`; systemd `ExecStart=winmux-server serve` (no `--dir`) picks
+  up the new default; the daemon does the data move. **Rollback:** move
+  `server/`→`insights/` before downgrading to 1.x (see `UPGRADE.md`).
+- **Superseded artifacts DELETED (S5):** the old `app/src-tauri/insights/` Go
+  module + `resources/winmux-insights-linux-*` binaries + their dead
+  `tauri.conf.json` resource entries were removed once confirmed unreferenced.
 
 ## 16. S3 — Workspace shared state (implemented)
 State model (`internal/workspace`): **Workspace** (server UUID `ws_…`) → **Session**

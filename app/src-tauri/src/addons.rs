@@ -684,12 +684,39 @@ pub(crate) async fn insights_fetch(
     let handle = pick_handle(&state, &workspace_id)
         .ok_or("no active SSH session for this workspace")?;
     let home = remote_home(&handle).await;
+    // Phase 72.2: append the HTTP status via curl -w so we can tell "daemon
+    // unreachable" (000 / no curl) apart from "auth failed" (401) apart from a
+    // real body (200). We strip the marker before returning so the JSON stays
+    // clean, and dlog the outcome (Rule #1: status + length only, never body).
     let cmd = format!(
         "curl -s --max-time 6 \
          -H \"Authorization: Bearer $(cat '{home}/.winmux/insights/token' 2>/dev/null)\" \
-         'http://127.0.0.1:7879{path}'"
+         -w '\\nWINMUX_HTTP=%{{http_code}}' \
+         'http://127.0.0.1:7879{path}' 2>/dev/null; \
+         command -v curl >/dev/null 2>&1 || echo 'WINMUX_HTTP=nocurl'"
     );
-    exec(&handle, &cmd, 10).await
+    let raw = exec(&handle, &cmd, 10).await?;
+    let status = raw
+        .rsplit("WINMUX_HTTP=")
+        .next()
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    // Body = everything before the last marker line.
+    let body = match raw.rfind("WINMUX_HTTP=") {
+        Some(i) => raw[..i].trim_end_matches('\n').to_string(),
+        None => raw.clone(),
+    };
+    crate::dlog(&format!(
+        "insights_fetch: path={path} http={status} body_len={}",
+        body.len()
+    ));
+    match status.as_str() {
+        "200" => Ok(body),
+        "nocurl" => Err("curl is not installed on this server (needed to reach the daemon)".into()),
+        "401" | "403" => Err("insights daemon rejected the token — reinstall the add-on".into()),
+        "000" | "" => Err("insights daemon not reachable on 127.0.0.1:7879 (is it running?)".into()),
+        other => Err(format!("insights daemon returned HTTP {other}")),
+    }
 }
 
 #[tauri::command]

@@ -91,7 +91,52 @@ export function InsightsWindow(p: Props) {
   const [loading, setLoading] = createSignal(false);
   const [auto, setAuto] = createSignal(false);
   // Phase 70.C: Metrics ↔ Mobile pairing tabs.
-  const [view, setView] = createSignal<"metrics" | "mobile">("metrics");
+  const [view, setView] = createSignal<"metrics" | "mobile" | "logs">("metrics");
+  // Phase 72.2: daemon log viewer.
+  const [logLines, setLogLines] = createSignal<string[]>([]);
+  const [logPath, setLogPath] = createSignal("");
+  const [logLoading, setLogLoading] = createSignal(false);
+  const [logErr, setLogErr] = createSignal<string | null>(null);
+  const [logFilter, setLogFilter] = createSignal("");
+
+  const refreshLogs = async () => {
+    if (!p.workspaceId) return;
+    setLogLoading(true);
+    setLogErr(null);
+    try {
+      const r = await invoke<string>("insights_fetch", {
+        workspaceId: p.workspaceId,
+        path: "/logs?tail=400",
+      });
+      const parsed = JSON.parse(r) as { path: string; lines: string[] };
+      setLogLines(parsed.lines ?? []);
+      setLogPath(parsed.path ?? "");
+    } catch (e) {
+      setLogErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setLogLoading(false);
+    }
+  };
+
+  const visibleLogs = () => {
+    const f = logFilter().trim().toLowerCase();
+    return f ? logLines().filter((l) => l.toLowerCase().includes(f)) : logLines();
+  };
+
+  const downloadLogs = () => {
+    const blob = new Blob([logLines().join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "insights.log";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Load logs when the Logs tab is opened.
+  createEffect(() => {
+    if (view() === "logs" && p.workspaceId) void refreshLogs();
+  });
 
   const refresh = async () => {
     if (!p.workspaceId) return;
@@ -198,6 +243,9 @@ export function InsightsWindow(p: Props) {
             <button class={view() === "mobile" ? "active" : ""} onClick={() => setView("mobile")}>
               📱 {t("insights.tab.mobile")}
             </button>
+            <button class={view() === "logs" ? "active" : ""} onClick={() => setView("logs")}>
+              📄 {t("insights.tab.logs")}
+            </button>
           </div>
           <Show when={view() === "metrics"}>
             <label class="ins-auto">
@@ -215,6 +263,36 @@ export function InsightsWindow(p: Props) {
         <div class="fm-window-body insights-body">
           <Show when={view() === "mobile"}>
             <MobilePairing workspaceId={p.workspaceId} />
+          </Show>
+          <Show when={view() === "logs"}>
+            <div class="ins-logs">
+              <div class="ins-logs-bar">
+                <input
+                  type="text"
+                  placeholder={t("insights.logs.filter")}
+                  value={logFilter()}
+                  onInput={(e) => setLogFilter(e.currentTarget.value)}
+                />
+                <button onClick={() => void refreshLogs()} disabled={logLoading()}>
+                  {logLoading() ? "…" : "⟳"}
+                </button>
+                <button onClick={downloadLogs} disabled={logLines().length === 0}>
+                  {t("insights.logs.download")}
+                </button>
+              </div>
+              <Show when={logPath()}>
+                <div class="settings-hint"><code>{logPath()}</code></div>
+              </Show>
+              <Show when={logErr()}>
+                <div class="ins-docker-err"><div class="ins-docker-err-msg">✗ {logErr()}</div></div>
+              </Show>
+              <Show
+                when={visibleLogs().length > 0}
+                fallback={<div class="settings-hint">{logLoading() ? t("insights.logs.loading") : t("insights.logs.empty")}</div>}
+              >
+                <pre class="ins-logs-view">{visibleLogs().join("\n")}</pre>
+              </Show>
+            </div>
           </Show>
           <Show when={view() === "metrics"}>
           <Show when={err()}>

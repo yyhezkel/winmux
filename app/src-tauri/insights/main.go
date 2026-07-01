@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const Version = "1.2.2"
+const Version = "1.2.3"
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
@@ -72,7 +72,7 @@ func main() {
 	stop := make(chan struct{})
 	go runSampler(store, sm, time.Duration(*interval)*time.Second, stop)
 
-	srv := newServer(store, sm, token, *port)
+	srv := newServer(store, sm, token, *port, logPath)
 
 	// Phase 69 — mobile Claude chat subsystem (separate chat.db). On any
 	// setup error we log and continue serving metrics; chat just stays off.

@@ -12,15 +12,16 @@ import (
 )
 
 type server struct {
-	store *Store
-	sm    *Sampler
-	token string
-	port  int
-	chat  *chatAPI // Phase 69 — mobile Claude chat (nil if disabled)
+	store   *Store
+	sm      *Sampler
+	token   string
+	port    int
+	logPath string   // Phase 72.2 — served by GET /logs
+	chat    *chatAPI // Phase 69 — mobile Claude chat (nil if disabled)
 }
 
-func newServer(store *Store, sm *Sampler, token string, port int) *server {
-	return &server{store: store, sm: sm, token: token, port: port}
+func newServer(store *Store, sm *Sampler, token string, port int, logPath string) *server {
+	return &server{store: store, sm: sm, token: token, port: port, logPath: logPath}
 }
 
 func (s *server) run() error {
@@ -31,6 +32,7 @@ func (s *server) run() error {
 	mux.HandleFunc("/docker", s.auth(s.handleDocker))
 	mux.HandleFunc("/docker/", s.auth(s.handleDockerAction)) // /docker/{id}/action
 	mux.HandleFunc("/processes", s.auth(s.handleProcesses))
+	mux.HandleFunc("/logs", s.auth(s.handleLogs)) // Phase 72.2
 	if s.chat != nil {
 		s.chat.registerRoutes(mux) // Phase 69 — /api/claude/* + /ws/claude/*
 	}
@@ -151,4 +153,20 @@ func (s *server) handleProcesses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"processes": topProcesses(limit)})
+}
+
+// handleLogs (Phase 72.2) returns the last `tail` lines of the daemon's own
+// insights.log so the desktop Monitor can show it without an SSH round-trip.
+func (s *server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	tail := 200
+	if v := r.URL.Query().Get("tail"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			tail = n
+		}
+	}
+	if tail > 2000 {
+		tail = 2000
+	}
+	lines := tailFile(s.logPath, tail)
+	writeJSON(w, map[string]any{"path": s.logPath, "lines": lines})
 }

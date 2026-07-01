@@ -9,20 +9,24 @@ import (
 	"net/http"
 )
 
-// Service serves the workspace REST API over a Manager.
+// Service serves the workspace REST + WS API over a Manager.
 type Service struct {
-	mgr *Manager
+	mgr   *Manager
+	token string // bearer token (also accepted via ?token= on the WS route)
 }
 
-// NewService wires the HTTP layer to a Manager.
-func NewService(mgr *Manager) *Service { return &Service{mgr: mgr} }
+// NewService wires the HTTP layer to a Manager. token gates the subscribe WS
+// (which can't always use the header); "" means open (tests).
+func NewService(mgr *Manager, token string) *Service { return &Service{mgr: mgr, token: token} }
 
-// RegisterRoutes mounts /api/v2/workspace/* behind auth.
+// RegisterRoutes mounts /api/v2/workspace/* — REST behind the shared auth
+// middleware, and the subscribe WebSocket with its own header-or-query auth.
 func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.HandlerFunc) http.HandlerFunc) {
 	mux.HandleFunc("GET /api/v2/workspace/list", auth(s.handleList))
 	mux.HandleFunc("POST /api/v2/workspace/create", auth(s.handleCreate))
 	mux.HandleFunc("GET /api/v2/workspace/{id}/sessions", auth(s.handleListSessions))
 	mux.HandleFunc("POST /api/v2/workspace/{id}/sessions", auth(s.handleCreateSession))
+	mux.HandleFunc("GET /api/v2/workspace/{id}/session/{sid}/subscribe", s.handleSubscribe)
 	mux.HandleFunc("GET /api/v2/workspace/{id}/session/{sid}", auth(s.handleGetSession))
 	mux.HandleFunc("GET /api/v2/workspace/{id}", auth(s.handleGet))
 	mux.HandleFunc("DELETE /api/v2/workspace/{id}", auth(s.handleDelete))

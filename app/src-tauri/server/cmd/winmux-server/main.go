@@ -126,7 +126,7 @@ func main() {
 	} else {
 		defer wstore.Close()
 		wmgr := workspace.NewManager(wstore, nil) // NoopSender until FCM lands
-		wsSvc = workspace.NewService(wmgr)
+		wsSvc = workspace.NewService(wmgr, token)
 		log.Printf("workspace: API enabled")
 	}
 

@@ -527,11 +527,18 @@ State model (`internal/workspace`): **Workspace** (server UUID `ws_…`) → **S
 - **FCM (§7, deferred):** `core.NotificationSender` with `NoopSender` shipped;
   real FCM (register token + push on hook timeout with a minimal payload) is a
   later sprint — the interface + the pending-request timeout field are in place.
-- **S3.d legacy integration (safe path):** a stable `ws_default` workspace is
-  ensured at boot; legacy `/api/claude/*` + `/ws/claude/*` keep serving existing
-  paired devices **unchanged** (no breaking changes — the primary compat goal).
-  The deeper unification (routing chat's own session/hook flow through the
-  workspace event log so a chat session IS a workspace session) is **deferred**
-  to a focused follow-up: chat already implements its own 8a/8b, and rewriting it
-  in the same sprint would risk the working device flow right before review. The
-  new workspace API implements 8a/8b independently and is fully tested.
+- **S3.d — SCOPE REFINED (Yossi, 2026-07-02):** there are **no mobile devices in
+  production**, so mobile-facing backward compat is not required.
+  - The legacy Claude-chat HTTP surface (`/api/claude/session[s]`,
+    `/api/claude/session/`, `/ws/claude/session/`) is **RETIRED → 410 Gone** — a
+    clean break, not a migration. Clients drive Claude through
+    `/api/v2/workspace/*` now; `workspace_id` is server-authoritative from day
+    one (no old-UUID reconciliation).
+  - **Pairing (`/api/pairing/*`) STAYS** — desktop-facing (Monitor QR + device
+    tokens); Insights + Pairing keep full backward compat. Only the mobile-facing
+    chat surface breaks. A `ws_default` workspace is still ensured at boot.
+  - The chat **engine** (SessionManager + stream-json + hook RPC bridge) is kept
+    as internal machinery. **Follow-up (when mobile consumes the new API):** wire
+    Claude-spawn into a workspace `claude_chat` session so it runs `claude` and
+    streams stdout into the workspace event log (engine↔substrate). Kotlin frame
+    types are NOT locked, so that wiring uses the cleanest per-`type` schema.

@@ -33,11 +33,21 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 func (c *ChatAPI) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/claude/session", c.guard(c.handleCreate))   // POST
-	mux.HandleFunc("/api/claude/sessions", c.guard(c.handleList))    // GET
-	mux.HandleFunc("/api/claude/session/", c.guard(c.handleItem))    // GET/DELETE {id}
-	mux.HandleFunc("/ws/claude/session/", c.handleWS)                // WS (auth inside)
-	c.registerPairingRoutes(mux)                                     // Phase 70 pairing
+	// Phase 77 (S3): the legacy Claude-chat HTTP surface is RETIRED. No mobile
+	// devices existed in production, so this is a clean break (not a migration):
+	// clients drive Claude sessions through /api/v2/workspace/* now. The old
+	// paths return 410 Gone. (The chat SessionManager + hook bridge stay as
+	// internal machinery for the workspace-driven spawn wiring.)
+	gone := func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "gone: this endpoint was retired in Phase 77 — use /api/v2/workspace/*", http.StatusGone)
+	}
+	mux.HandleFunc("/api/claude/session", gone)
+	mux.HandleFunc("/api/claude/sessions", gone)
+	mux.HandleFunc("/api/claude/session/", gone)
+	mux.HandleFunc("/ws/claude/session/", gone)
+	// Pairing STAYS — it's desktop-facing (the Monitor issues QR + device
+	// tokens), and Yossi lives on the desktop. Backward compat preserved.
+	c.registerPairingRoutes(mux)
 }
 
 // clientIP prefers nginx's forwarded headers (the daemon is behind the proxy,

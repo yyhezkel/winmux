@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const Version = "1.2.6"
+const Version = "1.2.7"
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
@@ -72,6 +72,7 @@ func main() {
 	stop := make(chan struct{})
 	go runSampler(store, sm, time.Duration(*interval)*time.Second, stop)
 	go logJanitor(logPath, home, stop) // Phase 75: bound all server-side logs
+	go portWatchReaper(stop)           // Phase 76.1: auto-kill duplicate port-watchers
 
 	srv := newServer(store, sm, token, *port, logPath)
 

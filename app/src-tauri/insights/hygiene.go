@@ -8,6 +8,7 @@ package main
 // for `go test` on the dev box.
 
 import (
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -130,6 +131,46 @@ func collectHygiene() Hygiene {
 	}
 	dupCount := markDuplicates(watchers)
 	return Hygiene{PortWatchers: watchers, DuplicateCount: dupCount, OrphanSessions: orphans}
+}
+
+// autoReapDuplicates SIGTERMs duplicate port-watchers automatically — exactly
+// one per workspace is ever correct, so this is safe to do unattended. It
+// NEVER touches claude sessions (those are report-only; the user may keep a
+// long-running loop alive and kills them manually from the Cleanup tab).
+// Returns how many were reaped. Kills by PID, never `pkill -f`.
+func autoReapDuplicates() int {
+	h := collectHygiene()
+	var pids []int32
+	for _, w := range h.PortWatchers {
+		if w.Duplicate {
+			pids = append(pids, w.PID)
+		}
+	}
+	if len(pids) == 0 {
+		return 0
+	}
+	killed := killPids(pids)
+	if len(killed) > 0 {
+		log.Printf("hygiene: auto-reaped %d duplicate port-watcher(s): %v", len(killed), killed)
+	}
+	return len(killed)
+}
+
+// portWatchReaper auto-reaps duplicate port-watchers every 5 minutes so the
+// leak self-heals server-side even for a workspace the desktop hasn't
+// reconnected. Only port-watchers — claude sessions are never auto-killed.
+func portWatchReaper(stop <-chan struct{}) {
+	autoReapDuplicates() // once at boot
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			autoReapDuplicates()
+		}
+	}
 }
 
 // killPids terminates (SIGTERM) only PIDs that are currently classified as a

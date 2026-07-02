@@ -1361,6 +1361,20 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   to { transform: translateX(0); opacity: 1; }
 }
 
+/* Unshipped-fivefer (#4): pop-out terminal window — full-screen fill. */
+.popout-terminal-host {
+  position: fixed;
+  inset: 0;
+  background: #0e1116;
+  overflow: hidden;
+}
+.popout-terminal-host .terminal-container {
+  position: absolute;
+  inset: 0;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
 /* Round B: generic side-drawer shell (generalizes the notif slide-in). */
 .side-drawer-backdrop {
   position: fixed;

@@ -5311,6 +5311,83 @@ fn pty_resize(
     }
 }
 
+/// Round B (#4): pop a live terminal pane out into its own OS window.
+///
+/// The popout loads `index.html?popout=<sid>`; index.tsx early-bails to a
+/// full-screen `<PopoutTerminal>` that attaches to the SAME session_id.
+/// `pty:data` / `pty:exit` are emitted app-wide (see `emit_data` /
+/// `emit_exit`), so the popout receives the stream alongside the main
+/// window. The popout owns input + resize while open; the origin pane
+/// detaches to a read-only mirror (frontend) to avoid a SIGWINCH tug-of-war.
+///
+/// Scoped by `capabilities/popout.json` (`windows: ["popout-*"]`) to the
+/// minimum: core events (listen/emit) + window close. Does not touch the
+/// `main` capability.
+#[tauri::command]
+fn popout_pane(
+    app: AppHandle,
+    session_id: String,
+    title: String,
+    cols: Option<u32>,
+    rows: Option<u32>,
+    dir: Option<String>,
+) -> Result<(), String> {
+    // Window labels only allow [a-zA-Z0-9-/:_]. session_id is our own
+    // UUID-ish token, but sanitize defensively.
+    let safe: String = session_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if safe.is_empty() {
+        return Err("invalid session id".into());
+    }
+    let label = format!("popout-{safe}");
+
+    // Already popped out? Focus the existing window instead of erroring on
+    // the duplicate label.
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    // Rough pixel size from the pane's current grid. The terminal fits
+    // itself on mount, so this only needs to be in the right ballpark.
+    let cols = f64::from(cols.unwrap_or(100).clamp(20, 400));
+    let rows = f64::from(rows.unwrap_or(30).clamp(6, 200));
+    let win_w = (cols * 8.5 + 24.0).clamp(480.0, 2400.0);
+    let win_h = (rows * 18.0 + 48.0).clamp(320.0, 1600.0);
+
+    let mut url = format!("index.html?popout={safe}");
+    if let Some(d) = dir.as_deref() {
+        if d == "rtl" || d == "ltr" {
+            url.push_str(&format!("&dir={d}"));
+        }
+    }
+
+    let win = tauri::WebviewWindowBuilder::new(
+        &app,
+        &label,
+        tauri::WebviewUrl::App(url.into()),
+    )
+    .title(title)
+    .inner_size(win_w, win_h)
+    .center()
+    .build()
+    .map_err(|e| format!("popout window: {e}"))?;
+
+    // Tell the app when the popout closes (user X, or the frontend closing
+    // itself on pty:exit) so the origin pane can re-attach input + resize.
+    let app2 = app.clone();
+    let sid = session_id.clone();
+    win.on_window_event(move |e| {
+        if matches!(e, tauri::WindowEvent::Destroyed) {
+            let _ = app2.emit("popout:closed", sid.clone());
+        }
+    });
+
+    Ok(())
+}
+
 // ─── Entrypoint ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -5791,6 +5868,8 @@ pub fn run() {
             local_wizard::record_recent_path,
             // Unshipped-fivefer (#2): taskbar badge from the frontend.
             tray::set_tray_badge,
+            // Unshipped-fivefer (#4): pop a terminal pane into its own window.
+            popout_pane,
         ])
         // #2 (feedback): close-to-tray removed — closing the window quits
         // normally (the minimize-to-tray surprise was confusing). The tray

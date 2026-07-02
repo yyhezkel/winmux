@@ -2,6 +2,7 @@
 import { render } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
+import { PopoutTerminal } from "./components/PopoutTerminal";
 
 // Phase 8.E: capture console.error / console.warn so `winmux dev console-tail`
 // can surface frontend issues. We forward to a fire-and-forget Tauri command
@@ -54,4 +55,19 @@ import App from "./App";
   });
 }
 
-render(() => <App />, document.getElementById("root") as HTMLElement);
+// Unshipped-fivefer (#4): pop-out terminal windows load
+// `index.html?popout=<sid>`. Bail to a bare full-screen <PopoutTerminal>
+// BEFORE mounting <App>, so none of the workspace/settings bootstrap runs
+// in the popout webview.
+const popoutParams = new URLSearchParams(window.location.search);
+const popoutSid = popoutParams.get("popout");
+if (popoutSid) {
+  const dir = popoutParams.get("dir");
+  if (dir === "rtl" || dir === "ltr") document.documentElement.dir = dir;
+  render(
+    () => <PopoutTerminal sessionId={popoutSid} />,
+    document.getElementById("root") as HTMLElement,
+  );
+} else {
+  render(() => <App />, document.getElementById("root") as HTMLElement);
+}

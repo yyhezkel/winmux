@@ -523,6 +523,31 @@ function App() {
     return ti;
   };
 
+  // Unshipped-fivefer (#4): pop a live pane's terminal into its own OS
+  // window. The popout (index.html?popout=<sid>) becomes the input + resize
+  // authority; this pane detaches to a read-only mirror — the global
+  // pty:data listener keeps rendering it. Re-attaches on `popout:closed`.
+  const popOutPane = async (paneId: string) => {
+    const sid = paneToSession.get(paneId);
+    const ti = terms.get(paneId);
+    if (!sid || !ti) return;
+    const label = activeWs()?.name ?? "winmux";
+    const dir = document.documentElement.dir === "rtl" ? "rtl" : "ltr";
+    try {
+      await invoke("popout_pane", {
+        sessionId: sid,
+        title: `${label} — winmux`,
+        cols: ti.term.cols,
+        rows: ti.term.rows,
+        dir,
+      });
+      ti.detach();
+      ti.notice(t("pane.popout.detached"));
+    } catch (e) {
+      console.error("popout_pane failed", e);
+    }
+  };
+
   // Phase 65.O (round 6): the tmux wheel-proxy was deleted — xterm.js
   // handles the wheel natively in every case. No per-pane flag to sync.
 
@@ -1647,6 +1672,22 @@ function App() {
         void refreshPersistence();
       })
     );
+    // Unshipped-fivefer (#4): a pop-out window closed — re-attach the origin
+    // pane's terminal (input + resize) if its session is still live. If the
+    // popout closed *because* of pty:exit, the exit handler above already
+    // cleared the maps, so this is a no-op.
+    unlistens.push(
+      await listen<string>("popout:closed", (e) => {
+        const sid = e.payload;
+        const pid = sessionToPane.get(sid);
+        if (!pid || paneToSession.get(pid) !== sid) return;
+        const ti = terms.get(pid);
+        if (!ti) return;
+        ti.attach(sid);
+        ti.notice(t("pane.popout.reattached"));
+        requestAnimationFrame(() => ti.fitAndResize(true));
+      })
+    );
     // Initial feed load.
     try {
       const items = await invoke<FeedItem[]>("feed_list");
@@ -2254,6 +2295,7 @@ function App() {
                     onConnect={(pid, opts) => connectPane(pid, opts)}
                     onSplit={splitPane}
                     onClose={closePane}
+                    onPopOut={popOutPane}
                     onDisconnect={disconnectPane}
                     onKillSession={killSession}
                     onSetTitle={(pid, title) => {

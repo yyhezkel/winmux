@@ -141,6 +141,23 @@ function App() {
     const c = unreadNotifs();
     void invoke("set_tray_badge", { count: c }).catch(() => {});
   });
+  // #1 fix: map a FeedItem (hooks/permissions/passive) to a NotifItem so the
+  // Notification Center shows the same stream the user sees in the feed. The
+  // id is a stable hash of request_id so an add+resolve don't duplicate.
+  const feedToNotif = (f: FeedItem): NotifItem => {
+    let h = 0;
+    for (let i = 0; i < f.request_id.length; i++) h = (h * 31 + f.request_id.charCodeAt(i)) | 0;
+    const kind =
+      f.kind === "notification" ? "notification" : f.kind === "error" ? "error" : "agent";
+    return {
+      id: Math.abs(h),
+      title: f.title || f.summary || "",
+      body: f.title ? f.summary : "",
+      workspace_id: f.workspace_id ?? null,
+      timestamp_ms: f.created_ms,
+      kind,
+    };
+  };
   const [editingWorkspace, setEditingWorkspace] = createSignal<Workspace | null>(null);
   const [activePaneId, setActivePaneId] = createSignal<string | null>(null);
   // Phase 55-A: pane maximize toggle. When set, LayoutView gets just
@@ -1643,6 +1660,10 @@ function App() {
       await listen<FeedItem>("feed:item-added", (e) => {
         setFeedItems((prev) => [e.payload, ...prev.filter((i) => i.request_id !== e.payload.request_id)]);
         if (e.payload.state !== "pending") scheduleFeedDismiss(e.payload.request_id);
+        // #1 fix: feed items (Claude hooks / permissions / passive) are the
+        // stream the user actually sees — mirror them into the Notification
+        // Center too (it previously only tapped OSC + RPC notifications).
+        pushNotif(feedToNotif(e.payload));
       })
     );
     unlistens.push(
@@ -1967,8 +1988,6 @@ function App() {
           onProvision={() => setShowProvision(true)}
           onOpenSettings={() => setShowSettings(true)}
           onOpenNotes={() => setShowNotes(true)}
-          onOpenNotifications={() => setShowNotifCenter(true)}
-          unreadNotifs={unreadNotifs()}
           onAction={(id, action) => {
             if (action === "rename") handleRename(id);
             else if (action === "edit") {
@@ -2100,6 +2119,19 @@ function App() {
                 onClick={() => setShowInsights(true)}
               >
                 📊 {t("sidebar.insights.label")}
+              </button>
+              {/* Feedback reorg: Notifications button lives at the header edge,
+                  after Monitor. Moved here from the sidebar so all workspace
+                  tools sit together. Badge shows the unread count. */}
+              <button
+                class="ws-header-btn notif-bell"
+                title={t("notif.title")}
+                onClick={() => setShowNotifCenter(true)}
+              >
+                🔔 {t("notif.title")}
+                <Show when={unreadNotifs() > 0}>
+                  <span class="notif-bell-badge">{unreadNotifs() > 99 ? "99+" : unreadNotifs()}</span>
+                </Show>
               </button>
               {/* Phase 24.D: removed + chat / + claude log buttons.
                   The two pane kinds + their backends are rolled back

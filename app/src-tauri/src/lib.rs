@@ -5791,20 +5791,10 @@ pub fn run() {
             // Unshipped-fivefer (#2): taskbar badge from the frontend.
             tray::set_tray_badge,
         ])
-        .on_window_event(|window, event| {
-            // #2: close-to-tray. Hide the main window instead of quitting so
-            // winmux keeps running with a tray presence; real quit is via the
-            // tray menu. Gated on TRAY_ACTIVE so a failed tray never traps the
-            // user with no way to reopen the window.
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main"
-                    && tray::TRAY_ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
-                {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-            }
-        })
+        // #2 (feedback): close-to-tray removed — closing the window quits
+        // normally (the minimize-to-tray surprise was confusing). The tray
+        // icon + badge stay for quick access; quit is either the window close
+        // or the tray menu.
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

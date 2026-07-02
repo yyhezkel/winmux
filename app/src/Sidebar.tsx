@@ -36,9 +36,6 @@ interface Props {
   onOpenSettings: () => void;
   /** Phase 39 — open the notes window from the sidebar. */
   onOpenNotes: () => void;
-  /** Unshipped-fivefer (#1) — open the Notification Center + its unread count. */
-  onOpenNotifications: () => void;
-  unreadNotifs: number;
   onAction: (
     id: string,
     action: "rename" | "edit" | "delete" | "disconnect" | "addons",
@@ -249,18 +246,6 @@ export function Sidebar(p: Props) {
           row vertically, so these stay reachable as icons (with
           tooltips) instead of disappearing. */}
       <div class="sidebar-actions-row">
-        {/* Unshipped-fivefer (#1): Notification Center bell + unread badge. */}
-        <button
-          class="ws-action-half notif-bell"
-          onClick={p.onOpenNotifications}
-          title={t("notif.title")}
-        >
-          <span class="ws-action-emoji">🔔</span>
-          <span class="ws-action-label">{t("notif.title")}</span>
-          <Show when={p.unreadNotifs > 0}>
-            <span class="notif-bell-badge">{p.unreadNotifs > 99 ? "99+" : p.unreadNotifs}</span>
-          </Show>
-        </button>
         <button class="ws-action-half" onClick={p.onOpenNotes} title={t("sidebar.notes.tooltip")}>
           <span class="ws-action-emoji">📝</span>
           <span class="ws-action-label">{t("sidebar.notes.tooltip")}</span>

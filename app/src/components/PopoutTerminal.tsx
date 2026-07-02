@@ -5,7 +5,7 @@ import { TerminalInstance } from "../terminalInstance";
 
 // Unshipped-fivefer (#4): the pop-out terminal window.
 //
-// index.tsx early-bails here when the URL carries `?popout=<sid>`, so this
+// index.tsx early-bails here when the window LABEL is `popout-<sid>`, so this
 // renders in a FRESH webview with none of App.tsx's workspace/settings
 // bootstrap. It reuses TerminalInstance (same onData→pty_write + resize
 // contract as an in-grid pane) and taps the app-wide `pty:data` / `pty:exit`

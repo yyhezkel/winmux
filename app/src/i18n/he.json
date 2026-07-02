@@ -743,6 +743,8 @@
   "notif.clear": "נקה הכל",
   "notif.close": "סגור",
   "drawer.popout": "פתח בחלון נפרד",
+  "drawer.expand": "הרחב למסך מלא",
+  "panel.collapse": "הצמד לצד",
   "notif.jump": "עבור לסביבה",
   "notif.filter.all": "הכל",
   "notif.filter.agent": "סוכן",

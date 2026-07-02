@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
-import { NotificationCenter, type NotifItem } from "./NotificationCenter";
+import { NotificationCenter, NotifHeaderActions, type NotifItem } from "./NotificationCenter";
 import { LayoutView } from "./LayoutView";
 import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
@@ -17,7 +17,10 @@ import { SshKeyOfferModal } from "./SshKeyOfferModal";
 import { CommandPalette, type Command } from "./CommandPalette";
 import { PortsWindow } from "./PortsWindow";
 import { BrowserWindow } from "./BrowserWindow";
-import { FileManagerWindow } from "./FileManagerWindow";
+import { FileManagerPane } from "./FileManagerPane";
+import { PanelSurface } from "./PanelSurface";
+import type { Geometry } from "./floatingWindow";
+import { closeOtherDrawers, type PanelId, type Surface, type PanelSurfaces } from "./panels";
 import {
   TerminalInstance,
   copyTerminalSelection,
@@ -97,7 +100,18 @@ function App() {
   // per-machine in localStorage (the items themselves are in-memory only, so
   // disk-persisting read-state would outlive its subjects).
   const [notifications, setNotifications] = createSignal<NotifItem[]>([]);
-  const [showNotifCenter, setShowNotifCenter] = createSignal(false);
+  // Unified side-panel lifecycle (see panels.ts). One registry replaces the
+  // former scattered per-panel booleans (showNotifCenter / showInsights +
+  // insightsMode / showFilesWindow). Each panel opens docked as a drawer,
+  // then floats out or expands to fullscreen; only one drawer at a time.
+  const [panels, setPanels] = createSignal<PanelSurfaces>({});
+  const surfaceOf = (id: PanelId): Surface => panels()[id] ?? "closed";
+  const setSurface = (id: PanelId, s: Surface) => setPanels((p) => ({ ...p, [id]: s }));
+  const openPanel = (id: PanelId) =>
+    setPanels((p) => ({ ...closeOtherDrawers(p, id), [id]: "drawer" })); // rule: opens docked
+  const closePanel = (id: PanelId) => setSurface(id, "closed");
+  const floatPanel = (id: PanelId) => setSurface(id, "float"); // ⤢ → in-app floating window
+  const expandPanel = (id: PanelId) => setSurface(id, "fullscreen"); // ⛶ → maximized-pane overlay
   const NOTIF_READ_KEY = "winmux.notif.read";
   const loadNotifRead = (): Set<number> => {
     try {
@@ -240,11 +254,8 @@ function App() {
   // "Connect to existing server" flow into this wizard's "existing"
   // mode, so there's no separate connect-existing modal anymore.
   const [showProvision, setShowProvision] = createSignal(false);
-  const [showInsights, setShowInsights] = createSignal(false);
-  // Round B: Monitor opens as an inline-end side drawer by default; the
-  // drawer's ⤢ pops it out into the classic floating window. Reset to
-  // "drawer" on close so the next open is docked again.
-  const [insightsMode, setInsightsMode] = createSignal<"drawer" | "window">("drawer");
+  // Monitor's open/drawer/float state now lives in the unified `panels`
+  // registry (see panels.ts) under the "monitor" id.
   const [addonsWin, setAddonsWin] = createSignal<{ id: string; name: string } | null>(null);
   // Phase 35 (#1.3): command palette (Ctrl+Shift+P).
   const [showPalette, setShowPalette] = createSignal(false);
@@ -263,9 +274,9 @@ function App() {
   // (the native Webview is hidden on close, not destroyed — page state
   // survives across open/close cycles).
   const [showBrowserWindow, setShowBrowserWindow] = createSignal(false);
-  // Phase 53 (rebased): workspace-level File Manager floating window.
-  // Pure HTML — wraps the existing FileManagerPane component.
-  const [showFilesWindow, setShowFilesWindow] = createSignal(false);
+  // Phase 53 (rebased): workspace-level File Manager. Pure HTML — wraps
+  // the existing FileManagerPane. Its open/drawer/float state now lives in
+  // the unified `panels` registry (see panels.ts) under the "files" id.
   // Phase 62.B (item I): sidebar mode lives in settings.json; full-mode
   // width lives in localStorage. Phase 65.P: two modes only (full /
   // icons). Any legacy "hidden" value migrates to "icons" on read so
@@ -663,7 +674,7 @@ function App() {
       { id: "ssh.connect", label: t("cmd.ssh.connect"), enabled: () => hasPane, handler: () => { if (pid) void connectPane(pid); } },
       { id: "ssh.disconnect", label: t("cmd.ssh.disconnect"), enabled: () => hasPane, handler: () => { if (pid) void disconnectPane(pid); } },
       { id: "ssh.provision", label: t("cmd.ssh.provision"), handler: () => setShowProvision(true) },
-      { id: "insights.monitor", label: t("cmd.insights.monitor"), enabled: () => hasWs, handler: () => setShowInsights(true) },
+      { id: "insights.monitor", label: t("cmd.insights.monitor"), enabled: () => hasWs, handler: () => openPanel("monitor") },
       { id: "settings.open", label: t("cmd.settings.open"), handler: () => setShowSettings(true) },
       { id: "settings.language", label: t("cmd.settings.language"), handler: () => setShowSettings(true) },
       { id: "settings.theme", label: t("cmd.settings.theme"), handler: () => setShowSettings(true) },
@@ -1375,6 +1386,18 @@ function App() {
       e.preventDefault();
       toggleMaximize();
       return;
+    }
+    // A fullscreen side panel sits above the panes (z 95), so Esc collapses
+    // it back to a drawer first — before the pane-maximize restore below.
+    if (e.key === "Escape") {
+      const fs = (Object.keys(panels()) as PanelId[]).find(
+        (id) => panels()[id] === "fullscreen",
+      );
+      if (fs) {
+        e.preventDefault();
+        setSurface(fs, "drawer");
+        return;
+      }
     }
     if (e.key === "Escape" && maximizedPaneId()) {
       e.preventDefault();
@@ -2153,7 +2176,7 @@ function App() {
               <button
                 class="ws-header-btn"
                 title={t("sidebar.files.tooltip")}
-                onClick={() => setShowFilesWindow(true)}
+                onClick={() => openPanel("files")}
               >
                 🗂 {t("sidebar.files.label")}
               </button>
@@ -2161,7 +2184,7 @@ function App() {
               <button
                 class="ws-header-btn"
                 title={t("sidebar.insights.tooltip")}
-                onClick={() => setShowInsights(true)}
+                onClick={() => openPanel("monitor")}
               >
                 📊 {t("sidebar.insights.label")}
               </button>
@@ -2171,7 +2194,7 @@ function App() {
               <button
                 class="ws-header-btn notif-bell"
                 title={t("notif.title")}
-                onClick={() => setShowNotifCenter(true)}
+                onClick={() => openPanel("notifications")}
               >
                 🔔 {t("notif.title")}
                 <Show when={unreadNotifs() > 0}>
@@ -2341,21 +2364,63 @@ function App() {
           own global store, opened by FileManager .md double-click. */}
       <MarkdownViewer />
 
-      {/* Unshipped-fivefer (#1): Notification Center — slide-in panel with a
-          click-away backdrop. */}
-      <Show when={showNotifCenter()}>
-        <div class="notif-backdrop" onClick={() => setShowNotifCenter(false)}>
+      {/* Unified side-panel lifecycle (see panels.ts): Notifications + Files
+          each open docked as a drawer, then float out or expand to fullscreen.
+          One PanelSurface per panel drives all three surfaces. Monitor is the
+          InsightsWindow above; Diff + Browser follow on their own tracks. */}
+      <PanelSurface
+        surface={surfaceOf("notifications")}
+        icon="🔔"
+        title={t("notif.title")}
+        bodyClass="notif-body"
+        floatStorageKey="winmux.panel-notifications-geometry"
+        floatDefault={{ x: 220, y: 90, w: 440, h: 640 } satisfies Geometry}
+        floatMinW={320}
+        floatMinH={360}
+        onClose={() => closePanel("notifications")}
+        onDrawer={() => openPanel("notifications")}
+        onFloat={() => floatPanel("notifications")}
+        onFullscreen={() => expandPanel("notifications")}
+        headerActions={() => (
+          <NotifHeaderActions onMarkAllRead={markAllNotifRead} onClear={clearNotifs} />
+        )}
+        body={() => (
           <NotificationCenter
             items={notifications()}
             readIds={notifRead()}
-            onClose={() => setShowNotifCenter(false)}
-            onJump={(wsId) => handleSetActive(wsId)}
+            onClose={() => closePanel("notifications")}
+            onJump={(wsId) => void handleSetActive(wsId)}
             onMarkRead={markNotifRead}
-            onMarkAllRead={markAllNotifRead}
-            onClear={clearNotifs}
           />
-        </div>
-      </Show>
+        )}
+      />
+      <PanelSurface
+        surface={surfaceOf("files")}
+        icon="🗂"
+        title={t("files.window.title", { workspace: activeWs()?.name ?? "" })}
+        drawerWidth="min(1100px, 96vw)"
+        bodyClass="files-body"
+        floatStorageKey={`winmux.panel-files-geometry.${file().active_workspace_id ?? "none"}`}
+        floatDefault={{ x: 160, y: 100, w: 1100, h: 700 } satisfies Geometry}
+        floatMinW={600}
+        floatMinH={380}
+        onClose={() => closePanel("files")}
+        onDrawer={() => openPanel("files")}
+        onFloat={() => floatPanel("files")}
+        onFullscreen={() => expandPanel("files")}
+        body={() => {
+          const ws = activeWs();
+          return ws ? (
+            <FileManagerPane
+              workspaceId={ws.id}
+              hasSsh={ws.connection?.type === "ssh"}
+              hasActiveSession={liveWorkspaceIds().has(ws.id)}
+            />
+          ) : (
+            <></>
+          );
+        }}
+      />
 
       <CreateWorkspaceModal
         open={showCreate()}
@@ -2445,15 +2510,13 @@ function App() {
       {/* Phase 68.D: Server Insights monitor. Round B: docks as a side
           drawer by default; ⤢ pops it out into the floating window. */}
       <InsightsWindow
-        open={showInsights()}
-        mode={insightsMode()}
+        surface={surfaceOf("monitor")}
         workspaceId={file().active_workspace_id ?? undefined}
         workspaceName={activeWs()?.name}
-        onClose={() => {
-          setShowInsights(false);
-          setInsightsMode("drawer");
-        }}
-        onPopOut={() => setInsightsMode("window")}
+        onClose={() => closePanel("monitor")}
+        onDrawer={() => openPanel("monitor")}
+        onFloat={() => floatPanel("monitor")}
+        onFullscreen={() => expandPanel("monitor")}
         onInstall={() => {
           const ws = activeWs();
           if (ws) setAddonsWin({ id: ws.id, name: ws.name });
@@ -2532,20 +2595,6 @@ function App() {
           if (!id) return Promise.reject(new Error("no active workspace"));
           return startForward(id, remotePort);
         }}
-      />
-
-      {/* Phase 53 (rebased): floating workspace-level File Manager
-          window. Pure HTML chrome around the existing dual-column
-          FileManagerPane (local + remote SFTP). hasActiveSession
-          drives whether the remote column lights up. */}
-      <FileManagerWindow
-        open={showFilesWindow()}
-        workspace={activeWs()}
-        hasActiveSession={(() => {
-          const id = file().active_workspace_id;
-          return id ? liveWorkspaceIds().has(id) : false;
-        })()}
-        onClose={() => setShowFilesWindow(false)}
       />
 
       {/* Phase 58: voice-input recording indicator + error toast.

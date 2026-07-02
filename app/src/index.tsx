@@ -1,6 +1,7 @@
 /* @refresh reload */
 import { render } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 // Global stylesheets live at the entry point so BOTH the main <App> and the
 // #4 pop-out window (which bypasses <App>) get xterm's CSS + our theme.
 // Previously these were imported inside App.tsx, so a popout webview rendered
@@ -61,15 +62,25 @@ import { PopoutTerminal } from "./components/PopoutTerminal";
   });
 }
 
-// Unshipped-fivefer (#4): pop-out terminal windows load
-// `index.html?popout=<sid>`. Bail to a bare full-screen <PopoutTerminal>
-// BEFORE mounting <App>, so none of the workspace/settings bootstrap runs
-// in the popout webview.
-const popoutParams = new URLSearchParams(window.location.search);
-const popoutSid = popoutParams.get("popout");
+// Unshipped-fivefer (#4): pop-out terminal windows. Bail to a bare
+// full-screen <PopoutTerminal> BEFORE mounting <App>, so none of the
+// workspace/settings bootstrap runs in the popout webview.
+//
+// The session id comes from the window LABEL (`popout-<sid>`). The popout URL
+// is a CLEAN `index.html` (no query/fragment) because Tauri's built-app asset
+// protocol serves a blank page for any suffixed path — so the label, not the
+// URL, carries the id.
+let winLabel = "";
+try {
+  winLabel = getCurrentWindow().label;
+} catch {
+  // window metadata not ready — treat as the main window
+}
+const popoutSid = winLabel.startsWith("popout-")
+  ? winLabel.slice("popout-".length)
+  : null;
+
 if (popoutSid) {
-  const dir = popoutParams.get("dir");
-  if (dir === "rtl" || dir === "ltr") document.documentElement.dir = dir;
   render(
     () => <PopoutTerminal sessionId={popoutSid} />,
     document.getElementById("root") as HTMLElement,

@@ -743,6 +743,8 @@
   "notif.clear": "مسح الكل",
   "notif.close": "إغلاق",
   "drawer.popout": "فتح في نافذة",
+  "drawer.expand": "توسيع إلى ملء الشاشة",
+  "panel.collapse": "إرساء إلى الجانب",
   "notif.jump": "الانتقال إلى مساحة العمل",
   "notif.filter.all": "الكل",
   "notif.filter.agent": "الوكيل",

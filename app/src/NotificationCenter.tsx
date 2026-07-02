@@ -22,8 +22,22 @@ interface Props {
   onClose: () => void;
   onJump: (workspaceId: string) => void;
   onMarkRead: (id: number) => void;
-  onMarkAllRead: () => void;
-  onClear: () => void;
+}
+
+// Header controls (mark-all-read + clear) for whichever surface hosts the
+// notification body — passed to SideDrawer/PanelChrome `headerActions`. The
+// ✕ close button is owned by the surface, so it isn't here.
+export function NotifHeaderActions(p: { onMarkAllRead: () => void; onClear: () => void }) {
+  return (
+    <>
+      <button class="side-drawer-btn" title={t("notif.markAllRead")} onClick={p.onMarkAllRead}>
+        ✓
+      </button>
+      <button class="side-drawer-btn" title={t("notif.clear")} onClick={p.onClear}>
+        🗑
+      </button>
+    </>
+  );
 }
 
 // Filters we can actually populate today. build/mention have no source yet
@@ -59,8 +73,6 @@ export function NotificationCenter(p: Props) {
     return f === "all" ? list : list.filter((n) => n.kind === f);
   });
 
-  const unread = createMemo(() => p.items.filter((n) => !p.readIds.has(n.id)).length);
-
   const click = (n: NotifItem) => {
     p.onMarkRead(n.id);
     if (n.workspace_id) {
@@ -70,27 +82,7 @@ export function NotificationCenter(p: Props) {
   };
 
   return (
-    <div class="notif-center" onClick={(e) => e.stopPropagation()}>
-      <div class="notif-head">
-        <span class="notif-head-title">
-          🔔 {t("notif.title")}
-          <Show when={unread() > 0}>
-            <span class="notif-head-count">{unread()}</span>
-          </Show>
-        </span>
-        <div class="notif-head-actions">
-          <button class="notif-head-btn" title={t("notif.markAllRead")} onClick={p.onMarkAllRead}>
-            ✓
-          </button>
-          <button class="notif-head-btn" title={t("notif.clear")} onClick={p.onClear}>
-            🗑
-          </button>
-          <button class="notif-head-btn" title={t("notif.close")} onClick={p.onClose}>
-            ✕
-          </button>
-        </div>
-      </div>
-
+    <>
       <div class="notif-filters">
         <For each={FILTERS}>
           {(f) => {
@@ -151,6 +143,6 @@ export function NotificationCenter(p: Props) {
           </For>
         </Show>
       </div>
-    </div>
+    </>
   );
 }

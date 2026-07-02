@@ -14,6 +14,9 @@ interface Props {
   /** Panel width. Defaults to a comfortable 400px, clamped on small screens. */
   width?: string;
   onClose: () => void;
+  /** When provided, a ⛶ button appears that expands the drawer to fill the
+   *  workspace like a maximized pane. Omit for drawers with no fullscreen. */
+  onExpand?: () => void;
   /** When provided, a ⤢ button appears that pops the drawer out into its own
    *  floating window. Omit for drawers with no windowed mode. */
   onPopOut?: () => void;
@@ -42,6 +45,16 @@ export function SideDrawer(p: Props) {
           </span>
           <div class="side-drawer-actions">
             {p.headerActions}
+            <Show when={p.onExpand}>
+              <button
+                class="side-drawer-btn"
+                title={t("drawer.expand")}
+                aria-label={t("drawer.expand")}
+                onClick={() => p.onExpand!()}
+              >
+                ⛶
+              </button>
+            </Show>
             <Show when={p.onPopOut}>
               <button
                 class="side-drawer-btn"

@@ -3,13 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
 import { MobilePairing } from "./MobilePairing";
 import { HygienePanel } from "./HygienePanel";
-import { SideDrawer } from "./SideDrawer";
-import {
-  clampToViewport,
-  makeWindowControls,
-  ResizeHandles,
-  type Geometry,
-} from "./floatingWindow";
+import { PanelSurface } from "./PanelSurface";
+import type { Surface } from "./panels";
+import type { Geometry } from "./floatingWindow";
 
 // Phase 68.D: Server Insights monitor. Pull-based — fetches the live
 // snapshot from the remote `winmux-insights` daemon (via the insights_fetch
@@ -39,18 +35,16 @@ interface DockerContainer {
 }
 
 interface Props {
-  open: boolean;
+  /** Unified surface: closed | drawer | float | fullscreen (see panels.ts). */
+  surface: Surface;
   workspaceId?: string;
   workspaceName?: string;
   onClose: () => void;
+  onDrawer: () => void;
+  onFloat: () => void;
+  onFullscreen: () => void;
   /** Phase 68 (UX): open the Add-ons window to install the daemon. */
   onInstall?: () => void;
-  /** Round B: "drawer" docks the monitor as an inline-end side drawer;
-   *  "window" is the classic draggable floating window. Defaults to window
-   *  for callers that haven't opted in. */
-  mode?: "drawer" | "window";
-  /** Round B: pop the drawer out into the floating window (drawer mode only). */
-  onPopOut?: () => void;
 }
 
 const DEFAULT_GEOMETRY: Geometry = { x: 180, y: 90, w: 820, h: 620 };
@@ -71,17 +65,6 @@ function fmtBytes(n: number): string {
 const fmtBps = (n: number) => `${fmtBytes(n)}/s`;
 
 export function InsightsWindow(p: Props) {
-  const [geom, setGeom] = createSignal<Geometry>(
-    clampToViewport(DEFAULT_GEOMETRY, MIN_W, MIN_H),
-  );
-  const { onDragStart, onResizeStart } = makeWindowControls({
-    geom,
-    setGeom,
-    minW: MIN_W,
-    minH: MIN_H,
-    closeGuardSelector: ".insights-x",
-  });
-
   const [snap, setSnap] = createSignal<Snapshot | null>(null);
   const [docker, setDocker] = createSignal<DockerContainer[]>([]);
   const [dockerOk, setDockerOk] = createSignal(false);
@@ -141,6 +124,8 @@ export function InsightsWindow(p: Props) {
     URL.revokeObjectURL(url);
   };
 
+  const isOpen = () => p.surface !== "closed";
+
   // Load logs when the Logs tab is opened.
   createEffect(() => {
     if (view() === "logs" && p.workspaceId) void refreshLogs();
@@ -198,7 +183,7 @@ export function InsightsWindow(p: Props) {
 
   // Refresh on open; optional 5s auto-refresh while focused.
   createEffect(() => {
-    if (!p.open || !p.workspaceId) return;
+    if (!isOpen() || !p.workspaceId) return;
     void refresh();
     if (!auto()) return;
     const id = setInterval(() => void refresh(), 5000);
@@ -436,49 +421,27 @@ export function InsightsWindow(p: Props) {
   );
 
   return (
-    <Show when={p.open}>
-      <Show
-        when={p.mode === "drawer"}
-        fallback={
-          <div
-            class="fm-window insights-window"
-            style={{
-              left: `${geom().x}px`,
-              top: `${geom().y}px`,
-              width: `${geom().w}px`,
-              height: `${geom().h}px`,
-            }}
-          >
-            <div class="fm-window-header" onMouseDown={onDragStart}>
-              <span class="fm-window-title">📊 {titleText()}</span>
-              {tabsEl()}
-              {metricsControlsEl()}
-              <button class="fm-window-x insights-x" onClick={p.onClose} title={t("common.close")}>
-                ×
-              </button>
-            </div>
-            <div class="fm-window-body insights-body">{bodyContent()}</div>
-            <ResizeHandles onStart={onResizeStart} />
-          </div>
-        }
-      >
-        <SideDrawer
-          icon="📊"
-          title={titleText()}
-          width="min(600px, 96vw)"
-          onClose={p.onClose}
-          onPopOut={p.onPopOut}
-          bodyClass="insights-body"
-          headerActions={
-            <>
-              {tabsEl()}
-              {metricsControlsEl()}
-            </>
-          }
-        >
-          {bodyContent()}
-        </SideDrawer>
-      </Show>
-    </Show>
+    <PanelSurface
+      surface={p.surface}
+      icon="📊"
+      title={titleText()}
+      drawerWidth="min(600px, 96vw)"
+      bodyClass="insights-body"
+      floatStorageKey={`winmux.panel-monitor-geometry.${p.workspaceId ?? "none"}`}
+      floatDefault={DEFAULT_GEOMETRY}
+      floatMinW={MIN_W}
+      floatMinH={MIN_H}
+      onClose={p.onClose}
+      onDrawer={p.onDrawer}
+      onFloat={p.onFloat}
+      onFullscreen={p.onFullscreen}
+      headerActions={() => (
+        <>
+          {tabsEl()}
+          {metricsControlsEl()}
+        </>
+      )}
+      body={bodyContent}
+    />
   );
 }

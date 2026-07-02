@@ -5323,8 +5323,13 @@ fn pty_resize(
 /// Scoped by `capabilities/popout.json` (`windows: ["popout-*"]`) to the
 /// minimum: core events (listen/emit) + window close. Does not touch the
 /// `main` capability.
+// IMPORTANT: this MUST stay `async`. On Windows, `WebviewWindowBuilder`
+// deadlocks when driven from a SYNCHRONOUS command (documented on docs.rs) —
+// the window shell appears but the webview never initializes (blank white).
+// An async command runs off the main event-loop thread and builds cleanly,
+// which is also why the workspace Browser (add_child) command is async.
 #[tauri::command]
-fn popout_pane(
+async fn popout_pane(
     app: AppHandle,
     session_id: String,
     title: String,
@@ -5357,23 +5362,52 @@ fn popout_pane(
     let win_w = (cols * 8.5 + 24.0).clamp(480.0, 2400.0);
     let win_h = (rows * 18.0 + 48.0).clamp(320.0, 1600.0);
 
-    let mut url = format!("index.html?popout={safe}");
-    if let Some(d) = dir.as_deref() {
-        if d == "rtl" || d == "ltr" {
-            url.push_str(&format!("&dir={d}"));
+    // CLEAN url — no query, no fragment. In a built app Tauri's asset
+    // protocol treats ANY suffix (`index.html?x` or `index.html#x`) as a
+    // literal path and serves a blank page. The frontend reads the session
+    // id from the window LABEL (`popout-<sid>`) instead, so the URL never
+    // needs to carry it. (`dir` is currently derived frontend-side from the
+    // per-line RTL observer, so it isn't threaded through the URL.)
+    let _ = &dir;
+
+    // Retry the transient WebView2 0x8007139F (ERROR_INVALID_STATE) a few
+    // times with a short backoff, mirroring workspace_browser_show. The
+    // builder is consumed by build(), so it's rebuilt each attempt.
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut last_err = String::new();
+    let mut built = None;
+    for attempt in 1..=MAX_ATTEMPTS {
+        dlog(&format!(
+            "popout_pane: building window label={label} size={win_w}x{win_h} (attempt {attempt}/{MAX_ATTEMPTS})"
+        ));
+        match tauri::WebviewWindowBuilder::new(
+            &app,
+            &label,
+            tauri::WebviewUrl::App("index.html".into()),
+        )
+        .title(title.clone())
+        .inner_size(win_w, win_h)
+        .center()
+        .build()
+        {
+            Ok(w) => {
+                built = Some(w);
+                break;
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                dlog(&format!(
+                    "popout_pane: build attempt {attempt}/{MAX_ATTEMPTS} FAILED: {last_err}"
+                ));
+                if attempt < MAX_ATTEMPTS {
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                }
+            }
         }
     }
-
-    let win = tauri::WebviewWindowBuilder::new(
-        &app,
-        &label,
-        tauri::WebviewUrl::App(url.into()),
-    )
-    .title(title)
-    .inner_size(win_w, win_h)
-    .center()
-    .build()
-    .map_err(|e| format!("popout window: {e}"))?;
+    let win = built
+        .ok_or_else(|| format!("popout window failed after {MAX_ATTEMPTS} attempts: {last_err}"))?;
+    dlog(&format!("popout_pane: window {label} built ok"));
 
     // Tell the app when the popout closes (user X, or the frontend closing
     // itself on pty:exit) so the origin pane can re-attach input + resize.

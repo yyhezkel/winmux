@@ -743,6 +743,8 @@
   "notif.clear": "Clear all",
   "notif.close": "Close",
   "drawer.popout": "Pop out to window",
+  "drawer.expand": "Expand to full screen",
+  "panel.collapse": "Dock to side",
   "notif.jump": "Go to workspace",
   "notif.filter.all": "All",
   "notif.filter.agent": "Agent",

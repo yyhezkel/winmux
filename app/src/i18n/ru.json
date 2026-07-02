@@ -743,6 +743,8 @@
   "notif.clear": "Очистить",
   "notif.close": "Закрыть",
   "drawer.popout": "Открепить в окно",
+  "drawer.expand": "Развернуть на весь экран",
+  "panel.collapse": "Пристыковать сбоку",
   "notif.jump": "К рабочему пространству",
   "notif.filter.all": "Все",
   "notif.filter.agent": "Агент",

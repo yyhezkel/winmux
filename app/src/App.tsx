@@ -136,6 +136,11 @@ function App() {
     setNotifications([]);
   };
   const unreadNotifs = () => notifications().filter((n) => !notifRead().has(n.id)).length;
+  // #2: mirror the unread count to the Windows taskbar badge.
+  createEffect(() => {
+    const c = unreadNotifs();
+    void invoke("set_tray_badge", { count: c }).catch(() => {});
+  });
   const [editingWorkspace, setEditingWorkspace] = createSignal<Workspace | null>(null);
   const [activePaneId, setActivePaneId] = createSignal<string | null>(null);
   // Phase 55-A: pane maximize toggle. When set, LayoutView gets just
@@ -1697,6 +1702,13 @@ function App() {
     // state.notifications AND emits this — the center mirrors it live.
     unlistens.push(
       await listen<NotifItem>("notification:new", (e) => pushNotif(e.payload)),
+    );
+    // #2: tray menu actions routed from the Rust tray handler.
+    unlistens.push(
+      await listen<string>("tray:action", (e) => {
+        if (e.payload === "new_workspace") setShowCreate(true);
+        else if (e.payload === "settings") setShowSettings(true);
+      }),
     );
     // Phase 36 (#2.2): auto port-forward lifecycle. The backend opens a
     // local SSH forward when the remote watcher reports a new listening

@@ -19,6 +19,7 @@ mod remote_bootstrap;
 mod rpc_server;
 mod settings;
 mod stt;
+mod tray;
 mod updater;
 // Phase 51.C: `mod tunnel` moved to its own crate winmux-tunnel.
 // Existing crate::tunnel::* callsites still resolve via this alias.
@@ -5393,6 +5394,12 @@ pub fn run() {
             .build()
             .map_err(|e| Box::<dyn std::error::Error>::from(format!("main window: {e}")))?;
             dlog("setup: main webview created");
+            // Unshipped-fivefer (#2): system tray. Best-effort — a failure
+            // just means no tray + no close-to-tray (see on_window_event).
+            match tray::init(app.handle()) {
+                Ok(()) => dlog("setup: system tray created"),
+                Err(e) => dlog(&format!("setup: tray init failed (continuing): {e}")),
+            }
             match load_from_disk() {
                 Ok(file) => {
                     *state.workspaces.lock().unwrap() = file;
@@ -5760,7 +5767,23 @@ pub fn run() {
             local_wizard::detect_local_shells,
             local_wizard::list_recent_paths,
             local_wizard::record_recent_path,
+            // Unshipped-fivefer (#2): taskbar badge from the frontend.
+            tray::set_tray_badge,
         ])
+        .on_window_event(|window, event| {
+            // #2: close-to-tray. Hide the main window instead of quitting so
+            // winmux keeps running with a tray presence; real quit is via the
+            // tray menu. Gated on TRAY_ACTIVE so a failed tray never traps the
+            // user with no way to reopen the window.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main"
+                    && tray::TRAY_ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

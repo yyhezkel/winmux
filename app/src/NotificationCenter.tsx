@@ -1,0 +1,156 @@
+import { createMemo, createSignal, For, Show } from "solid-js";
+import { t } from "./i18n";
+
+// Unshipped-fivefer (#1): the Notification Center. A slide-in panel that
+// unifies the two notification streams (OSC 9/99/777 from terminals +
+// RPC/agent notifications from Claude hooks) into one filterable, read-aware
+// timeline. State (the accumulating item list + read set) lives in App.tsx;
+// this component is presentational + owns only the active filter.
+
+export interface NotifItem {
+  id: number;
+  title: string;
+  body: string;
+  workspace_id: string | null;
+  timestamp_ms: number;
+  kind: string; // agent | notification | error | build | mention
+}
+
+interface Props {
+  items: NotifItem[];
+  readIds: Set<number>;
+  onClose: () => void;
+  onJump: (workspaceId: string) => void;
+  onMarkRead: (id: number) => void;
+  onMarkAllRead: () => void;
+  onClear: () => void;
+}
+
+// Filters we can actually populate today. build/mention have no source yet
+// (deferred) — no point showing empty tabs.
+const FILTERS = ["all", "agent", "notification", "error"] as const;
+type Filter = (typeof FILTERS)[number];
+
+const KIND_ICON: Record<string, string> = {
+  agent: "🤖",
+  notification: "🔔",
+  error: "⛔",
+  build: "🔨",
+  mention: "@",
+};
+const iconFor = (k: string) => KIND_ICON[k] ?? "•";
+
+function relTime(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return t("notif.time.now");
+  const m = Math.round(s / 60);
+  if (m < 60) return t("notif.time.min").replace("{n}", String(m));
+  const h = Math.round(m / 60);
+  if (h < 24) return t("notif.time.hour").replace("{n}", String(h));
+  return t("notif.time.day").replace("{n}", String(Math.round(h / 24)));
+}
+
+export function NotificationCenter(p: Props) {
+  const [filter, setFilter] = createSignal<Filter>("all");
+
+  const filtered = createMemo(() => {
+    const f = filter();
+    const list = [...p.items].sort((a, b) => b.timestamp_ms - a.timestamp_ms);
+    return f === "all" ? list : list.filter((n) => n.kind === f);
+  });
+
+  const unread = createMemo(() => p.items.filter((n) => !p.readIds.has(n.id)).length);
+
+  const click = (n: NotifItem) => {
+    p.onMarkRead(n.id);
+    if (n.workspace_id) {
+      p.onJump(n.workspace_id);
+      p.onClose();
+    }
+  };
+
+  return (
+    <div class="notif-center" onClick={(e) => e.stopPropagation()}>
+      <div class="notif-head">
+        <span class="notif-head-title">
+          🔔 {t("notif.title")}
+          <Show when={unread() > 0}>
+            <span class="notif-head-count">{unread()}</span>
+          </Show>
+        </span>
+        <div class="notif-head-actions">
+          <button class="notif-head-btn" title={t("notif.markAllRead")} onClick={p.onMarkAllRead}>
+            ✓
+          </button>
+          <button class="notif-head-btn" title={t("notif.clear")} onClick={p.onClear}>
+            🗑
+          </button>
+          <button class="notif-head-btn" title={t("notif.close")} onClick={p.onClose}>
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <div class="notif-filters">
+        <For each={FILTERS}>
+          {(f) => {
+            const n = createMemo(() =>
+              f === "all" ? p.items.length : p.items.filter((it) => it.kind === f).length,
+            );
+            return (
+              <button
+                class={`notif-filter ${filter() === f ? "active" : ""}`}
+                onClick={() => setFilter(f)}
+              >
+                {t(`notif.filter.${f}`)}
+                <Show when={n() > 0}>
+                  <span class="notif-filter-count">{n()}</span>
+                </Show>
+              </button>
+            );
+          }}
+        </For>
+      </div>
+
+      <div class="notif-list">
+        <Show
+          when={filtered().length > 0}
+          fallback={
+            <div class="notif-empty">
+              <div class="notif-empty-icon" aria-hidden="true">🔔</div>
+              <div class="notif-empty-title">{t("notif.empty.title")}</div>
+              <div class="notif-empty-desc">{t("notif.empty.desc")}</div>
+            </div>
+          }
+        >
+          <For each={filtered()}>
+            {(n) => (
+              <div
+                class={`notif-item ${p.readIds.has(n.id) ? "read" : "unread"} ${n.workspace_id ? "jumpable" : ""}`}
+                onClick={() => click(n)}
+              >
+                <span class="notif-item-icon" aria-hidden="true">{iconFor(n.kind)}</span>
+                <div class="notif-item-body">
+                  <div class="notif-item-title">{n.title || n.body}</div>
+                  <Show when={n.title && n.body}>
+                    <div class="notif-item-summary">{n.body}</div>
+                  </Show>
+                  <div class="notif-item-meta">
+                    <span class="notif-item-kind">{t(`notif.filter.${n.kind}`) || n.kind}</span>
+                    <span class="notif-item-time">{relTime(n.timestamp_ms)}</span>
+                    <Show when={n.workspace_id}>
+                      <span class="notif-item-jump">↗ {t("notif.jump")}</span>
+                    </Show>
+                  </div>
+                </div>
+                <Show when={!p.readIds.has(n.id)}>
+                  <span class="notif-item-dot" aria-hidden="true" />
+                </Show>
+              </div>
+            )}
+          </For>
+        </Show>
+      </div>
+    </div>
+  );
+}

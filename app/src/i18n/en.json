@@ -734,5 +734,20 @@
   "connectExisting.connecting": "Setting up…",
   "connectExisting.result.ready": "Workspace '{name}' is ready",
   "connectExisting.result.keyPath": "Key installed at {path}",
-  "connectExisting.btn.createPane": "Create a pane now"
+  "connectExisting.btn.createPane": "Create a pane now",
+  "notif.title": "Notifications",
+  "notif.markAllRead": "Mark all read",
+  "notif.clear": "Clear all",
+  "notif.close": "Close",
+  "notif.jump": "Go to workspace",
+  "notif.filter.all": "All",
+  "notif.filter.agent": "Agent",
+  "notif.filter.notification": "Terminal",
+  "notif.filter.error": "Errors",
+  "notif.empty.title": "No notifications",
+  "notif.empty.desc": "Agent hooks, terminal alerts (OSC 9/99/777), and errors show up here.",
+  "notif.time.now": "just now",
+  "notif.time.min": "{n}m ago",
+  "notif.time.hour": "{n}h ago",
+  "notif.time.day": "{n}d ago"
 }

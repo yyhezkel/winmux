@@ -734,5 +734,20 @@
   "connectExisting.connecting": "Настройка…",
   "connectExisting.result.ready": "Рабочее пространство '{name}' готово",
   "connectExisting.result.keyPath": "Ключ установлен в {path}",
-  "connectExisting.btn.createPane": "Создать панель"
+  "connectExisting.btn.createPane": "Создать панель",
+  "notif.title": "Уведомления",
+  "notif.markAllRead": "Отметить все",
+  "notif.clear": "Очистить",
+  "notif.close": "Закрыть",
+  "notif.jump": "К рабочему пространству",
+  "notif.filter.all": "Все",
+  "notif.filter.agent": "Агент",
+  "notif.filter.notification": "Терминал",
+  "notif.filter.error": "Ошибки",
+  "notif.empty.title": "Нет уведомлений",
+  "notif.empty.desc": "Хуки агента, оповещения терминала (OSC 9/99/777) и ошибки появятся здесь.",
+  "notif.time.now": "только что",
+  "notif.time.min": "{n} мин назад",
+  "notif.time.hour": "{n} ч назад",
+  "notif.time.day": "{n} дн назад"
 }

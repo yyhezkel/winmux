@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
+import { NotificationCenter, type NotifItem } from "./NotificationCenter";
 import { LayoutView } from "./LayoutView";
 import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
@@ -91,6 +92,50 @@ function App() {
     workspaces: [],
   });
   const [showCreate, setShowCreate] = createSignal(false);
+  // Unshipped-fivefer (#1): Notification Center. Session-accumulating store
+  // fed by both notification streams (OSC + RPC/agent); read-state persists
+  // per-machine in localStorage (the items themselves are in-memory only, so
+  // disk-persisting read-state would outlive its subjects).
+  const [notifications, setNotifications] = createSignal<NotifItem[]>([]);
+  const [showNotifCenter, setShowNotifCenter] = createSignal(false);
+  const NOTIF_READ_KEY = "winmux.notif.read";
+  const loadNotifRead = (): Set<number> => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(NOTIF_READ_KEY) ?? "[]") as number[]);
+    } catch {
+      return new Set();
+    }
+  };
+  const [notifRead, setNotifRead] = createSignal<Set<number>>(loadNotifRead());
+  const persistNotifRead = (s: Set<number>) => {
+    try {
+      localStorage.setItem(NOTIF_READ_KEY, JSON.stringify([...s]));
+    } catch {
+      /* private mode / quota */
+    }
+  };
+  const pushNotif = (n: NotifItem) =>
+    setNotifications((prev) =>
+      prev.some((x) => x.id === n.id) ? prev : [n, ...prev].slice(0, 300),
+    );
+  const markNotifRead = (id: number) =>
+    setNotifRead((prev) => {
+      const n = new Set(prev);
+      n.add(id);
+      persistNotifRead(n);
+      return n;
+    });
+  const markAllNotifRead = () =>
+    setNotifRead(() => {
+      const n = new Set(notifications().map((x) => x.id));
+      persistNotifRead(n);
+      return n;
+    });
+  const clearNotifs = () => {
+    void invoke("notifications_clear").catch(() => {});
+    setNotifications([]);
+  };
+  const unreadNotifs = () => notifications().filter((n) => !notifRead().has(n.id)).length;
   const [editingWorkspace, setEditingWorkspace] = createSignal<Workspace | null>(null);
   const [activePaneId, setActivePaneId] = createSignal<string | null>(null);
   // Phase 55-A: pane maximize toggle. When set, LayoutView gets just
@@ -1530,6 +1575,14 @@ function App() {
       setSettings(s);
       applyTheme(s);
       applyI18nSettings(s.i18n);
+      // #1: seed the Notification Center with any notifications already
+      // collected this session (RPC/agent items live in the backend Vec).
+      try {
+        const seed = await invoke<NotifItem[]>("notifications_list");
+        setNotifications(seed.map((n) => ({ ...n, kind: n.kind || "agent" })).reverse());
+      } catch (e) {
+        console.warn("notifications_list failed", e);
+      }
       setShortcutTable(buildShortcutTable(s.shortcuts ?? DEFAULT_SHORTCUTS));
       setCtrlCCopyOnSelect(
         (s.shortcuts ?? DEFAULT_SHORTCUTS).copy_on_select_with_ctrl_c,
@@ -1628,8 +1681,22 @@ function App() {
           };
           setFeedItems((prev) => [item, ...prev]);
           scheduleFeedDismiss(item.request_id);
+          // #1: also record it in the Notification Center timeline.
+          pushNotif({
+            id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
+            title: hasTitle ? title : body,
+            body: hasTitle ? body : "",
+            workspace_id: null,
+            timestamp_ms: Date.now(),
+            kind: "notification",
+          });
         },
       ),
+    );
+    // #1: RPC/agent notifications (Claude hooks). Backend pushes to
+    // state.notifications AND emits this — the center mirrors it live.
+    unlistens.push(
+      await listen<NotifItem>("notification:new", (e) => pushNotif(e.payload)),
     );
     // Phase 36 (#2.2): auto port-forward lifecycle. The backend opens a
     // local SSH forward when the remote watcher reports a new listening
@@ -1888,6 +1955,8 @@ function App() {
           onProvision={() => setShowProvision(true)}
           onOpenSettings={() => setShowSettings(true)}
           onOpenNotes={() => setShowNotes(true)}
+          onOpenNotifications={() => setShowNotifCenter(true)}
+          unreadNotifs={unreadNotifs()}
           onAction={(id, action) => {
             if (action === "rename") handleRename(id);
             else if (action === "edit") {
@@ -2181,6 +2250,22 @@ function App() {
       {/* Phase GG: in-app Markdown viewer (floating window). Reads its
           own global store, opened by FileManager .md double-click. */}
       <MarkdownViewer />
+
+      {/* Unshipped-fivefer (#1): Notification Center — slide-in panel with a
+          click-away backdrop. */}
+      <Show when={showNotifCenter()}>
+        <div class="notif-backdrop" onClick={() => setShowNotifCenter(false)}>
+          <NotificationCenter
+            items={notifications()}
+            readIds={notifRead()}
+            onClose={() => setShowNotifCenter(false)}
+            onJump={(wsId) => handleSetActive(wsId)}
+            onMarkRead={markNotifRead}
+            onMarkAllRead={markAllNotifRead}
+            onClear={clearNotifs}
+          />
+        </div>
+      </Show>
 
       <CreateWorkspaceModal
         open={showCreate()}

@@ -71,6 +71,10 @@ pub(crate) struct NotificationItem {
     pub(crate) body: String,
     pub(crate) workspace_id: Option<String>,
     pub(crate) timestamp_ms: u128,
+    // Unshipped-fivefer (#1): coarse category for the Notification Center
+    // filter — "agent" (hooks/Claude), "notification" (OSC/generic),
+    // "error", "build", "mention".
+    pub(crate) kind: String,
 }
 
 #[derive(Clone, Serialize, Debug, PartialEq, Eq, ts_rs::TS)]

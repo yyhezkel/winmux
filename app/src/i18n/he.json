@@ -734,5 +734,20 @@
   "connectExisting.connecting": "מגדיר…",
   "connectExisting.result.ready": "סביבת העבודה '{name}' מוכנה",
   "connectExisting.result.keyPath": "המפתח הותקן ב-{path}",
-  "connectExisting.btn.createPane": "צור פאנל עכשיו"
+  "connectExisting.btn.createPane": "צור פאנל עכשיו",
+  "notif.title": "התראות",
+  "notif.markAllRead": "סמן הכל כנקרא",
+  "notif.clear": "נקה הכל",
+  "notif.close": "סגור",
+  "notif.jump": "עבור לסביבה",
+  "notif.filter.all": "הכל",
+  "notif.filter.agent": "סוכן",
+  "notif.filter.notification": "טרמינל",
+  "notif.filter.error": "שגיאות",
+  "notif.empty.title": "אין התראות",
+  "notif.empty.desc": "hooks של הסוכן, התראות טרמינל (OSC 9/99/777) ושגיאות יופיעו כאן.",
+  "notif.time.now": "עכשיו",
+  "notif.time.min": "לפני {n} דק׳",
+  "notif.time.hour": "לפני {n} שע׳",
+  "notif.time.day": "לפני {n} ימים"
 }

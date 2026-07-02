@@ -251,6 +251,18 @@ export function SettingsModal(p: Props) {
                   <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
                     {t("settings.autoConnect.hint")}
                   </p>
+                  {/* Unshipped-fivefer (#3): browser session persistence. */}
+                  <label class="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={p.settings.persist_browser_sessions !== false}
+                      onChange={(e) => update("persist_browser_sessions", e.currentTarget.checked)}
+                    />
+                    <span>{t("settings.persistBrowser.label")}</span>
+                  </label>
+                  <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
+                    {t("settings.persistBrowser.hint")}
+                  </p>
                   <label>
                     <span>{t("settings.autoDestroy.label")}</span>
                     <input

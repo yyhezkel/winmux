@@ -749,5 +749,7 @@
   "notif.time.now": "just now",
   "notif.time.min": "{n}m ago",
   "notif.time.hour": "{n}h ago",
-  "notif.time.day": "{n}d ago"
+  "notif.time.day": "{n}d ago",
+  "settings.persistBrowser.label": "Persist browser sessions",
+  "settings.persistBrowser.hint": "Keep cookies and logins in workspace browsers across restarts. When off, the shared browser profile is cleared on the next launch."
 }

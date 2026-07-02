@@ -749,5 +749,7 @@
   "notif.time.now": "الآن",
   "notif.time.min": "قبل {n} د",
   "notif.time.hour": "قبل {n} س",
-  "notif.time.day": "قبل {n} يوم"
+  "notif.time.day": "قبل {n} يوم",
+  "settings.persistBrowser.label": "الإبقاء على جلسات المتصفح",
+  "settings.persistBrowser.hint": "احتفظ بملفات تعريف الارتباط وتسجيلات الدخول في متصفحات مساحات العمل بين عمليات إعادة التشغيل. عند الإيقاف، يُمسح ملف المتصفح المشترك في التشغيل التالي."
 }

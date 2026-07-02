@@ -749,5 +749,7 @@
   "notif.time.now": "только что",
   "notif.time.min": "{n} мин назад",
   "notif.time.hour": "{n} ч назад",
-  "notif.time.day": "{n} дн назад"
+  "notif.time.day": "{n} дн назад",
+  "settings.persistBrowser.label": "Сохранять сессии браузера",
+  "settings.persistBrowser.hint": "Сохранять cookie и входы в браузерах рабочих пространств между перезапусками. При отключении общий профиль браузера очищается при следующем запуске."
 }

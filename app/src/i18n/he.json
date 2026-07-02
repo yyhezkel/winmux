@@ -749,5 +749,7 @@
   "notif.time.now": "עכשיו",
   "notif.time.min": "לפני {n} דק׳",
   "notif.time.hour": "לפני {n} שע׳",
-  "notif.time.day": "לפני {n} ימים"
+  "notif.time.day": "לפני {n} ימים",
+  "settings.persistBrowser.label": "שמור סשנים של הדפדפן",
+  "settings.persistBrowser.hint": "שמור עוגיות והתחברויות בדפדפני סביבות העבודה בין הפעלות. כשכבוי — פרופיל הדפדפן המשותף מתנקה בהפעלה הבאה."
 }

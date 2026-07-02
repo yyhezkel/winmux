@@ -5358,6 +5358,26 @@ pub fn run() {
         eprintln!("PANIC at {location}: {msg}");
     }));
 
+    // Unshipped-fivefer (#3): browser session persistence. Point WebView2 at a
+    // single stable profile folder under our config dir so cookies/logins in
+    // workspace browsers survive restarts. One app-wide folder (shared by the
+    // main window + every workspace browser) — deliberately NOT a per-workspace
+    // --user-data-dir, which reintroduces the 0x8007139F "user data folder in
+    // use" crash (WebView2 allows one environment per process). Must be set
+    // before any webview is created, hence here at the top of run().
+    if let Ok(base) = config_dir() {
+        let profile = base.join("webview2");
+        // Toggle off → wipe the profile on this launch (clear-on-restart), then
+        // keep using the same path so the next session starts clean too until
+        // re-enabled.
+        if !settings::persist_browser_sessions_flag() {
+            let _ = std::fs::remove_dir_all(&profile);
+        }
+        let _ = std::fs::create_dir_all(&profile);
+        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &profile);
+        dlog(&format!("webview2 profile folder: {}", profile.display()));
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

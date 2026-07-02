@@ -59,6 +59,9 @@ interface Props {
   // When set, the modal is in EDIT mode for that workspace; the connection-type
   // fields are read-only (deleting + recreating is required to change).
   editing: Workspace | null;
+  // Design Pass 01 (#1): initial connection type for a FRESH create (ignored
+  // in edit mode). Lets the Welcome "Connect via SSH" CTA land on the SSH tab.
+  initialType?: "local" | "ssh";
   onClose: () => void;
   // Phase 34: open the SSH-key-setup HelpPane as a side-by-side split.
   // Optional — when omitted (e.g. tests, embedded usage), the `?` icon
@@ -421,7 +424,7 @@ export function CreateWorkspaceModal(p: Props) {
       } else {
         // Fresh "new workspace" state.
         setName("");
-        setType("local");
+        setType(p.initialType ?? "local");
         setShell("");
         setHost("");
         setUser("");

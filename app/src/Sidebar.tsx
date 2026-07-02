@@ -467,6 +467,18 @@ export function Sidebar(p: Props) {
         </button>
       </div>
       <div class="sidebar-list">
+        {/* Design Pass 01 (#1): friendly CTA card while the list is empty,
+            so a fresh sidebar isn't just blank above the action buttons. */}
+        <Show when={p.workspaces.length === 0}>
+          <div class="sidebar-empty-card">
+            <div class="sidebar-empty-icon" aria-hidden="true">＋</div>
+            <div class="sidebar-empty-title">{t("ws.welcome.sidebar.title")}</div>
+            <div class="sidebar-empty-desc">{t("ws.welcome.sidebar.desc")}</div>
+            <button class="primary" onClick={p.onCreate}>
+              {t("ws.welcome.sidebar.cta")}
+            </button>
+          </div>
+        </Show>
         <Show when={p.groups.length > 0}>
           <div
             data-group-id=""

@@ -6,6 +6,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { NotificationCenter, NotifHeaderActions, type NotifItem } from "./NotificationCenter";
+import { WelcomeScreen } from "./WelcomeScreen";
 import { LayoutView } from "./LayoutView";
 import { setPaneSwapHandler } from "./paneDrag";
 import { FeedPanel } from "./FeedPanel";
@@ -110,6 +111,10 @@ function App() {
     workspaces: [],
   });
   const [showCreate, setShowCreate] = createSignal(false);
+  // Design Pass 01 (#1): lets the Welcome "Connect via SSH" CTA open the
+  // create modal pre-set to SSH. Reset to "local" on close so the plain
+  // "+ New workspace" entry points still default to a local shell.
+  const [createInitialType, setCreateInitialType] = createSignal<"local" | "ssh">("local");
   // Unshipped-fivefer (#1): Notification Center. Session-accumulating store
   // fed by both notification streams (OSC + RPC/agent); read-state persists
   // per-machine in localStorage (the items themselves are in-memory only, so
@@ -2694,7 +2699,22 @@ function App() {
           </ErrorBoundary>
         </Show>
 
-        <Show when={!activeWs()}>
+        {/* Design Pass 01 (#1): zero workspaces → full welcome screen.
+            Workspaces exist but none active → light "pick one" prompt. */}
+        <Show when={file().workspaces.length === 0}>
+          <WelcomeScreen
+            onCreate={() => {
+              setCreateInitialType("local");
+              setShowCreate(true);
+            }}
+            onConnectSsh={() => {
+              setCreateInitialType("ssh");
+              setShowCreate(true);
+            }}
+            onProvision={() => setShowProvision(true)}
+          />
+        </Show>
+        <Show when={file().workspaces.length > 0 && !activeWs()}>
           <div class="empty">
             <p>{t("ws.empty.none")}</p>
             <button class="primary" onClick={() => setShowCreate(true)}>
@@ -2922,9 +2942,11 @@ function App() {
       <CreateWorkspaceModal
         open={showCreate()}
         editing={editingWorkspace()}
+        initialType={createInitialType()}
         onClose={() => {
           setShowCreate(false);
           setEditingWorkspace(null);
+          setCreateInitialType("local");
         }}
         onCreate={handleCreate}
         onUpdate={handleUpdate}

@@ -1,6 +1,12 @@
 /* @refresh reload */
 import { render } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
+// Global stylesheets live at the entry point so BOTH the main <App> and the
+// #4 pop-out window (which bypasses <App>) get xterm's CSS + our theme.
+// Previously these were imported inside App.tsx, so a popout webview rendered
+// unstyled — blank white screen, invisible terminal.
+import "@xterm/xterm/css/xterm.css";
+import "./App.css";
 import App from "./App";
 import { PopoutTerminal } from "./components/PopoutTerminal";
 

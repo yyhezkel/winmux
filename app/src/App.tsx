@@ -49,6 +49,7 @@ import {
   describeConnection,
   effectiveIdentity,
   findPane,
+  pruneLayout,
   type Connection,
   type EnvVar,
   type FeedItem,
@@ -180,6 +181,10 @@ function App() {
   // pane in the workspace after enter/exit so xterm geometry catches
   // up to the new available area.
   const [maximizedPaneId, setMaximizedPaneId] = createSignal<string | null>(null);
+  // Unshipped-fivefer (#4): pane_ids currently living in their own pop-out OS
+  // window. They're pruned from the grid render tree (siblings reflow to fill),
+  // and returned to their slot on `popout:closed`.
+  const [poppedOut, setPoppedOut] = createSignal<Set<string>>(new Set());
   const [pendingPwFor, setPendingPwFor] = createSignal<string | null>(null);
   const [pendingPassphraseFor, setPendingPassphraseFor] = createSignal<{
     paneId: string;
@@ -560,8 +565,22 @@ function App() {
         rows: ti.term.rows,
         dir,
       });
+      // The pane now lives in its own OS window — vacate its grid slot so the
+      // siblings reflow to fill it (it returns on popout:closed). detach() so
+      // the hidden grid terminal is no longer the input/resize authority.
       ti.detach();
-      ti.notice(t("pane.popout.detached"));
+      const nextHidden = new Set(poppedOut());
+      nextHidden.add(paneId);
+      setPoppedOut(nextHidden);
+      // If we just hid the active pane, move focus to a still-visible one.
+      const wsLayout = activeWs()?.layout;
+      if (activePaneId() === paneId && wsLayout) {
+        const survivor = collectPanes(wsLayout).find((p) => !nextHidden.has(p));
+        if (survivor) {
+          setActivePaneId(survivor);
+          terms.get(survivor)?.focus();
+        }
+      }
     } catch (e) {
       console.error("popout_pane failed", e);
     }
@@ -1694,6 +1713,16 @@ function App() {
         if (!pid) return;
         sessionToPane.delete(e.payload.session_id);
         paneToSession.delete(pid);
+        // If the pane was popped out, its window is closing too — return the
+        // (now-dead) pane to the grid so it isn't pruned away forever. Done
+        // here because popout:closed can't map the sid once the maps are gone.
+        if (poppedOut().has(pid)) {
+          setPoppedOut((s) => {
+            const n = new Set(s);
+            n.delete(pid);
+            return n;
+          });
+        }
         const ti = terms.get(pid);
         ti?.notice(
           `[disconnected${e.payload.reason ? ` (${e.payload.reason})` : ""}]`
@@ -1711,7 +1740,15 @@ function App() {
       await listen<string>("popout:closed", (e) => {
         const sid = e.payload;
         const pid = sessionToPane.get(sid);
+        // pty:exit-driven close already cleared the maps AND un-pruned the
+        // pane (see the pty:exit handler); nothing left to do here.
         if (!pid || paneToSession.get(pid) !== sid) return;
+        // Return the pane to its grid slot, then re-attach input + resize.
+        setPoppedOut((s) => {
+          const n = new Set(s);
+          n.delete(pid);
+          return n;
+        });
         const ti = terms.get(pid);
         if (!ti) return;
         ti.attach(sid);
@@ -2269,8 +2306,19 @@ function App() {
                     workspaceId={activeWs()!.id}
                     node={(() => {
                       const ws = activeWs()!;
+                      // Unshipped-fivefer (#4): prune panes that are popped out
+                      // into their own OS window so the grid reflows to fill
+                      // their slot. The pane_ids stay in ws.layout, so closing
+                      // the popout un-prunes and restores them in place. Fall
+                      // back to the full layout if EVERY pane is popped out
+                      // (sole-pane workspace) so we never render an empty grid.
+                      const hidden = poppedOut();
+                      const base =
+                        hidden.size > 0
+                          ? pruneLayout(ws.layout!, hidden) ?? ws.layout!
+                          : ws.layout!;
                       const max = maximizedPaneId();
-                      if (!max) return ws.layout!;
+                      if (!max) return base;
                       // Phase 55-A: when a pane is maximized, swap
                       // the tree for that one leaf so it fills the
                       // workspace area. Splits + the other panes are
@@ -2278,8 +2326,8 @@ function App() {
                       // straight back without re-creating any
                       // TerminalInstance (those are keyed by pane_id
                       // in the `terms` map, surviving the DOM detach).
-                      const node = findPane(ws.layout!, max);
-                      return node ?? ws.layout!;
+                      const node = findPane(base, max);
+                      return node ?? base;
                     })()}
                     activePaneId={activePaneId()}
                     connectedPaneIds={connectedPanes()}

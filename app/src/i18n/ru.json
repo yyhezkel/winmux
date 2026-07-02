@@ -756,5 +756,8 @@
   "fm.action.cut": "Вырезать",
   "fm.action.paste": "Вставить",
   "fm.paste.same_location": "Уже в этой папке.",
-  "fm.paste.use_download": "Чтобы скопировать удалённый файл на ПК, используйте «Скачать»."
+  "fm.paste.use_download": "Чтобы скопировать удалённый файл на ПК, используйте «Скачать».",
+  "fm.paste.to_local": "Вставить локально",
+  "fm.paste.to_remote": "Вставить на сервер",
+  "fm.paste.clear": "Очистить буфер"
 }

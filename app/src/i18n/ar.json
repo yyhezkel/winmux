@@ -756,5 +756,8 @@
   "fm.action.cut": "قص",
   "fm.action.paste": "لصق",
   "fm.paste.same_location": "موجود بالفعل في هذا المجلد.",
-  "fm.paste.use_download": "لجلب ملف بعيد إلى جهازك، استخدم التنزيل."
+  "fm.paste.use_download": "لجلب ملف بعيد إلى جهازك، استخدم التنزيل.",
+  "fm.paste.to_local": "لصق محليًا",
+  "fm.paste.to_remote": "لصق عن بُعد",
+  "fm.paste.clear": "مسح الحافظة"
 }

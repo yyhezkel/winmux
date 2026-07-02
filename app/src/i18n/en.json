@@ -756,5 +756,8 @@
   "fm.action.cut": "Cut",
   "fm.action.paste": "Paste",
   "fm.paste.same_location": "Already in this folder.",
-  "fm.paste.use_download": "To bring a remote file to your PC, use Download."
+  "fm.paste.use_download": "To bring a remote file to your PC, use Download.",
+  "fm.paste.to_local": "Paste to local",
+  "fm.paste.to_remote": "Paste to remote",
+  "fm.paste.clear": "Clear clipboard"
 }

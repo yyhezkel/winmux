@@ -1032,6 +1032,29 @@ export function FileManagerPane(p: Props) {
 
   return (
     <div class="fm-pane">
+      {/* Feedback: persistent clipboard bar so Paste is one click from
+          anywhere — no need to hunt for a context menu after copy/cut. */}
+      <Show when={clip()}>
+        <div class="fm-clip-bar">
+          <span class="fm-clip-label">
+            {clip()!.op === "cut" ? "✂" : "📋"} {clip()!.name}
+            <span class="fm-clip-src">({clip()!.side})</span>
+          </span>
+          <span class="fm-clip-actions">
+            <button class="fm-clip-btn" onClick={() => void pasteInto("local")}>
+              {t("fm.paste.to_local")}
+            </button>
+            <Show when={p.hasSsh}>
+              <button class="fm-clip-btn" onClick={() => void pasteInto("remote")}>
+                {t("fm.paste.to_remote")}
+              </button>
+            </Show>
+            <button class="fm-clip-btn fm-clip-x" title={t("fm.paste.clear")} onClick={() => setClip(null)}>
+              ✕
+            </button>
+          </span>
+        </div>
+      </Show>
       <div class="fm-toolbar">
         <label class="fm-checkbox">
           <input
@@ -1483,6 +1506,11 @@ export function FileManagerPane(p: Props) {
                   ? t("fm.btn.upload_from_disk_remote")
                   : t("fm.btn.upload_from_disk_local")}
               </button>
+              <Show when={clip()}>
+                <button class="fm-ctx-item" onClick={fire(() => void pasteInto(side))}>
+                  📋  {t("fm.action.paste")}
+                </button>
+              </Show>
               <div class="fm-ctx-sep" />
               <button class="fm-ctx-item" onClick={fire(() => void copyPathOf(side, ""))}>
                 {t("fm.btn.copy_path_current")}

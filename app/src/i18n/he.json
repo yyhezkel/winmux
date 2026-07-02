@@ -756,5 +756,8 @@
   "fm.action.cut": "גזור",
   "fm.action.paste": "הדבק",
   "fm.paste.same_location": "כבר בתיקייה הזאת.",
-  "fm.paste.use_download": "כדי להביא קובץ מרוחק למחשב, השתמש בהורדה."
+  "fm.paste.use_download": "כדי להביא קובץ מרוחק למחשב, השתמש בהורדה.",
+  "fm.paste.to_local": "הדבק במקומי",
+  "fm.paste.to_remote": "הדבק במרוחק",
+  "fm.paste.clear": "נקה clipboard"
 }

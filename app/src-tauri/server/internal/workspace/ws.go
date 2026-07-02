@@ -24,15 +24,23 @@ var upgrader = websocket.Upgrader{
 }
 
 // wsAuthorized checks the bearer token from the header or the ?token= query.
+// It accepts the shared (desktop) token OR — via deviceAuth — a paired device's
+// long-term token, so the WS subscribe matches the REST surface's auth
+// (api.tokenOK). Without this, a phone that just created a session over REST
+// (device token accepted) would get 401 on the subscribe. deviceAuth is wired
+// to chat.ChatAPI.TokenValid in cmd; nil in tests.
 func (s *Service) wsAuthorized(r *http.Request) bool {
-	if s.token == "" {
-		return true // token unset (tests) → open
+	if s.token == "" && s.deviceAuth == nil {
+		return true // no auth configured (tests) → open
 	}
 	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if got == s.token {
+	if got == "" {
+		got = r.URL.Query().Get("token") // WS clients can't always set headers
+	}
+	if s.token != "" && got == s.token {
 		return true
 	}
-	return r.URL.Query().Get("token") == s.token
+	return s.deviceAuth != nil && s.deviceAuth(got)
 }
 
 func (s *Service) handleSubscribe(w http.ResponseWriter, r *http.Request) {

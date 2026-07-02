@@ -11,13 +11,19 @@ import (
 
 // Service serves the workspace REST + WS API over a Manager.
 type Service struct {
-	mgr   *Manager
-	token string // bearer token (also accepted via ?token= on the WS route)
+	mgr        *Manager
+	token      string            // shared (desktop) token; also via ?token= on the WS route
+	deviceAuth func(string) bool // accepts a paired device's long-term token (nil in tests)
 }
 
 // NewService wires the HTTP layer to a Manager. token gates the subscribe WS
-// (which can't always use the header); "" means open (tests).
+// (which can't always use the header); "" (and no device auth) means open (tests).
 func NewService(mgr *Manager, token string) *Service { return &Service{mgr: mgr, token: token} }
+
+// SetDeviceAuth lets the subscribe WS accept paired-device tokens (in addition
+// to the shared token), matching the REST surface. cmd wires this to
+// chat.ChatAPI.TokenValid so a phone's long-term token works on the stream.
+func (s *Service) SetDeviceAuth(fn func(string) bool) { s.deviceAuth = fn }
 
 // RegisterRoutes mounts /api/v2/workspace/* — REST behind the shared auth
 // middleware, and the subscribe WebSocket with its own header-or-query auth.

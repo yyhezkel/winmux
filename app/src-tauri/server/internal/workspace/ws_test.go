@@ -105,6 +105,44 @@ func TestWSTwoClientsAndHookResolve(t *testing.T) {
 	}
 }
 
+// The subscribe WS must accept a paired-device token (not only the shared
+// token) — the bug that 401'd a phone after it created a session over REST.
+func TestWSAcceptsDeviceToken(t *testing.T) {
+	st, err := OpenStore(filepath.Join(t.TempDir(), "ws.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(st.Close)
+	m := NewManager(st, nil)
+	svc := NewService(m, "shared-token")
+	svc.SetDeviceAuth(func(tok string) bool { return tok == "device-token" || tok == "shared-token" })
+	mux := http.NewServeMux()
+	svc.RegisterRoutes(mux, func(h http.HandlerFunc) http.HandlerFunc { return h })
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	w, _ := m.CreateWorkspace("p")
+	se, _ := m.CreateSession(w.ID, "")
+	base := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v2/workspace/x/session/" + se.ID + "/subscribe?client_id=P&token="
+
+	// device token → connects (hello).
+	c, _, err := websocket.DefaultDialer.Dial(base+"device-token", nil)
+	if err != nil {
+		t.Fatalf("device token should authorize the WS: %v", err)
+	}
+	if h := readFrame(t, c); h["type"] != "hello" {
+		t.Fatalf("want hello, got %v", h)
+	}
+	c.Close()
+
+	// a bogus token → 401 (handshake fails).
+	if _, resp, err := websocket.DefaultDialer.Dial(base+"nope", nil); err == nil {
+		t.Fatal("bogus token must be rejected")
+	} else if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %v", resp)
+	}
+}
+
 // A late subscriber replays the whole history from its cursor, then streams.
 func TestWSReconnectReplaysFromCursor(t *testing.T) {
 	m, srv := testWSServer(t)

@@ -162,6 +162,12 @@ func main() {
 			log.Printf("workspace: ensure default failed: %v", e)
 		}
 		wsSvc = workspace.NewService(wmgr, token)
+		// Accept paired-device tokens on the subscribe WS (matches the REST
+		// surface) so a phone's long-term token works on the stream, not just
+		// the shared desktop token.
+		if chatAPI != nil {
+			wsSvc.SetDeviceAuth(chatAPI.TokenValid)
+		}
 		log.Printf("workspace: API enabled")
 	}
 

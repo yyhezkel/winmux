@@ -16,6 +16,7 @@ package chat
 import (
 	"encoding/json"
 	"log"
+	"os"
 	"sync"
 
 	"winmux-server/internal/workspace"
@@ -28,6 +29,7 @@ const KindClaudeChat = "claude_chat"
 type WorkspaceBridge struct {
 	mgr   *SessionManager
 	wsMgr *workspace.Manager
+	home  string // cwd for spawned claude — its config/trust/auth live under $HOME
 	mu    sync.Mutex
 	live  map[string]*Session // wsSessionID → engine Session
 }
@@ -35,7 +37,8 @@ type WorkspaceBridge struct {
 // NewWorkspaceBridge builds the bridge. Register it with
 // workspace.Manager.SetDriver so client input reaches it.
 func NewWorkspaceBridge(mgr *SessionManager, wsMgr *workspace.Manager) *WorkspaceBridge {
-	return &WorkspaceBridge{mgr: mgr, wsMgr: wsMgr, live: map[string]*Session{}}
+	home, _ := os.UserHomeDir()
+	return &WorkspaceBridge{mgr: mgr, wsMgr: wsMgr, home: home, live: map[string]*Session{}}
 }
 
 // OnUserInput spawns the engine on first message (claude_chat only), then feeds
@@ -81,7 +84,9 @@ func (b *WorkspaceBridge) engineFor(wsSessionID string) *Session {
 	if err != nil || row.Kind != KindClaudeChat {
 		return nil
 	}
-	sess, err := b.mgr.create(startSpec{})
+	// Spawn claude in $HOME so it finds its config/trust/auth (~/.claude.json,
+	// ~/.claude/…) — under systemd the daemon's cwd is not the user's home.
+	sess, err := b.mgr.create(startSpec{Cwd: b.home})
 	if err != nil {
 		b.pub(wsSessionID, workspace.FrameError, map[string]any{"message": "claude spawn failed: " + err.Error()})
 		return nil

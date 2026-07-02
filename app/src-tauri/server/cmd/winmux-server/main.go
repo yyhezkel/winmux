@@ -115,15 +115,16 @@ func main() {
 	// Phase 69 — mobile Claude chat subsystem (separate chat.db). On any setup
 	// error we log and continue serving metrics; chat just stays off.
 	var chatAPI *chat.ChatAPI
+	var chatMgr *chat.SessionManager // hoisted so the workspace bridge can reach it
 	chatStore, cerr := chat.OpenChatStore(filepath.Join(*base, "chat.db"))
 	if cerr != nil {
 		log.Printf("chat: open store failed, chat disabled: %v", cerr)
 	} else {
 		defer chatStore.Close()
-		mgr := chat.NewSessionManager(chatStore)
-		chatAPI = chat.NewChatAPI(mgr, chatStore, token)
-		hooks.Start(mgr) // thin listener → SessionManager.HandleHookConn (cycle-safe)
-		go chat.RunSessionSweeper(mgr, stop)
+		chatMgr = chat.NewSessionManager(chatStore)
+		chatAPI = chat.NewChatAPI(chatMgr, chatStore, token)
+		hooks.Start(chatMgr) // thin listener → SessionManager.HandleHookConn (cycle-safe)
+		go chat.RunSessionSweeper(chatMgr, stop)
 		log.Printf("chat: Claude chat subsystem enabled")
 	}
 
@@ -167,6 +168,13 @@ func main() {
 		// the shared desktop token.
 		if chatAPI != nil {
 			wsSvc.SetDeviceAuth(chatAPI.TokenValid)
+		}
+		// §16 engine↔substrate bridge: run Claude for `claude_chat` sessions —
+		// client user_input spawns/feeds a Claude process whose output streams
+		// back as workspace frames.
+		if chatMgr != nil {
+			wmgr.SetDriver(chat.NewWorkspaceBridge(chatMgr, wmgr))
+			log.Printf("workspace: claude_chat engine bridge enabled")
 		}
 		log.Printf("workspace: API enabled")
 	}

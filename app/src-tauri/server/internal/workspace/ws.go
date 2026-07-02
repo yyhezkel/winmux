@@ -124,15 +124,26 @@ func (s *Service) readLoop(conn *websocket.Conn, sid, clientID string) {
 		if json.Unmarshal(data, &f) != nil {
 			continue
 		}
+		d := s.mgr.Driver()
 		switch f.Type {
 		case FrameUserInput:
 			payload, _ := json.Marshal(userInputPayload{Content: f.Content, ClientID: clientID})
-			_, _ = s.mgr.Publish(sid, FrameUserInput, payload)
+			_, _ = s.mgr.Publish(sid, FrameUserInput, payload) // echo to all subscribers
+			if d != nil {
+				d.OnUserInput(sid, f.Content, clientID) // → drive Claude (claude_chat)
+			}
 		case FrameHookDecision:
-			_, _ = s.mgr.ResolveHook(f.ReqID, clientID, f.Decision)
+			// First decision wins (broadcasts hook_resolved); only the winner
+			// forwards the answer to the engine.
+			if won, _ := s.mgr.ResolveHook(f.ReqID, clientID, f.Decision); won && d != nil {
+				d.OnHookDecision(sid, f.ReqID, clientID, f.Decision)
+			}
 		case FrameInterrupt:
 			payload, _ := json.Marshal(interruptPayload{ClientID: clientID})
 			_, _ = s.mgr.Publish(sid, FrameInterrupt, payload)
+			if d != nil {
+				d.OnInterrupt(sid, clientID)
+			}
 		case FrameUnsubscribe:
 			_ = conn.Close() // ends the write loop too
 			return

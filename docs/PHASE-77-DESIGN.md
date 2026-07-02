@@ -595,10 +595,27 @@ State model (`internal/workspace`): **Workspace** (server UUID `ws_…`) → **S
     tokens); Insights + Pairing keep full backward compat. Only the mobile-facing
     chat surface breaks. A `ws_default` workspace is still ensured at boot.
   - The chat **engine** (SessionManager + stream-json + hook RPC bridge) is kept
-    as internal machinery. **Follow-up (when mobile consumes the new API):** wire
-    Claude-spawn into a workspace `claude_chat` session so it runs `claude` and
-    streams stdout into the workspace event log (engine↔substrate). Kotlin frame
-    types are NOT locked, so that wiring uses the cleanest per-`type` schema.
+    as internal machinery. ~~Follow-up~~ **DONE (2026-07-02, §18).**
+
+## 18. Engine↔substrate bridge — claude_chat runs Claude (implemented)
+`internal/chat/bridge.go` (`WorkspaceBridge`) connects the Claude engine to the
+workspace substrate, closing the mobile loop (pair → session → **Claude answers**):
+- Lives in `chat` so it drives the `Session`'s unexported methods; imports
+  `workspace` (no cycle — workspace only imports `core`).
+- `workspace.Manager` gains an optional `SessionDriver` (pure pub/sub otherwise);
+  the WS `readLoop` notifies it on `user_input` / `hook_decision` (winner only) /
+  `interrupt`. Wired in cmd: `wmgr.SetDriver(chat.NewWorkspaceBridge(chatMgr, wmgr))`.
+- **Lazy spawn:** the first `user_input` on a `claude_chat` session spawns a
+  Claude process (`SessionManager.create`); non-`claude_chat` sessions are a
+  no-op. Output is pumped through `translate()` which maps the engine frames to
+  the §4.4 contract (`assistant`/`assistant_delta`/`text`→`assistant_text.content`;
+  `tool_use` `id/name/input`→`tool_id/tool_name/tool_input`; `tool_result`
+  `tool_use_id`→`tool_id`; `status`/`error`/`notification`; `hook_request` via
+  `CreateHookRequest` keeping `req_id` so 8b winner-takes-all + the engine hook
+  share it). Engine-internal frames (session_init/result/raw/user/system) drop.
+- Tests: `TestBridgeTranslate` (field/type renames), `TestBridgeIgnoresNonClaudeKind`,
+  `TestWSDriverReceivesUserInput`. Requires `claude` on the server PATH for a live
+  run (a spawn failure surfaces as an `error` frame to the client).
 
 ## 17. S6 — SDK coverage of the mobile surface (implemented, 2026-07-02)
 The mobile session flagged an SDK gap: `WinmuxClient` covered only files/logs/

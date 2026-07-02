@@ -25,6 +25,7 @@ type liveSession struct {
 type Manager struct {
 	store    *Store
 	notifier core.NotificationSender
+	driver   SessionDriver // optional engine hook (claude_chat); nil = pure pub/sub
 
 	mu   sync.Mutex
 	live map[string]*liveSession // session_id → live subscribers
@@ -44,6 +45,23 @@ func now() int64 { return time.Now().Unix() }
 // ─── workspaces ──────────────────────────────────────────────────────────────
 
 // CreateWorkspace mints a server-authoritative UUID (Q5).
+// SessionDriver is an optional consumer of client→server commands on a session
+// (Phase 77 §16). The chat WorkspaceBridge implements it to run Claude for a
+// `claude_chat` session: the manager stays a pure pub/sub substrate; the driver
+// is notified out-of-band so it can spawn/feed the engine. nil = no engine.
+type SessionDriver interface {
+	OnUserInput(sessionID, content, clientID string)
+	OnHookDecision(sessionID, reqID, clientID, decision string)
+	OnInterrupt(sessionID, clientID string)
+}
+
+// SetDriver registers the (single) session driver. Wired in cmd after both the
+// chat engine + workspace manager exist.
+func (m *Manager) SetDriver(d SessionDriver) { m.driver = d }
+
+// Driver returns the registered driver (nil if none).
+func (m *Manager) Driver() SessionDriver { return m.driver }
+
 // DefaultID is the always-present workspace every client falls into when it
 // hasn't chosen one (ensured at startup). Returned by pairing/redeem as
 // default_workspace_id so a freshly paired phone can connect without a

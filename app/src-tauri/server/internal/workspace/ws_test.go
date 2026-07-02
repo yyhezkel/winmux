@@ -105,6 +105,39 @@ func TestWSTwoClientsAndHookResolve(t *testing.T) {
 	}
 }
 
+// mockDriver records the calls the WS readLoop makes into the session driver.
+type mockDriver struct{ userInput chan [2]string }
+
+func (d *mockDriver) OnUserInput(sid, content, clientID string) {
+	d.userInput <- [2]string{sid, content}
+}
+func (d *mockDriver) OnHookDecision(sid, reqID, clientID, dec string) {}
+func (d *mockDriver) OnInterrupt(sid, clientID string)                {}
+
+// A client user_input must be handed to the registered driver (the hook the
+// claude_chat engine bridge uses to drive Claude).
+func TestWSDriverReceivesUserInput(t *testing.T) {
+	m, srv := testWSServer(t)
+	d := &mockDriver{userInput: make(chan [2]string, 1)}
+	m.SetDriver(d)
+	w, _ := m.CreateWorkspace("p")
+	se, _ := m.CreateSession(w.ID, "claude_chat")
+
+	c := dialSub(t, srv, se.ID, "A", 0)
+	defer c.Close()
+	if err := c.WriteMessage(websocket.TextMessage, []byte(`{"type":"user_input","content":"hello claude"}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-d.userInput:
+		if got[0] != se.ID || got[1] != "hello claude" {
+			t.Fatalf("driver got %v", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("driver.OnUserInput was not called")
+	}
+}
+
 // The subscribe WS must accept a paired-device token (not only the shared
 // token) — the bug that 401'd a phone after it created a session over REST.
 func TestWSAcceptsDeviceToken(t *testing.T) {

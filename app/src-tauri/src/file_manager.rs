@@ -452,6 +452,35 @@ pub(crate) async fn file_rename_remote(
     fm_log("rename", &format!("{old_path} → {new_path}"), r)
 }
 
+/// Feedback (cut/copy/paste): copy a remote file to another remote path on the
+/// same host over SFTP (read src → write dest). Move (cut) uses the cheaper
+/// `file_rename_remote` instead; this is the copy case.
+#[tauri::command]
+pub(crate) async fn file_copy_remote(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    src: String,
+    dest: String,
+) -> Result<(), String> {
+    let handle = pick_ssh_handle_for_workspace(&state, &workspace_id)
+        .ok_or_else(|| "no active SSH session".to_string())?;
+    let sftp = open_sftp(&handle).await?;
+    let res = async {
+        let mut rf = sftp.open(&src).await.map_err(|e| format!("sftp open {src}: {e}"))?;
+        let mut bytes = Vec::new();
+        rf.read_to_end(&mut bytes).await.map_err(|e| format!("read {src}: {e}"))?;
+        drop(rf);
+        let mut wf = sftp.create(&dest).await.map_err(|e| format!("sftp create {dest}: {e}"))?;
+        wf.write_all(&bytes).await.map_err(|e| format!("write {dest}: {e}"))?;
+        wf.flush().await.ok();
+        wf.shutdown().await.ok();
+        Ok::<(), String>(())
+    }
+    .await;
+    let _ = sftp.close().await;
+    fm_log("copy", &format!("{src} → {dest}"), res)
+}
+
 #[tauri::command]
 pub(crate) async fn file_mkdir_remote(
     state: State<'_, AppState>,

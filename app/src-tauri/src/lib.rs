@@ -5750,6 +5750,7 @@ pub fn run() {
             file_manager::file_delete_remote,
             file_manager::file_rename_local,
             file_manager::file_rename_remote,
+            file_manager::file_copy_remote,
             file_manager::file_mkdir_local,
             file_manager::file_copy_local,
             file_manager::file_mkdir_remote,

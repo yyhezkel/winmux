@@ -261,7 +261,7 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--w-surface);
-  border-right: 1px solid var(--w-border);
+  border-inline-end: 1px solid var(--w-border);
   font-size: var(--w-fs-lg);
   overflow: hidden;
 }
@@ -376,7 +376,7 @@ body {
 .ws-menu {
   position: absolute;
   top: 100%;
-  left: 12px;
+  inset-inline-start: 12px;
   z-index: 10;
   background: var(--w-surface-hi);
   border: 1px solid var(--w-border-hi);
@@ -396,7 +396,7 @@ body {
   background: transparent;
   border: none;
   color: var(--w-text);
-  text-align: left;
+  text-align: start;
   padding: 6px 9px;
   font-size: var(--w-fs-md);
   cursor: pointer;
@@ -444,13 +444,13 @@ body {
 }
 .ws-title { font-weight: 600; color: var(--w-text); }
 .ws-conn-info {
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--w-text-dim);
   font-family: var(--w-font-mono);
   font-size: var(--w-fs-sm);
 }
 .ws-header-btn {
-  margin-left: 8px;
+  margin-inline-start: 8px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -946,7 +946,7 @@ body {
   color: var(--w-text-faint);
   font-size: var(--w-fs-xs);
   font-family: var(--w-font-mono);
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .pane-annotation-bar {
@@ -1633,7 +1633,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .feed-panel {
   position: fixed;
   top: 12px;
-  right: 12px;
+  inset-inline-end: 12px;
   z-index: 200;
   width: 380px;
   display: flex;
@@ -1691,7 +1691,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 }
 
 .feed-verdict {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-size: var(--w-fs-xs);
   padding: 2px 6px;
   border-radius: 3px;
@@ -1710,13 +1710,13 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   color: var(--w-text-dim);
   font-size: 14px;
   padding: 0 4px;
-  margin-left: auto;
+  margin-inline-start: auto;
   cursor: pointer;
   border-radius: 3px;
   transition: background 100ms ease, color 100ms ease;
 }
 .feed-x:hover { background: var(--w-surface-hi); color: var(--w-text); }
-.feed-verdict + .feed-x { margin-left: 0; }
+.feed-verdict + .feed-x { margin-inline-start: 0; }
 
 /* v0.4.4 (Change 3): feed toolbar + per-workspace grouping + session badge.
    The panel itself is pointer-events:none (clicks fall through the gaps), so
@@ -1885,7 +1885,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   align-items: center;
 }
 .notes-add-row .primary {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .notes-filters {
@@ -1902,11 +1902,11 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   border: 1px solid var(--w-border-hi);
   border-radius: var(--w-r-sm);
   padding: 3px 7px;
-  margin-left: 4px;
+  margin-inline-start: 4px;
   font-size: var(--w-fs-sm);
 }
 .notes-count {
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--w-text-faint);
   font-family: var(--w-font-mono);
 }
@@ -1934,7 +1934,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   border: none;
   color: var(--w-text-dim);
   font-size: var(--w-fs-sm);
-  text-align: left;
+  text-align: start;
   padding: 4px 0;
   cursor: pointer;
   font-family: inherit;
@@ -2108,7 +2108,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 }
 
 .note-actions {
-  margin-left: auto;
+  margin-inline-start: auto;
   display: flex;
   gap: 4px;
 }
@@ -2183,13 +2183,13 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   gap: 1px;
   padding: 10px 8px;
   background: rgba(0, 0, 0, 0.18);
-  border-right: 1px solid var(--w-border);
+  border-inline-end: 1px solid var(--w-border);
 }
 .settings-tab {
   background: transparent;
   border: none;
   color: var(--w-text-dim);
-  text-align: left;
+  text-align: start;
   padding: 7px 11px;
   font-size: var(--w-fs-md);
   border-radius: var(--w-r-sm);
@@ -2411,7 +2411,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: var(--w-bg-elev, #1f2335); color: var(--w-text-primary, #e6edf3);
   border: 1px solid var(--w-border); border-radius: 5px; padding: 3px 6px;
 }
-.vm-refresh { margin-left: auto; cursor: pointer; }
+.vm-refresh { margin-inline-start: auto; cursor: pointer; }
 .vm-err {
   display: flex; align-items: center; gap: 10px; padding: 8px 10px;
   border: 1px solid var(--w-error, #f7768e); border-radius: 6px;
@@ -2590,9 +2590,9 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--w-border);
+  border-inline-end: 1px solid var(--w-border);
 }
-.fm-col:last-child { border-right: none; }
+.fm-col:last-child { border-inline-end: none; }
 
 .fm-col-head {
   display: flex;
@@ -2718,7 +2718,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 }
 .fm-size, .fm-time {
   color: var(--w-text-dim);
-  text-align: right;
+  text-align: end;
   font-variant-numeric: tabular-nums;
 }
 
@@ -3567,7 +3567,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  margin-left: 4px;
+  margin-inline-start: 4px;
   background: rgba(78, 201, 176, 0.18);
   color: var(--w-success);
   border-radius: 3px;
@@ -3587,7 +3587,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   min-width: 16px;
   height: 16px;
   padding: 0 5px;
-  margin-left: 4px;
+  margin-inline-start: 4px;
   background: rgba(122, 162, 247, 0.18);
   color: var(--w-accent, #7aa2f7);
   border-radius: 3px;
@@ -3613,7 +3613,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .pane-disc-menu {
   position: absolute;
   top: 100%;
-  right: 0;
+  inset-inline-end: 0;
   z-index: 50;
   background: var(--w-surface-hi);
   border: 1px solid var(--w-border-hi);
@@ -3629,7 +3629,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: transparent;
   border: none;
   color: var(--w-text);
-  text-align: left;
+  text-align: start;
   padding: 6px 9px;
   font-size: var(--w-fs-md);
   cursor: pointer;
@@ -3674,31 +3674,20 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .connect-tmux:active { transform: scale(0.98); }
 
 /* ─── Phase 12.A: RTL flips ───
-   App.css is overwhelmingly written with logical positioning (`flex`,
-   `gap`, `auto` margins via `margin-left: auto;`). The few spots that
-   still use physical left/right need to be mirrored under [dir="rtl"]
-   so the FABs, banners, dropdowns, and feed cards land on the correct
-   physical side. CSS logical properties cover most cases for free; the
-   below are the remaining `position: fixed` floats. */
+   Design Pass 01: physical left/right layout has been converted to CSS
+   logical properties (`inset-inline-*`, `margin-inline-*`, `border-inline-*`,
+   `text-align: start/end`), which the browser mirrors for free under
+   `dir="rtl"`. Only the cases with NO logical equivalent remain here:
+   `box-shadow` inset direction and the slide-in keyframe. */
 
-[dir="rtl"] .feed-panel { right: auto; left: 12px; }
-[dir="rtl"] .ws-menu { left: auto; right: 12px; }
-[dir="rtl"] .pane-disc-menu { right: auto; left: 0; }
 [dir="rtl"] .feed-card { animation-name: feed-in-rtl; }
-[dir="rtl"] .ws-conn-info { margin-left: 0; margin-right: auto; }
-[dir="rtl"] .ws-header-btn { margin-left: 0; margin-right: 8px; }
-[dir="rtl"] .feed-verdict,
-[dir="rtl"] .feed-x { margin-left: 0; margin-right: auto; }
 [dir="rtl"] .pane-status-text { margin: 0 8px; }
-[dir="rtl"] .note-actions,
-[dir="rtl"] .notes-add-row .primary { margin-left: 0; margin-right: auto; }
 [dir="rtl"] .ws-item.active {
   box-shadow: inset -2px 0 0 var(--w-accent);
 }
 [dir="rtl"] .settings-tab.active {
   box-shadow: inset -2px 0 0 var(--w-accent);
 }
-[dir="rtl"] .sidebar { border-right: 0; border-left: 1px solid var(--w-border); }
 
 @keyframes feed-in-rtl {
   from { transform: translateX(-8px); opacity: 0; }
@@ -3734,7 +3723,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .connect-menu {
   position: absolute;
   top: calc(100% + 4px);
-  right: 0;
+  inset-inline-end: 0;
   z-index: 50;
   background: var(--w-surface);
   border: 1px solid var(--w-border-hi);
@@ -3750,7 +3739,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: transparent;
   border: none;
   color: var(--w-text);
-  text-align: left;
+  text-align: start;
   padding: 6px 10px;
   font-size: var(--w-fs-md);
   cursor: pointer;
@@ -3772,7 +3761,6 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   font-weight: 600;
 }
 
-[dir="rtl"] .connect-menu { right: auto; left: 0; }
 
 /* v0.4.4 (Task 2): the unified "New connection…" entry sits at the top of the
    Smart Connect menu, emphasised over the à-la-carte shortcuts below it. */
@@ -5431,7 +5419,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   border-radius: 6px; padding: 8px; margin: 0;
 }
 /* Phase 70.C: Metrics ↔ Mobile tabs + the Mobile pairing tab. */
-.ins-tabs { display: flex; gap: 2px; margin-left: 10px; }
+.ins-tabs { display: flex; gap: 2px; margin-inline-start: 10px; }
 .ins-tabs button {
   background: transparent; border: 1px solid var(--w-border, #2a2e44); color: var(--w-text-secondary, #9aa5ce);
   border-radius: 5px; padding: 2px 9px; font-size: 12px; cursor: pointer;

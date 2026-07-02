@@ -2427,6 +2427,33 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   text-transform: capitalize;
 }
 
+/* Design Pass 01 (#2): dark/light/system segmented control. */
+.settings-mode-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--wmx-radius-lg, 10px);
+  background: var(--w-bg);
+  border: 1px solid var(--w-border);
+}
+.settings-mode-btn {
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  color: var(--w-text-dim);
+  font-size: var(--w-fs-md);
+  font-family: var(--w-font-ui);
+  border-radius: var(--wmx-radius-md, 7px);
+  cursor: pointer;
+  transition: background var(--wmx-dur-fast, 120ms) ease, color var(--wmx-dur-fast, 120ms) ease;
+}
+.settings-mode-btn:hover { color: var(--w-text); }
+.settings-mode-btn.active {
+  background: var(--w-surface-hi);
+  color: var(--w-text);
+  box-shadow: var(--wmx-elev-1, 0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
 .settings-preset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

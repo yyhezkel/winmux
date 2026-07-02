@@ -1,0 +1,110 @@
+/* ─────────────────────────────────────────────────────────────────────
+   winmux — design tokens (Design Pass 01, #2)  ·  --wmx-*
+   Imported AFTER App.css so the alias layer wins over App.css's literal
+   :root defaults. Two things live here:
+     1. NEW scales that App.css never had: spacing, elevation, motion,
+        focus, an extended radius/type scale. Additive — zero conflict.
+     2. A Dark/Light MODE axis via [data-theme-mode]. Dark reuses the
+        existing engine untouched; Light overrides the chrome colour
+        vars (the `--w-*` the whole app already reads) so the toggle
+        needs zero per-component CSS.
+   Colour source of truth stays the preset engine (settings.ts applyTheme
+   writes --w-* inline). Presets "float above" mode in dark; Light mode is
+   winmux's own daylight palette and overrides preset chrome (accents kept
+   readable on white). See docs/DESIGN-PASS-01.md §3.
+   ───────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── spacing — 4-based rhythm ── */
+  --wmx-space-0: 0;    --wmx-space-px: 1px;
+  --wmx-space-1: 4px;  --wmx-space-2: 8px;  --wmx-space-3: 12px;
+  --wmx-space-4: 16px; --wmx-space-5: 24px; --wmx-space-6: 32px;
+
+  /* ── radius ── */
+  --wmx-radius-sm: 4px;  --wmx-radius-md: 6px;  --wmx-radius-lg: 10px;
+  --wmx-radius-xl: 14px; --wmx-radius-pill: 999px;
+
+  /* ── elevation ── */
+  --wmx-elev-0: none;
+  --wmx-elev-1: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --wmx-elev-2: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --wmx-elev-3: 0 16px 48px rgba(0, 0, 0, 0.55);
+
+  /* ── motion ── */
+  --wmx-dur-instant: 80ms; --wmx-dur-fast: 120ms;
+  --wmx-dur-base: 180ms;   --wmx-dur-slow: 240ms;
+  --wmx-ease-standard:   cubic-bezier(0.2, 0.8, 0.2, 1);
+  --wmx-ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --wmx-ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
+
+  /* ── typography scale (em, off the user-driven root size) ── */
+  --wmx-fs-xs: 0.75em;  --wmx-fs-sm: 0.8125em; --wmx-fs-md: 0.875em;
+  --wmx-fs-lg: 1em;     --wmx-fs-xl: 1.125em;  --wmx-fs-2xl: 1.375em;
+  --wmx-fw-regular: 400; --wmx-fw-medium: 500; --wmx-fw-semibold: 600; --wmx-fw-bold: 700;
+  --wmx-lh-tight: 1.25; --wmx-lh-normal: 1.5; --wmx-lh-relaxed: 1.7;
+
+  /* ── focus ring (a11y) ── */
+  --wmx-ring-width: 2px;
+  --wmx-ring: 0 0 0 2px var(--w-bg), 0 0 0 4px var(--w-accent);
+
+  /* ── colour aliases — new code uses --wmx-*, gets the live theme ── */
+  --wmx-bg: var(--w-bg);
+  --wmx-surface: var(--w-surface);
+  --wmx-surface-raised: var(--w-surface-hi);
+  --wmx-border: var(--w-border);
+  --wmx-border-strong: var(--w-border-hi);
+  --wmx-text: var(--w-text);
+  --wmx-text-muted: var(--w-text-dim);
+  --wmx-text-faint: var(--w-text-faint);
+  --wmx-accent: var(--w-accent);
+  --wmx-accent-strong: var(--w-accent-hi);
+  --wmx-success: var(--w-success);
+  --wmx-warning: var(--w-warning);
+  --wmx-danger: var(--w-error);
+  --wmx-info: var(--w-purple);
+}
+
+/* ── Light mode — winmux's daylight palette (cool, brand-consistent:
+   Tokyo Night in daytime, not cream/GitHub-light). `!important` so it
+   overrides applyTheme's inline --w-* on <html>; the whole app reads
+   these vars, so no per-component rules are needed. Terminal (xterm)
+   keeps its own colours — this themes the chrome. ── */
+[data-theme-mode="light"] {
+  --w-bg: #eef1f6 !important;
+  --w-surface: #ffffff !important;
+  --w-surface-hi: #e7ecf3 !important;
+  --w-border: #d3dae4 !important;
+  --w-border-hi: #bcc6d4 !important;
+  --w-text: #1a1f2b !important;
+  --w-text-dim: #55617a !important;
+  --w-text-faint: #8794aa !important;
+  --w-accent: #365fd6 !important;
+  --w-accent-hi: #2647b8 !important;
+  --w-success: #1f8a6d !important;
+  --w-warning: #9a6a00 !important;
+  --w-error: #cf3049 !important;
+  --w-purple: #7a53c8 !important;
+}
+/* Softer shadows read better on light surfaces. */
+[data-theme-mode="light"] {
+  --wmx-elev-1: 0 1px 2px rgba(31, 41, 63, 0.12);
+  --wmx-elev-2: 0 8px 28px rgba(31, 41, 63, 0.18);
+  --wmx-elev-3: 0 16px 48px rgba(31, 41, 63, 0.22);
+}
+
+/* ── Focus ring — keyboard only, zero-specificity so any existing
+   explicit :focus rule still wins. ── */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--wmx-ring);
+  border-radius: var(--wmx-radius-sm);
+}
+
+/* ── Respect reduced-motion globally. ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

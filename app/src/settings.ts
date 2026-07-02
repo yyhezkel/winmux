@@ -288,7 +288,13 @@ export interface Settings {
   // Unshipped-fivefer (#3): persist workspace-browser sessions (cookies/
   // logins) across restarts. Backend defaults to true.
   persist_browser_sessions?: boolean;
+  // Design Pass 01 (#2): dark/light appearance axis. Backend defaults to
+  // "system" via serde(default); older settings.json load unchanged.
+  theme_mode?: ThemeMode;
 }
+
+// Design Pass 01 (#2): appearance polarity. "system" follows the OS.
+export type ThemeMode = "dark" | "light" | "system";
 
 // Phase 75: debug.log hygiene.
 export interface LogsSettings {
@@ -418,12 +424,43 @@ export function applyTheme(s: Settings): void {
   // v0.4.4-beta.2: clear stale mouse-tracking modes on connect (default on).
   setAutoResetOnConnect(s.terminal.auto_reset_on_connect ?? true);
 
+  // Design Pass 01 (#2): dark/light axis. Resolve "system" against the OS
+  // and write data-theme-mode on <html>; tokens.css keys the Light chrome
+  // palette off it. Independent of the colour preset.
+  document.documentElement.dataset.themeMode = resolveThemeMode(s.theme_mode);
+
   // Phase font-bug-fix v2 (stretch): if a web font URL is configured,
   // inject a single <link rel="stylesheet"> tag so that font becomes
   // available by family name. Removing or changing the URL replaces the
   // tag — we don't try to garbage-collect previously-loaded sheets.
   const url = (s.font as any).web_font_url as string | undefined;
   applyWebFont(url ?? "");
+}
+
+/**
+ * Design Pass 01 (#2): resolve the appearance axis to a concrete polarity.
+ * "system" (or a missing value) follows the OS `prefers-color-scheme`.
+ */
+export function resolveThemeMode(mode: string | undefined): "dark" | "light" {
+  if (mode === "light") return "light";
+  if (mode === "dark") return "dark";
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches
+    ? "light"
+    : "dark";
+}
+
+/**
+ * Re-apply the theme when the OS scheme flips while the user is on
+ * "system". Registered once at startup with a live settings getter.
+ */
+export function watchSystemTheme(getSettings: () => Settings): void {
+  const mq = window.matchMedia?.("(prefers-color-scheme: light)");
+  if (!mq) return;
+  mq.addEventListener("change", () => {
+    if ((getSettings().theme_mode ?? "system") === "system") {
+      applyTheme(getSettings());
+    }
+  });
 }
 
 function applyWebFont(url: string): void {

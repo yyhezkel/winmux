@@ -43,6 +43,7 @@ import { saveRemoteFileAs } from "./download";
 import { MarkdownViewer } from "./MarkdownViewer";
 import {
   applyTheme,
+  watchSystemTheme,
   loadSettings,
   saveSettings,
   DEFAULT_SHORTCUTS,
@@ -81,6 +82,7 @@ import {
 } from "./types";
 import "@xterm/xterm/css/xterm.css";
 import "./App.css";
+import "./tokens.css"; // Design Pass 01 (#2): --wmx-* tokens + dark/light mode (must load after App.css)
 
 type PaneStatus = { msg: string; err: boolean };
 
@@ -1949,6 +1951,8 @@ function App() {
       const s = await loadSettings();
       setSettings(s);
       applyTheme(s);
+      // Design Pass 01 (#2): re-tint if the OS scheme flips while on "system".
+      watchSystemTheme(() => settings() ?? s);
       applyI18nSettings(s.i18n);
       // #1: seed the Notification Center with any notifications already
       // collected this session (RPC/agent items live in the backend Vec).

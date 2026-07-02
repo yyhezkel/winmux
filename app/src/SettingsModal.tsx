@@ -297,6 +297,24 @@ export function SettingsModal(p: Props) {
               </Show>
 
               <Show when={tab() === "theme"}>
+                {/* Design Pass 01 (#2): dark/light/system appearance axis,
+                    above the presets. Presets set colours; this sets polarity. */}
+                <section>
+                  <h4>{t("settings.theme.appearance")}</h4>
+                  <div class="settings-mode-toggle">
+                    <For each={["dark", "light", "system"] as const}>
+                      {(m) => (
+                        <button
+                          class={`settings-mode-btn ${(p.settings.theme_mode ?? "system") === m ? "active" : ""}`}
+                          onClick={() => update("theme_mode", m)}
+                        >
+                          {m === "dark" ? "🌙 " : m === "light" ? "☀ " : "🖥 "}
+                          {t(`settings.theme.mode.${m}`)}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </section>
                 <section>
                   <h4>{t("settings.theme.preset")}</h4>
                   <div class="settings-preset-grid">

@@ -649,6 +649,15 @@ pub(crate) struct Settings {
     /// pre-beta.3 settings.json loads.
     #[serde(default)]
     pub hook_notifications: HookSettings,
+    /// Design Pass 01 (#2): dark/light appearance axis — "dark" | "light" |
+    /// "system". Independent of the colour preset: dark reuses the preset
+    /// engine as-is, "light" applies winmux's daylight chrome palette,
+    /// "system" follows the OS (`prefers-color-scheme`). A String (not an
+    /// enum) to match the sidebar_mode / rtl_mode pattern and keep the TS
+    /// binding a plain union. `default = "system"` keeps older settings.json
+    /// loading unchanged.
+    #[serde(default = "default_theme_mode")]
+    pub theme_mode: String,
 }
 
 fn default_sidebar_mode() -> String {
@@ -662,6 +671,10 @@ pub(crate) fn persist_browser_sessions_flag() -> bool {
     load_from_disk()
         .map(|s| s.persist_browser_sessions)
         .unwrap_or(true)
+}
+
+fn default_theme_mode() -> String {
+    "system".to_string()
 }
 
 /// Phase 75: debug.log retention. The log auto-rotates at a size cap and is
@@ -943,6 +956,7 @@ impl Default for Settings {
             logs: LogsSettings::default(),
             persist_browser_sessions: true,
             hook_notifications: HookSettings::default(),
+            theme_mode: default_theme_mode(),
         }
     }
 }

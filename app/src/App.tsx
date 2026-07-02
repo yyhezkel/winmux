@@ -544,6 +544,14 @@ function App() {
     if (!sid || !ti) return;
     const label = activeWs()?.name ?? "winmux";
     const dir = document.documentElement.dir === "rtl" ? "rtl" : "ltr";
+    // Seed the popout's Ctrl+wheel zoom from the configured terminal size the
+    // first time only — later wheel zooms own it (localStorage, shared origin).
+    if (localStorage.getItem("winmux.popout.font_size_pt") == null) {
+      localStorage.setItem(
+        "winmux.popout.font_size_pt",
+        String(settings()?.font.terminal_size_pt ?? 13),
+      );
+    }
     try {
       await invoke("popout_pane", {
         sessionId: sid,

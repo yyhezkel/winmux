@@ -1,0 +1,62 @@
+<svg viewBox="0 0 900 620" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI',system-ui,sans-serif">
+  <defs>
+    <filter id="p-shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+  <!-- dimmed app behind -->
+  <rect x="0" y="0" width="900" height="620" fill="#0e1116"/>
+  <rect x="0" y="0" width="900" height="620" fill="#000" opacity="0.45"/>
+
+  <!-- palette -->
+  <g filter="url(#p-shadow)">
+    <rect x="190" y="70" width="520" height="464" rx="12" fill="#161b22" stroke="#2d333d"/>
+  </g>
+
+  <!-- input row -->
+  <text x="214" y="112" fill="#7d8590" font-size="16">🔍</text>
+  <text x="242" y="114" fill="#e6edf3" font-size="16" font-family="monospace">diff<tspan fill="#7aa2f7">▏</tspan></text>
+  <text x="686" y="113" fill="#565f6a" font-size="11" text-anchor="end">esc to close</text>
+  <line x1="190" y1="132" x2="710" y2="132" stroke="#21262d"/>
+
+  <!-- category: WORKSPACE -->
+  <text x="212" y="156" fill="#565f6a" font-size="10.5" letter-spacing="0.7">WORKSPACE</text>
+  <!-- selected item -->
+  <rect x="202" y="164" width="496" height="40" rx="7" fill="#7aa2f7" fill-opacity="0.14"/>
+  <rect x="202" y="164" width="2.5" height="40" rx="2" fill="#7aa2f7"/>
+  <text x="222" y="189" font-size="15">◨</text>
+  <!-- fuzzy highlight: "Diff" chars matched -->
+  <text x="250" y="190" font-size="13.5" fill="#e6edf3"><tspan fill="#94b4ff" font-weight="700">Diff</tspan> pane: open for active workspace</text>
+  <rect x="612" y="174" width="76" height="20" rx="5" fill="#0e1116" stroke="#2d333d"/>
+  <text x="650" y="188" fill="#7d8590" font-size="10.5" font-family="monospace" text-anchor="middle">Ctrl ⇧ G</text>
+
+  <!-- item -->
+  <text x="222" y="231" font-size="15">◨</text>
+  <text x="250" y="232" font-size="13.5" fill="#e6edf3"><tspan fill="#94b4ff" font-weight="700">Diff</tspan>: cycle source (live / baseline / checkpoint)</text>
+
+  <!-- category: FILES -->
+  <text x="212" y="270" fill="#565f6a" font-size="10.5" letter-spacing="0.7">FILES &amp; SEARCH</text>
+  <text x="222" y="300" font-size="15">🗂</text>
+  <text x="250" y="301" font-size="13.5" fill="#e6edf3">Open File Manager · show <tspan fill="#94b4ff" font-weight="700">diff</tspan>ed files</text>
+  <rect x="626" y="285" width="62" height="20" rx="5" fill="#0e1116" stroke="#2d333d"/>
+  <text x="657" y="299" fill="#7d8590" font-size="10.5" font-family="monospace" text-anchor="middle">Ctrl ⇧ E</text>
+
+  <!-- category: CLAUDE -->
+  <text x="212" y="339" fill="#565f6a" font-size="10.5" letter-spacing="0.7">CLAUDE</text>
+  <text x="222" y="369" font-size="15">🤖</text>
+  <text x="250" y="370" font-size="13.5" fill="#e6edf3">Ask Claude to review the current <tspan fill="#94b4ff" font-weight="700">diff</tspan></text>
+
+  <text x="222" y="408" font-size="15">🤖</text>
+  <text x="250" y="409" font-size="13.5" fill="#7d8590">Ask Claude to commit staged changes</text>
+
+  <!-- footer hint bar -->
+  <line x1="190" y1="494" x2="710" y2="494" stroke="#21262d"/>
+  <g fill="#565f6a" font-size="11" font-family="monospace">
+    <text x="212" y="516">↑↓ navigate</text>
+    <text x="330" y="516">⏎ run</text>
+    <text x="410" y="516">→ actions</text>
+    <text x="620" y="516" text-anchor="end">5 of 42 commands</text>
+  </g>
+
+  <text x="450" y="576" fill="#7d8590" font-size="12" text-anchor="middle" font-style="italic">Polished palette: fuzzy match highlight · category grouping · leading icons · keybinding hints · result count.</text>
+</svg>

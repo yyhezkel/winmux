@@ -1,0 +1,96 @@
+<svg viewBox="0 0 1080 700" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI',system-ui,sans-serif">
+  <rect x="0" y="0" width="1080" height="700" fill="#0e1116"/>
+  <rect x="0" y="0" width="1080" height="700" fill="#000" opacity="0.35"/>
+  <!-- settings modal -->
+  <rect x="120" y="40" width="840" height="620" rx="12" fill="#161b22" stroke="#2d333d"/>
+  <!-- header -->
+  <text x="152" y="82" fill="#e6edf3" font-size="18" font-weight="600">Settings</text>
+  <text x="928" y="82" fill="#7d8590" font-size="16" text-anchor="end">✕</text>
+  <line x1="120" y1="100" x2="960" y2="100" stroke="#21262d"/>
+
+  <!-- tab rail -->
+  <rect x="120" y="100" width="176" height="560" fill="#12151b"/>
+  <line x1="296" y1="100" x2="296" y2="660" stroke="#21262d"/>
+  <g font-size="13" fill="#7d8590">
+    <text x="146" y="138">General</text>
+    <rect x="130" y="150" width="156" height="30" rx="6" fill="#7aa2f7" fill-opacity="0.12"/>
+    <rect x="130" y="150" width="2.5" height="30" rx="2" fill="#7aa2f7"/>
+    <text x="146" y="170" fill="#e6edf3" font-weight="600">Theme</text>
+    <text x="146" y="208">Font</text><text x="146" y="240">Terminal</text><text x="146" y="272">Shortcuts</text>
+    <text x="146" y="304">Claude</text><text x="146" y="336">Language</text>
+  </g>
+
+  <!-- ===== THEME PANEL ===== -->
+  <!-- mode toggle (NEW) -->
+  <text x="324" y="140" fill="#e6edf3" font-size="14" font-weight="600">Appearance</text>
+  <rect x="324" y="152" width="212" height="36" rx="9" fill="#0e1116" stroke="#21262d"/>
+  <rect x="328" y="156" width="102" height="28" rx="7" fill="#7aa2f7" fill-opacity="0.18"/>
+  <text x="379" y="175" fill="#94b4ff" font-size="12.5" font-weight="600" text-anchor="middle">🌙 Dark</text>
+  <text x="483" y="175" fill="#7d8590" font-size="12.5" text-anchor="middle">☀ Light</text>
+  <text x="556" y="175" fill="#565f6a" font-size="11">follows preset · toggle re-maps tokens</text>
+
+  <!-- preset grid -->
+  <text x="324" y="228" fill="#e6edf3" font-size="14" font-weight="600">Preset</text>
+  <!-- card function via groups -->
+  <!-- Tokyo Night (active) -->
+  <g>
+    <rect x="324" y="242" width="188" height="96" rx="10" fill="#0e1116" stroke="#7aa2f7"/>
+    <rect x="336" y="254" width="164" height="44" rx="6" fill="#1a1b26"/>
+    <rect x="346" y="266" width="60" height="20" rx="4" fill="#24283b"/>
+    <circle cx="430" cy="276" r="8" fill="#7aa2f7"/><circle cx="452" cy="276" r="8" fill="#4ec9b0"/><circle cx="474" cy="276" r="8" fill="#bb9af7"/>
+    <text x="336" y="322" fill="#e6edf3" font-size="12.5" font-weight="600">Tokyo Night</text>
+    <text x="500" y="322" fill="#7aa2f7" font-size="12" text-anchor="end">✓</text>
+  </g>
+  <!-- Dracula -->
+  <g>
+    <rect x="528" y="242" width="188" height="96" rx="10" fill="#0e1116" stroke="#21262d"/>
+    <rect x="540" y="254" width="164" height="44" rx="6" fill="#282a36"/>
+    <rect x="550" y="266" width="60" height="20" rx="4" fill="#44475a"/>
+    <circle cx="634" cy="276" r="8" fill="#bd93f9"/><circle cx="656" cy="276" r="8" fill="#50fa7b"/><circle cx="678" cy="276" r="8" fill="#ff79c6"/>
+    <text x="540" y="322" fill="#e6edf3" font-size="12.5" font-weight="600">Dracula</text>
+  </g>
+  <!-- Nord -->
+  <g>
+    <rect x="732" y="242" width="188" height="96" rx="10" fill="#0e1116" stroke="#21262d"/>
+    <rect x="744" y="254" width="164" height="44" rx="6" fill="#2e3440"/>
+    <rect x="754" y="266" width="60" height="20" rx="4" fill="#3b4252"/>
+    <circle cx="838" cy="276" r="8" fill="#88c0d0"/><circle cx="860" cy="276" r="8" fill="#a3be8c"/><circle cx="882" cy="276" r="8" fill="#b48ead"/>
+    <text x="744" y="322" fill="#e6edf3" font-size="12.5" font-weight="600">Nord</text>
+  </g>
+  <!-- Solarized Light -->
+  <g>
+    <rect x="324" y="350" width="188" height="96" rx="10" fill="#0e1116" stroke="#21262d"/>
+    <rect x="336" y="362" width="164" height="44" rx="6" fill="#fdf6e3"/>
+    <rect x="346" y="374" width="60" height="20" rx="4" fill="#eee8d5"/>
+    <circle cx="430" cy="384" r="8" fill="#268bd2"/><circle cx="452" cy="384" r="8" fill="#859900"/><circle cx="474" cy="384" r="8" fill="#d33682"/>
+    <text x="336" y="430" fill="#e6edf3" font-size="12.5" font-weight="600">Solarized Light</text>
+    <rect x="470" y="418" width="30" height="16" rx="8" fill="#e0af68" fill-opacity="0.16"/><text x="485" y="430" fill="#e0af68" font-size="9" text-anchor="middle">☀</text>
+  </g>
+  <!-- Custom -->
+  <g>
+    <rect x="528" y="350" width="188" height="96" rx="10" fill="#0e1116" stroke="#21262d" stroke-dasharray="4 4"/>
+    <text x="622" y="396" font-size="20" text-anchor="middle">🎨</text>
+    <text x="622" y="430" fill="#7d8590" font-size="12.5" text-anchor="middle">Custom…</text>
+  </g>
+
+  <!-- token note -->
+  <rect x="324" y="466" width="592" height="70" rx="10" fill="#0e1116" stroke="#21262d"/>
+  <text x="342" y="492" fill="#e6edf3" font-size="12.5" font-weight="600">Advanced colors</text>
+  <text x="342" y="514" fill="#7d8590" font-size="11.5">9 base tokens (bg · surface · border · text ×2 · accent · success · warning · danger)</text>
+  <text x="342" y="530" fill="#565f6a" font-size="11">Secondary tones derive automatically. ANSI palette below.</text>
+  <text x="900" y="506" fill="#7aa2f7" font-size="12" text-anchor="end">edit ▸</text>
+
+  <!-- RTL mirror strip -->
+  <line x1="324" y1="558" x2="916" y2="558" stroke="#21262d"/>
+  <text x="324" y="584" fill="#565f6a" font-size="11" font-weight="600">RTL-AGNOSTIC · same panel mirrors for he / ar</text>
+  <!-- LTR mini -->
+  <rect x="324" y="596" width="120" height="44" rx="6" fill="#0e1116" stroke="#21262d"/>
+  <rect x="330" y="602" width="30" height="32" rx="4" fill="#161b22"/><text x="372" y="622" fill="#7d8590" font-size="10">panel →</text>
+  <text x="450" y="622" fill="#565f6a" font-size="11">LTR</text>
+  <!-- RTL mini -->
+  <rect x="524" y="596" width="120" height="44" rx="6" fill="#0e1116" stroke="#21262d"/>
+  <rect x="608" y="602" width="30" height="32" rx="4" fill="#161b22"/><text x="596" y="622" fill="#7d8590" font-size="10" text-anchor="end">← panel</text>
+  <text x="500" y="622" fill="#565f6a" font-size="11" text-anchor="end">RTL</text>
+
+  <text x="540" y="678" fill="#7d8590" font-size="11.5" text-anchor="middle" font-style="italic">Theme tab: explicit Dark/Light mode axis (new) · existing preset grid with live swatches · advanced token editor demoted, not removed.</text>
+</svg>

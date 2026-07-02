@@ -1,0 +1,74 @@
+<svg viewBox="0 0 1080 620" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI',system-ui,sans-serif">
+  <rect x="0" y="0" width="1080" height="620" fill="#0e1116"/>
+  <!-- column headers -->
+  <text x="180" y="40" fill="#7d8590" font-size="13" font-weight="600" text-anchor="middle">A · Empty</text>
+  <text x="540" y="40" fill="#7d8590" font-size="13" font-weight="600" text-anchor="middle">B · Blocking permission</text>
+  <text x="900" y="40" fill="#7d8590" font-size="13" font-weight="600" text-anchor="middle">C · Stacked activity (OSC)</text>
+
+  <!-- ===== A: empty feed ===== -->
+  <rect x="40" y="66" width="280" height="500" rx="10" fill="#0b0e13" stroke="#21262d" stroke-dasharray="4 4"/>
+  <circle cx="180" cy="250" r="30" fill="#161b22"/>
+  <text x="180" y="260" font-size="26" text-anchor="middle" opacity="0.6">🔔</text>
+  <text x="180" y="316" fill="#e6edf3" font-size="14" font-weight="600" text-anchor="middle">All caught up</text>
+  <text x="180" y="340" fill="#7d8590" font-size="11.5" text-anchor="middle">Permission requests and</text>
+  <text x="180" y="356" fill="#7d8590" font-size="11.5" text-anchor="middle">agent activity appear here.</text>
+  <rect x="96" y="384" width="168" height="1" fill="#21262d"/>
+  <text x="180" y="410" fill="#565f6a" font-size="10.5" text-anchor="middle">Reacts to Claude hooks +</text>
+  <text x="180" y="426" fill="#565f6a" font-size="10.5" text-anchor="middle">OSC 9 / 99 / 777 notifications</text>
+
+  <!-- ===== B: single blocking card ===== -->
+  <rect x="400" y="66" width="280" height="182" rx="10" fill="#161b22" stroke="#e0af68"/>
+  <rect x="400" y="66" width="280" height="182" rx="10" fill="#e0af68" fill-opacity="0.04"/>
+  <text x="420" y="92" fill="#e0af68" font-size="10.5" font-weight="700">🔐 PERMISSION</text>
+  <text x="660" y="92" fill="#565f6a" font-size="10.5" text-anchor="end">pane #1 · now</text>
+  <text x="420" y="118" fill="#e6edf3" font-size="14" font-weight="600">Run shell command</text>
+  <rect x="420" y="130" width="240" height="30" rx="6" fill="#0b0e13" stroke="#21262d"/>
+  <text x="432" y="150" fill="#e6edf3" font-size="11.5" font-family="monospace">go test ./api/... -race</text>
+  <text x="420" y="182" fill="#7d8590" font-size="11">Claude in <tspan fill="#e6edf3">api-server</tspan> wants to test.</text>
+  <rect x="420" y="196" width="118" height="34" rx="7" fill="#4ec9b0" fill-opacity="0.16"/>
+  <text x="479" y="218" fill="#4ec9b0" font-size="12.5" font-weight="600" text-anchor="middle">Allow</text>
+  <rect x="548" y="196" width="112" height="34" rx="7" fill="#f7768e" fill-opacity="0.14"/>
+  <text x="604" y="218" fill="#f7768e" font-size="12.5" font-weight="600" text-anchor="middle">Deny</text>
+
+  <!-- resolved card (allowed, faded) -->
+  <rect x="400" y="264" width="280" height="70" rx="10" fill="#161b22" stroke="#4ec9b0" opacity="0.85"/>
+  <text x="420" y="290" fill="#4ec9b0" font-size="10.5" font-weight="700">✓ ALLOWED</text>
+  <text x="660" y="290" fill="#565f6a" font-size="10.5" text-anchor="end">2m ago</text>
+  <text x="420" y="314" fill="#7d8590" font-size="12" font-family="monospace">git push origin main</text>
+
+  <!-- denied card -->
+  <rect x="400" y="350" width="280" height="70" rx="10" fill="#161b22" stroke="#f7768e" opacity="0.85"/>
+  <text x="420" y="376" fill="#f7768e" font-size="10.5" font-weight="700">✕ DENIED</text>
+  <text x="660" y="376" fill="#565f6a" font-size="10.5" text-anchor="end">5m ago</text>
+  <text x="420" y="400" fill="#7d8590" font-size="12" font-family="monospace">rm -rf /var/lib/pg</text>
+
+  <!-- ===== C: stacked OSC activity ===== -->
+  <!-- notification card 1 -->
+  <rect x="760" y="66" width="280" height="72" rx="10" fill="#161b22" stroke="#21262d"/>
+  <text x="780" y="92" fill="#4ec9b0" font-size="10.5" font-weight="700">🔔 NOTIFICATION</text>
+  <text x="1020" y="92" fill="#565f6a" font-size="10.5" text-anchor="end">OSC 777</text>
+  <text x="780" y="116" fill="#e6edf3" font-size="12.5">build finished</text>
+  <text x="780" y="132" fill="#7d8590" font-size="11">cargo build · 0 errors · 41s</text>
+
+  <!-- notification card 2 -->
+  <rect x="760" y="150" width="280" height="72" rx="10" fill="#161b22" stroke="#21262d"/>
+  <text x="780" y="176" fill="#e0af68" font-size="10.5" font-weight="700">🔔 NOTIFICATION</text>
+  <text x="1020" y="176" fill="#565f6a" font-size="10.5" text-anchor="end">OSC 9</text>
+  <text x="780" y="200" fill="#e6edf3" font-size="12.5">pytest: 3 failed</text>
+  <text x="780" y="216" fill="#7d8590" font-size="11">tests/test_auth.py</text>
+
+  <!-- grouped run (stacked, count badge) -->
+  <rect x="772" y="242" width="268" height="120" rx="10" fill="#12151b" stroke="#21262d"/>
+  <rect x="766" y="236" width="274" height="120" rx="10" fill="#161b22" stroke="#2d333d"/>
+  <text x="786" y="262" fill="#7aa2f7" font-size="10.5" font-weight="700">🤖 SESSION RUN</text>
+  <rect x="978" y="248" width="52" height="18" rx="9" fill="#7aa2f7" fill-opacity="0.16"/>
+  <text x="1004" y="261" fill="#7aa2f7" font-size="10" font-weight="600" text-anchor="middle">×7 steps</text>
+  <text x="786" y="288" fill="#e6edf3" font-size="12.5" font-weight="600">Refactor auth middleware</text>
+  <g font-size="11" fill="#7d8590">
+    <text x="786" y="310">✓ read 4 files · ✓ edited 2 · ✓ ran tests</text>
+    <text x="786" y="330" fill="#4ec9b0">● completed · 1m 12s</text>
+  </g>
+  <text x="1020" y="330" fill="#565f6a" font-size="10.5" text-anchor="end">expand ▸</text>
+
+  <text x="540" y="596" fill="#565f6a" font-size="11.5" text-anchor="middle">Feed states: empty (educates) → blocking (warm border, actions) → resolved (colored edge, faded) → grouped run (collapses OSC + hook steps).</text>
+</svg>

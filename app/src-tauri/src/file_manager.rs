@@ -190,6 +190,27 @@ pub(crate) fn file_mkdir_local(path: String) -> Result<(), String> {
     std::fs::create_dir_all(&p).map_err(|e| format!("mkdir {p:?}: {e}"))
 }
 
+/// Unshipped-fivefer (#5): copy a local file into the file manager's local
+/// column. `std::fs::copy` handles binary content and any size natively (no
+/// read-as-text + write round-trip through IPC), removing the old "binary
+/// drop not supported" limitation. Folders aren't supported yet.
+#[tauri::command]
+pub(crate) fn file_copy_local(src: String, dest: String) -> Result<(), String> {
+    let s = PathBuf::from(expand_path(&src));
+    let d = PathBuf::from(expand_path(&dest));
+    if s.is_dir() {
+        return Err(format!("copying folders isn't supported yet: {}", s.display()));
+    }
+    if let Some(parent) = d.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("mkdir parent: {e}"))?;
+        }
+    }
+    std::fs::copy(&s, &d)
+        .map(|_| ())
+        .map_err(|e| format!("copy {s:?} -> {d:?}: {e}"))
+}
+
 /// Phase 23: create a new empty file locally. Fails if the path already
 /// exists (we never silently truncate an existing file from a "New
 /// file" UI gesture — that's a recipe for data loss).

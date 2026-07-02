@@ -283,30 +283,17 @@ export function FileManagerPane(p: Props) {
         if (side === "remote" && dropPaths.length > 0) {
           void dropUploadToRemote(dropPaths);
         } else if (side === "local" && dropPaths.length > 0) {
-          // Local → local: copy each dropped file into the displayed
-          // local dir. Use Rust-side fs::copy via a tiny helper —
-          // for simplicity we read the bytes via file_read_local +
-          // file_write_local. Skip if it'd overwrite itself.
+          // Local → local: copy each dropped file into the displayed local
+          // dir. Unshipped-fivefer (#5): uses the backend file_copy_local
+          // (std::fs::copy) so binary files and any size work — no more
+          // read-as-text limitation. Skip a copy onto itself.
           (async () => {
             for (const host of dropPaths) {
               const basename = host.split(/[\\/]/).filter(Boolean).pop() || "dropped";
               const dest = fullLocal(basename);
               if (dest.toLowerCase() === host.toLowerCase()) continue;
               await wrap(`copy ${basename}`, async () => {
-                // Cheapest path: shell out via cmd /C copy /Y.
-                // We don't have a dedicated backend command yet —
-                // instead we read+write the file. Works for any size
-                // tauri-IPC can stomach (~megabytes).
-                const fc = await invoke<{ text: string; is_binary: boolean }>(
-                  "file_read_local",
-                  { path: host }
-                );
-                if (fc.is_binary) {
-                  throw new Error(
-                    "binary drop into local column not yet supported — use remote column"
-                  );
-                }
-                await invoke("file_write_local", { path: dest, text: fc.text });
+                await invoke("file_copy_local", { src: host, dest });
               });
             }
             await refreshLocal();

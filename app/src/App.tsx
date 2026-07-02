@@ -241,6 +241,10 @@ function App() {
   // mode, so there's no separate connect-existing modal anymore.
   const [showProvision, setShowProvision] = createSignal(false);
   const [showInsights, setShowInsights] = createSignal(false);
+  // Round B: Monitor opens as an inline-end side drawer by default; the
+  // drawer's ⤢ pops it out into the classic floating window. Reset to
+  // "drawer" on close so the next open is docked again.
+  const [insightsMode, setInsightsMode] = createSignal<"drawer" | "window">("drawer");
   const [addonsWin, setAddonsWin] = createSignal<{ id: string; name: string } | null>(null);
   // Phase 35 (#1.3): command palette (Ctrl+Shift+P).
   const [showPalette, setShowPalette] = createSignal(false);
@@ -2396,12 +2400,18 @@ function App() {
         />
       </Show>
 
-      {/* Phase 68.D: Server Insights monitor (floating window). */}
+      {/* Phase 68.D: Server Insights monitor. Round B: docks as a side
+          drawer by default; ⤢ pops it out into the floating window. */}
       <InsightsWindow
         open={showInsights()}
+        mode={insightsMode()}
         workspaceId={file().active_workspace_id ?? undefined}
         workspaceName={activeWs()?.name}
-        onClose={() => setShowInsights(false)}
+        onClose={() => {
+          setShowInsights(false);
+          setInsightsMode("drawer");
+        }}
+        onPopOut={() => setInsightsMode("window")}
         onInstall={() => {
           const ws = activeWs();
           if (ws) setAddonsWin({ id: ws.id, name: ws.name });

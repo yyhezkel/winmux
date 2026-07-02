@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
 import { MobilePairing } from "./MobilePairing";
 import { HygienePanel } from "./HygienePanel";
+import { SideDrawer } from "./SideDrawer";
 import {
   clampToViewport,
   makeWindowControls,
@@ -44,6 +45,12 @@ interface Props {
   onClose: () => void;
   /** Phase 68 (UX): open the Add-ons window to install the daemon. */
   onInstall?: () => void;
+  /** Round B: "drawer" docks the monitor as an inline-end side drawer;
+   *  "window" is the classic draggable floating window. Defaults to window
+   *  for callers that haven't opted in. */
+  mode?: "drawer" | "window";
+  /** Round B: pop the drawer out into the floating window (drawer mode only). */
+  onPopOut?: () => void;
 }
 
 const DEFAULT_GEOMETRY: Geometry = { x: 180, y: 90, w: 820, h: 620 };
@@ -221,51 +228,41 @@ export function InsightsWindow(p: Props) {
     </div>
   );
 
-  return (
-    <Show when={p.open}>
-      <div
-        class="fm-window insights-window"
-        style={{
-          left: `${geom().x}px`,
-          top: `${geom().y}px`,
-          width: `${geom().w}px`,
-          height: `${geom().h}px`,
-        }}
-      >
-        <div class="fm-window-header" onMouseDown={onDragStart}>
-          <span class="fm-window-title">
-            📊 {t("insights.title")}
-            {p.workspaceName ? ` — ${p.workspaceName}` : ""}
-          </span>
-          <div class="ins-tabs">
-            <button class={view() === "metrics" ? "active" : ""} onClick={() => setView("metrics")}>
-              {t("insights.tab.metrics")}
-            </button>
-            <button class={view() === "mobile" ? "active" : ""} onClick={() => setView("mobile")}>
-              📱 {t("insights.tab.mobile")}
-            </button>
-            <button class={view() === "logs" ? "active" : ""} onClick={() => setView("logs")}>
-              📄 {t("insights.tab.logs")}
-            </button>
-            <button class={view() === "health" ? "active" : ""} onClick={() => setView("health")}>
-              🧹 {t("insights.tab.health")}
-            </button>
-          </div>
-          <Show when={view() === "metrics"}>
-            <label class="ins-auto">
-              <input type="checkbox" checked={auto()} onChange={(e) => setAuto(e.currentTarget.checked)} />
-              <span>{t("insights.auto")}</span>
-            </label>
-            <button class="ins-refresh" onClick={() => void refresh()} title={t("insights.refresh")}>
-              {loading() ? "…" : "⟳"}
-            </button>
-          </Show>
-          <button class="fm-window-x insights-x" onClick={p.onClose} title={t("common.close")}>
-            ×
-          </button>
-        </div>
-        <div class="fm-window-body insights-body">
-          <Show when={view() === "mobile"}>
+  const titleText = () =>
+    `${t("insights.title")}${p.workspaceName ? ` — ${p.workspaceName}` : ""}`;
+
+  const tabsEl = () => (
+    <div class="ins-tabs">
+      <button class={view() === "metrics" ? "active" : ""} onClick={() => setView("metrics")}>
+        {t("insights.tab.metrics")}
+      </button>
+      <button class={view() === "mobile" ? "active" : ""} onClick={() => setView("mobile")}>
+        📱 {t("insights.tab.mobile")}
+      </button>
+      <button class={view() === "logs" ? "active" : ""} onClick={() => setView("logs")}>
+        📄 {t("insights.tab.logs")}
+      </button>
+      <button class={view() === "health" ? "active" : ""} onClick={() => setView("health")}>
+        🧹 {t("insights.tab.health")}
+      </button>
+    </div>
+  );
+
+  const metricsControlsEl = () => (
+    <Show when={view() === "metrics"}>
+      <label class="ins-auto">
+        <input type="checkbox" checked={auto()} onChange={(e) => setAuto(e.currentTarget.checked)} />
+        <span>{t("insights.auto")}</span>
+      </label>
+      <button class="ins-refresh" onClick={() => void refresh()} title={t("insights.refresh")}>
+        {loading() ? "…" : "⟳"}
+      </button>
+    </Show>
+  );
+
+  const bodyContent = () => (
+    <>
+      <Show when={view() === "mobile"}>
             <MobilePairing workspaceId={p.workspaceId} />
           </Show>
           <Show when={view() === "health"}>
@@ -435,9 +432,53 @@ export function InsightsWindow(p: Props) {
             )}
           </Show>
           </Show>
-        </div>
-        <ResizeHandles onStart={onResizeStart} />
-      </div>
+    </>
+  );
+
+  return (
+    <Show when={p.open}>
+      <Show
+        when={p.mode === "drawer"}
+        fallback={
+          <div
+            class="fm-window insights-window"
+            style={{
+              left: `${geom().x}px`,
+              top: `${geom().y}px`,
+              width: `${geom().w}px`,
+              height: `${geom().h}px`,
+            }}
+          >
+            <div class="fm-window-header" onMouseDown={onDragStart}>
+              <span class="fm-window-title">📊 {titleText()}</span>
+              {tabsEl()}
+              {metricsControlsEl()}
+              <button class="fm-window-x insights-x" onClick={p.onClose} title={t("common.close")}>
+                ×
+              </button>
+            </div>
+            <div class="fm-window-body insights-body">{bodyContent()}</div>
+            <ResizeHandles onStart={onResizeStart} />
+          </div>
+        }
+      >
+        <SideDrawer
+          icon="📊"
+          title={titleText()}
+          width="min(600px, 96vw)"
+          onClose={p.onClose}
+          onPopOut={p.onPopOut}
+          bodyClass="insights-body"
+          headerActions={
+            <>
+              {tabsEl()}
+              {metricsControlsEl()}
+            </>
+          }
+        >
+          {bodyContent()}
+        </SideDrawer>
+      </Show>
     </Show>
   );
 }

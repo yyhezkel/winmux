@@ -95,6 +95,10 @@ func main() {
 	}
 	log.Printf("winmux-server %s starting (port=%d dir=%s interval=%ds)", core.Version, *port, *base, *interval)
 
+	// systemd gives the daemon a minimal PATH; merge the user's login-shell PATH
+	// so subprocesses (the claude_chat engine) resolve `claude` like the terminal.
+	config.AugmentUserPath()
+
 	token := config.LoadOrCreateToken(filepath.Join(*base, "token"))
 
 	store, err := insights.OpenStore(filepath.Join(*base, "metrics.db"))

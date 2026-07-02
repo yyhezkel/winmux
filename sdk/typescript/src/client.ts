@@ -11,6 +11,11 @@ export type ClientInfo = Schemas["ClientInfo"];
 export type LogRead = Schemas["ReadBody"];
 export type Version = Schemas["VersionBody"];
 export type Health = Schemas["HealthBody"];
+export type PairingRedeemResponse = Schemas["PairingRedeemResponse"];
+export type Workspace = Schemas["Workspace"];
+export type Session = Schemas["Session"];
+export type CreateSessionRequest = Schemas["CreateSessionRequest"];
+export type SessionCreated = Schemas["SessionCreated"];
 
 export interface WinmuxClientOptions {
   /** e.g. "http://127.0.0.1:7879" */
@@ -50,6 +55,36 @@ export class WinmuxClient {
     const res = await this.f(this.base + path, { ...init, headers: this.auth(init?.headers as Record<string, string>) });
     if (!res.ok) throw new WinmuxApiError(res.status, await res.text());
     return (await res.json()) as T;
+  }
+
+  private postJson<T>(path: string, body: unknown): Promise<T> {
+    return this.json<T>(path, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
+  }
+
+  // ── pairing ──────────────────────────────────────────────────────────────
+  /** Pairing: exchange a one-shot token for a device credential. */
+  get pairing() {
+    return {
+      /** POST /api/pairing/redeem — public; the one-shot token is the credential. */
+      redeem: (oneShotToken: string): Promise<PairingRedeemResponse> =>
+        this.postJson<PairingRedeemResponse>("/api/pairing/redeem", { one_shot_token: oneShotToken }),
+    };
+  }
+
+  // ── workspaces ─────────────────────────────────────────────────────────────
+  /** Workspace list + per-session access (the mobile stream lives on WorkspaceSocket). */
+  get workspaces() {
+    const c = this;
+    return {
+      list: (): Promise<Workspace[]> => c.json<Workspace[]>("/api/v2/workspace/list"),
+      getSession: (workspaceId: string, sessionId: string): Promise<Session> =>
+        c.json<Session>(`/api/v2/workspace/${encodeURIComponent(workspaceId)}/session/${encodeURIComponent(sessionId)}`),
+      /** Sessions under a workspace: `.workspaces.sessions(id).create({ kind })`. */
+      sessions: (workspaceId: string) => ({
+        create: (request: CreateSessionRequest): Promise<SessionCreated> =>
+          c.postJson<SessionCreated>(`/api/v2/workspace/${encodeURIComponent(workspaceId)}/sessions`, request),
+      }),
+    };
   }
 
   // ── meta (public) ──────────────────────────────────────────────────────

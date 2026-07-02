@@ -4,6 +4,7 @@
 // against a live server is covered by the TypeScript SDK's contract test.
 package dev.winmux.sdk
 
+import kotlinx.serialization.builtins.ListSerializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -43,6 +44,36 @@ class ContractTest {
         )
         assertTrue(f is UserInputFrame)
         assertEquals("hi", f.content)
+    }
+
+    @Test
+    fun `S6 mobile DTOs round-trip`() {
+        val redeem = json.decodeFromString(
+            PairingRedeemResponse.serializer(),
+            """{"device_id":"dev_abc","long_term_token":"tok123","default_workspace_id":"ws_default"}""",
+        )
+        assertEquals("dev_abc", redeem.deviceId)
+        assertEquals("ws_default", redeem.defaultWorkspaceId)
+
+        val ws = json.decodeFromString(
+            ListSerializer(Workspace.serializer()),
+            """[{"id":"ws_default","name":"default","created_at":1782900000,"active_session_count":2}]""",
+        )
+        assertEquals("ws_default", ws[0].id)
+        assertEquals(2L, ws[0].activeSessionCount)
+
+        val created = json.decodeFromString(
+            SessionCreated.serializer(),
+            """{"session_id":"sess_x","kind":"claude_chat"}""",
+        )
+        assertEquals("sess_x", created.sessionId)
+
+        val detail = json.decodeFromString(
+            Session.serializer(),
+            """{"id":"sess_x","kind":"claude_chat","workspace_id":"ws_default","subscribers":1,"pending_requests":[],"event_count":5}""",
+        )
+        assertEquals("ws_default", detail.workspaceId)
+        assertEquals(5L, detail.eventCount)
     }
 
     @Test

@@ -54,6 +54,18 @@
         ],
         "type": "object"
       },
+      "CreateSessionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
       "ErrEvent": {
         "additionalProperties": false,
         "properties": {
@@ -256,6 +268,76 @@
         ],
         "type": "object"
       },
+      "Pairing-redeemRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "one_shot_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "one_shot_token"
+        ],
+        "type": "object"
+      },
+      "PairingRedeemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "default_workspace_id": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "long_term_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_id",
+          "long_term_token",
+          "default_workspace_id"
+        ],
+        "type": "object"
+      },
+      "PendingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "req_id": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "resolved_by": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "timeout_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "req_id",
+          "session_id",
+          "type",
+          "created_at",
+          "timeout_at",
+          "resolved_by",
+          "resolution"
+        ],
+        "type": "object"
+      },
       "ReadBody": {
         "additionalProperties": false,
         "properties": {
@@ -275,6 +357,62 @@
         "required": [
           "lines",
           "truncated"
+        ],
+        "type": "object"
+      },
+      "Session": {
+        "additionalProperties": false,
+        "properties": {
+          "event_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "pending_requests": {
+            "items": {
+              "$ref": "#/components/schemas/PendingRequest"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "subscribers": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "workspace_id",
+          "subscribers",
+          "pending_requests",
+          "event_count"
+        ],
+        "type": "object"
+      },
+      "SessionCreated": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "kind"
         ],
         "type": "object"
       },
@@ -330,6 +468,32 @@
           "frame_version"
         ],
         "type": "object"
+      },
+      "Workspace": {
+        "additionalProperties": false,
+        "properties": {
+          "active_session_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "active_session_count"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -346,6 +510,56 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/pairing/redeem": {
+      "post": {
+        "operationId": "pairing-redeem",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Real-IP",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Pairing-redeemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingRedeemResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Redeem a one-shot pairing token for a device credential",
+        "tags": [
+          "pairing"
+        ]
+      }
+    },
     "/api/v2/files/delete": {
       "delete": {
         "operationId": "files-delete",
@@ -834,6 +1048,158 @@
         "summary": "Server-Sent Events tail of a client's log (event: line)",
         "tags": [
           "logs"
+        ]
+      }
+    },
+    "/api/v2/workspace/list": {
+      "get": {
+        "operationId": "workspace-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Workspace"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List workspaces",
+        "tags": [
+          "workspace"
+        ]
+      }
+    },
+    "/api/v2/workspace/{id}/session/{sid}": {
+      "get": {
+        "operationId": "workspace-get-session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a session's detail",
+        "tags": [
+          "workspace"
+        ]
+      }
+    },
+    "/api/v2/workspace/{id}/sessions": {
+      "post": {
+        "operationId": "workspace-create-session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionCreated"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a session in a workspace",
+        "tags": [
+          "workspace"
         ]
       }
     },

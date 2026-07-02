@@ -38,9 +38,13 @@ func main() {
 			// Emit the generated OpenAPI spec to stdout and exit. The SDK
 			// pipeline (sdk-gen/) and its CI drift-guard use this — no running
 			// server or data dir needed (nil providers; handlers never run).
+			// All subsystems present (nil-backed) so every SDK-facing op is in the
+			// spec — registration only reflects types; no store is touched.
 			srv := api.NewServer("", 0, api.Deps{
-				Files: files.NewService(nil),
-				Logs:  logs.NewService(nil),
+				Files:     files.NewService(nil),
+				Logs:      logs.NewService(nil),
+				Chat:      chat.NewChatAPI(nil, nil, ""),
+				Workspace: workspace.NewService(workspace.NewManager(nil, nil), ""),
 			})
 			b, err := srv.OpenAPISpec()
 			if err != nil {
@@ -154,7 +158,7 @@ func main() {
 		// Backward-compat: a stable "default" workspace so legacy chat sessions
 		// (still served at /api/claude/*) have a home in the workspace model as
 		// the deeper chat↔workspace merge lands in a later sprint.
-		if _, e := wmgr.EnsureWorkspace("ws_default", "default"); e != nil {
+		if _, e := wmgr.EnsureWorkspace(workspace.DefaultID, "default"); e != nil {
 			log.Printf("workspace: ensure default failed: %v", e)
 		}
 		wsSvc = workspace.NewService(wmgr, token)

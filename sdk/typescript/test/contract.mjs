@@ -95,6 +95,33 @@ try {
   const logs = await client.listLogClients();
   assert.ok(logs.clients.some((c) => c.client_id === "server"), "server pseudo-client present");
 
+  // S6: pairing redeem + workspace list/create-session/get-session, and that a
+  // redeemed device token authenticates the /api/v2 surface.
+  const issue = await fetch(`${BASE}/api/pairing/issue`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ device_name: "contract-phone" }),
+  });
+  const { one_shot_token } = await issue.json();
+  assert.ok(one_shot_token, "issued a one-shot pairing token");
+
+  const redeemed = await client.pairing.redeem(one_shot_token);
+  assert.ok(redeemed.device_id && redeemed.long_term_token, "redeem returns a device credential");
+  assert.equal(redeemed.default_workspace_id, "ws_default", "redeem returns default_workspace_id");
+
+  // the long-term device token must work on the bearer-gated workspace API
+  const phone = new WinmuxClient({ baseUrl: BASE, token: redeemed.long_term_token });
+  const wss = await phone.workspaces.list();
+  assert.ok(wss.some((w) => w.id === "ws_default"), "device token lists workspaces");
+
+  const created = await phone.workspaces.sessions("ws_default").create({ kind: "claude_chat" });
+  assert.ok(created.session_id, "create session returns id");
+  assert.equal(created.kind, "claude_chat", "session kind echoed");
+
+  const detail = await phone.workspaces.getSession("ws_default", created.session_id);
+  assert.equal(detail.workspace_id, "ws_default", "get-session workspace_id");
+  assert.equal(detail.kind, "claude_chat", "get-session kind");
+
   // WS 8a: create a session under the default workspace, subscribe, receive hello.
   const sessRes = await fetch(`${BASE}/api/v2/workspace/ws_default/sessions`, {
     method: "POST",
@@ -131,7 +158,9 @@ try {
   assert.equal(hello.session_id, session_id, "hello carries session_id");
   assert.ok(typeof hello.frame_version === "number", "hello carries frame_version");
 
-  console.log(`\n✓ contract OK — ${frames.length} frame(s); REST files/logs/version + WS hello verified`);
+  console.log(
+    `\n✓ contract OK — files/logs/version + pairing.redeem + device-token workspace list/create/get-session + WS hello (${frames.length} frame) verified`,
+  );
 } catch (e) {
   failed = true;
   console.error("\n✗ contract FAILED:", e?.message ?? e);

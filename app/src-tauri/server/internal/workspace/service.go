@@ -22,15 +22,20 @@ func NewService(mgr *Manager, token string) *Service { return &Service{mgr: mgr,
 // RegisterRoutes mounts /api/v2/workspace/* — REST behind the shared auth
 // middleware, and the subscribe WebSocket with its own header-or-query auth.
 func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.HandlerFunc) http.HandlerFunc) {
-	mux.HandleFunc("GET /api/v2/workspace/list", auth(s.handleList))
 	mux.HandleFunc("POST /api/v2/workspace/create", auth(s.handleCreate))
 	mux.HandleFunc("GET /api/v2/workspace/{id}/sessions", auth(s.handleListSessions))
-	mux.HandleFunc("POST /api/v2/workspace/{id}/sessions", auth(s.handleCreateSession))
 	mux.HandleFunc("GET /api/v2/workspace/{id}/session/{sid}/subscribe", s.handleSubscribe)
-	mux.HandleFunc("GET /api/v2/workspace/{id}/session/{sid}", auth(s.handleGetSession))
 	mux.HandleFunc("GET /api/v2/workspace/{id}", auth(s.handleGet))
 	mux.HandleFunc("DELETE /api/v2/workspace/{id}", auth(s.handleDelete))
+	// Phase 77 S6: list, get-session, and create-session are served as typed
+	// huma ops (api package) so they land in the generated OpenAPI + SDKs — the
+	// mobile-consumed surface. Their raw handlers (handleList / handleGetSession
+	// / handleCreateSession) remain the reference impl the huma ops delegate to.
 }
+
+// Mgr exposes the manager so the api package's huma ops can reuse the exact
+// business logic behind the mobile-facing endpoints.
+func (s *Service) Mgr() *Manager { return s.mgr }
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -43,23 +48,6 @@ func fail(w http.ResponseWriter, err error) {
 		return
 	}
 	http.Error(w, err.Error(), http.StatusInternalServerError)
-}
-
-func (s *Service) handleList(w http.ResponseWriter, _ *http.Request) {
-	wss, err := s.mgr.ListWorkspaces()
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	out := make([]map[string]any, 0, len(wss))
-	for _, ws := range wss {
-		sess, _ := s.mgr.ListSessions(ws.ID)
-		out = append(out, map[string]any{
-			"id": ws.ID, "name": ws.Name, "created_at": ws.CreatedAt,
-			"active_session_count": len(sess),
-		})
-	}
-	writeJSON(w, out)
 }
 
 func (s *Service) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -112,30 +100,3 @@ func (s *Service) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-func (s *Service) handleCreateSession(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Kind string `json:"kind"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	se, err := s.mgr.CreateSession(r.PathValue("id"), body.Kind)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, map[string]any{"session_id": se.ID, "kind": se.Kind})
-}
-
-func (s *Service) handleGetSession(w http.ResponseWriter, r *http.Request) {
-	se, err := s.mgr.GetSession(r.PathValue("sid"))
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	pending, _ := s.mgr.ListPending(se.ID)
-	writeJSON(w, map[string]any{
-		"id": se.ID, "kind": se.Kind, "workspace_id": se.WorkspaceID,
-		"subscribers":      s.mgr.SubscriberCount(se.ID),
-		"pending_requests": pending,
-		"event_count":      s.mgr.store.EventCount(se.ID),
-	})
-}

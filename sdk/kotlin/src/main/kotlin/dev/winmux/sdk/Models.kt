@@ -20,6 +20,11 @@ data class ClientsBody(
 )
 
 @Serializable
+data class CreateSessionRequest(
+    val kind: String
+)
+
+@Serializable
 data class ErrEvent(
     val error: String
 )
@@ -81,9 +86,48 @@ data class OkBody(
 )
 
 @Serializable
+data class Pairing-redeemRequest(
+    @SerialName("one_shot_token") val oneShotToken: String
+)
+
+@Serializable
+data class PairingRedeemResponse(
+    @SerialName("default_workspace_id") val defaultWorkspaceId: String,
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("long_term_token") val longTermToken: String
+)
+
+@Serializable
+data class PendingRequest(
+    @SerialName("created_at") val createdAt: Long,
+    @SerialName("req_id") val reqId: String,
+    val resolution: String,
+    @SerialName("resolved_by") val resolvedBy: String,
+    @SerialName("session_id") val sessionId: String,
+    @SerialName("timeout_at") val timeoutAt: Long,
+    val type: String
+)
+
+@Serializable
 data class ReadBody(
     val lines: List<String>,
     val truncated: Boolean
+)
+
+@Serializable
+data class Session(
+    @SerialName("event_count") val eventCount: Long,
+    val id: String,
+    val kind: String,
+    @SerialName("pending_requests") val pendingRequests: List<PendingRequest>,
+    val subscribers: Long,
+    @SerialName("workspace_id") val workspaceId: String
+)
+
+@Serializable
+data class SessionCreated(
+    val kind: String,
+    @SerialName("session_id") val sessionId: String
 )
 
 @Serializable
@@ -99,5 +143,13 @@ data class VersionBody(
     @SerialName("frame_version") val frameVersion: Long,
     val name: String,
     val version: String
+)
+
+@Serializable
+data class Workspace(
+    @SerialName("active_session_count") val activeSessionCount: Long,
+    @SerialName("created_at") val createdAt: Long,
+    val id: String,
+    val name: String
 )
 

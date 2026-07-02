@@ -18,7 +18,13 @@ bearer-token gated. Two audiences:
 | `GET /api/asyncapi.json` | none | WS frame contract (AsyncAPI 2.6) |
 | `GET /api/frames.schema.json` | none | WS frames as JSON-Schema 2020-12 (SDK source) |
 
-## Client-SDK surface (`/api/v2/*`, bearer)
+## Client-SDK surface (bearer, generated into the SDKs)
+
+Auth on `/api/v2/*` accepts **the shared desktop token OR a paired device's
+long-term token** (from `pairing/redeem`), so a phone uses the same surface.
+
+**Pairing** — `POST /api/pairing/redeem` (public; one-shot token in body is the
+credential) → `{device_id, long_term_token, default_workspace_id}`.
 
 **Files** — sandboxed to the server's files root (`$HOME` by default):
 `GET files/list?path=&depth=1|2`, `GET files/read?path=&max_bytes=` (raw bytes +
@@ -29,9 +35,14 @@ bearer-token gated. Two audiences:
 `GET logs/list`, `GET logs/read?client_id=&file=&tail=`,
 `GET logs/stream?client_id=&file=` (SSE `event: line`).
 
-**Workspace** (WS frame streaming — see [CLIENTS.md](CLIENTS.md) + AsyncAPI):
-`GET/POST workspace/*`, and the stream
-`GET workspace/{id}/session/{sid}/subscribe?cursor=&client_id=&token=`.
+**Workspace** — `GET /api/v2/workspace/list`,
+`POST /api/v2/workspace/{id}/sessions` (`{kind}` → `{session_id, kind}`),
+`GET /api/v2/workspace/{id}/session/{sid}`, plus the WS stream
+`GET workspace/{id}/session/{sid}/subscribe?cursor=&client_id=&token=`
+(frames in [CLIENTS.md](CLIENTS.md) + AsyncAPI).
+
+> Desktop-only workspace admin (`POST /create`, `GET /{id}`, `DELETE /{id}`,
+> `GET /{id}/sessions`) stays on raw handlers — outside the SDK spec.
 
 Full schemas: the served `openapi.json` (REST) + `frames.schema.json` (WS).
 

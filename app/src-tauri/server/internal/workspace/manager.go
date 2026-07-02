@@ -44,6 +44,12 @@ func now() int64 { return time.Now().Unix() }
 // ─── workspaces ──────────────────────────────────────────────────────────────
 
 // CreateWorkspace mints a server-authoritative UUID (Q5).
+// DefaultID is the always-present workspace every client falls into when it
+// hasn't chosen one (ensured at startup). Returned by pairing/redeem as
+// default_workspace_id so a freshly paired phone can connect without a
+// workspace-list round-trip.
+const DefaultID = "ws_default"
+
 func (m *Manager) CreateWorkspace(name string) (Workspace, error) {
 	w := Workspace{ID: "ws_" + uuid.NewString(), Name: name, CreatedAt: now()}
 	return w, m.store.CreateWorkspace(w)
@@ -91,6 +97,7 @@ func (m *Manager) CreateSession(wsID, kind string) (Session, error) {
 func (m *Manager) GetSession(id string) (Session, error)          { return m.store.GetSession(id) }
 func (m *Manager) ListSessions(wsID string) ([]Session, error)    { return m.store.ListSessions(wsID) }
 func (m *Manager) ListPending(id string) ([]PendingRequest, error) { return m.store.ListPending(id) }
+func (m *Manager) EventCount(sessionID string) int64              { return m.store.EventCount(sessionID) }
 
 // SubscriberCount reports how many clients are live on a session.
 func (m *Manager) SubscriberCount(sessionID string) int {

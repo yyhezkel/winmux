@@ -24,8 +24,14 @@ class WinmuxClient(
     private val token: String? = null,
     private val http: OkHttpClient = OkHttpClient(),
 ) {
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
+    internal val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
     private val base = baseUrl.trimEnd('/')
+
+    /** Pairing endpoints (`client.pairing.redeem(...)`). */
+    val pairing = PairingApi(this)
+
+    /** Workspace list + session access (`client.workspaces.list()`, `.sessions(id).create(...)`). */
+    val workspaces = WorkspaceApi(this)
 
     private fun req(path: String): Request.Builder {
         val b = Request.Builder().url(base + path)
@@ -33,12 +39,22 @@ class WinmuxClient(
         return b
     }
 
-    private inline fun <reified T> getJson(path: String): T =
+    // Shared request helpers used by the namespaced API classes.
+    internal fun getText(path: String): String =
         http.newCall(req(path).get().build()).execute().use { res ->
             val body = res.body?.string().orEmpty()
             if (!res.isSuccessful) throw WinmuxApiException(res.code, body)
-            json.decodeFromString(body)
+            body
         }
+
+    internal fun postText(path: String, jsonBody: String): String =
+        http.newCall(req(path).post(jsonBody.toRequestBody("application/json".toMediaType())).build()).execute().use { res ->
+            val body = res.body?.string().orEmpty()
+            if (!res.isSuccessful) throw WinmuxApiException(res.code, body)
+            body
+        }
+
+    private inline fun <reified T> getJson(path: String): T = json.decodeFromString(getText(path))
 
     // ── meta (public) ──────────────────────────────────────────────────────
     fun version(): VersionBody = getJson("/api/version")

@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/pairing/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Redeem a one-shot pairing token for a device credential */
+        post: operations["pairing-redeem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/files/delete": {
         parameters: {
             query?: never;
@@ -140,6 +157,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/workspace/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List workspaces */
+        get: operations["workspace-list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/workspace/{id}/session/{sid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a session's detail */
+        get: operations["workspace-get-session"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/workspace/{id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a session in a workspace */
+        post: operations["workspace-create-session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/version": {
         parameters: {
             query?: never;
@@ -188,6 +256,9 @@ export interface components {
         };
         ClientsBody: {
             clients: components["schemas"]["ClientInfo"][] | null;
+        };
+        CreateSessionRequest: {
+            kind: string;
         };
         ErrEvent: {
             error: string;
@@ -264,9 +335,42 @@ export interface components {
         OkBody: {
             ok: boolean;
         };
+        "Pairing-redeemRequest": {
+            one_shot_token: string;
+        };
+        PairingRedeemResponse: {
+            default_workspace_id: string;
+            device_id: string;
+            long_term_token: string;
+        };
+        PendingRequest: {
+            /** Format: int64 */
+            created_at: number;
+            req_id: string;
+            resolution: string;
+            resolved_by: string;
+            session_id: string;
+            /** Format: int64 */
+            timeout_at: number;
+            type: string;
+        };
         ReadBody: {
             lines: string[] | null;
             truncated: boolean;
+        };
+        Session: {
+            /** Format: int64 */
+            event_count: number;
+            id: string;
+            kind: string;
+            pending_requests: components["schemas"]["PendingRequest"][] | null;
+            /** Format: int64 */
+            subscribers: number;
+            workspace_id: string;
+        };
+        SessionCreated: {
+            kind: string;
+            session_id: string;
         };
         UploadResultBody: {
             path: string;
@@ -281,6 +385,14 @@ export interface components {
             name: string;
             version: string;
         };
+        Workspace: {
+            /** Format: int64 */
+            active_session_count: number;
+            /** Format: int64 */
+            created_at: number;
+            id: string;
+            name: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -290,6 +402,41 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "pairing-redeem": {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Real-IP"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Pairing-redeemRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairingRedeemResponse"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "files-delete": {
         parameters: {
             query: {
@@ -557,6 +704,102 @@ export interface operations {
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     })[];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "workspace-list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "workspace-get-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                sid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "workspace-create-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionCreated"];
                 };
             };
             /** @description Error */

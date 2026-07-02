@@ -41,7 +41,7 @@ func (s *Server) newHumaAPI(mux *http.ServeMux) huma.API {
 	cfg.SchemasPath = ""
 
 	api := humago.New(mux, cfg)
-	api.UseMiddleware(bearerMiddleware(api, s.token))
+	api.UseMiddleware(s.bearerMiddleware(api))
 
 	s.registerMetaOps(api)
 	if s.deps.Files != nil {
@@ -50,6 +50,7 @@ func (s *Server) newHumaAPI(mux *http.ServeMux) huma.API {
 	if s.deps.Logs != nil {
 		s.deps.Logs.RegisterHuma(api)
 	}
+	s.registerMobileOps(api) // pairing/redeem + workspace list/get-session/create-session
 	return api
 }
 
@@ -62,18 +63,28 @@ func (s *Server) OpenAPISpec() ([]byte, error) {
 	return s.newHumaAPI(http.NewServeMux()).OpenAPI().MarshalJSON()
 }
 
-// bearerMiddleware enforces the shared bearer token for every operation that
-// declares a security requirement; operations with no Security (version,
-// health) are public. Mirrors auth.Bearer's behavior (same 401 on missing or
-// mismatched token) for the huma-hosted routes.
-func bearerMiddleware(api huma.API, token string) func(huma.Context, func(huma.Context)) {
+// tokenOK reports whether a bearer token is accepted: the shared (desktop)
+// token, or — when chat is enabled — a registered device's long-term token, so
+// a paired phone can call the /api/v2/* surface with the token it got from
+// /api/pairing/redeem.
+func (s *Server) tokenOK(token string) bool {
+	if token != "" && token == s.token {
+		return true
+	}
+	return s.deps.Chat != nil && s.deps.Chat.TokenValid(token)
+}
+
+// bearerMiddleware enforces auth for every operation that declares a security
+// requirement; operations with no Security (version, health, pairing/redeem)
+// are public. 401 on a missing/unknown token.
+func (s *Server) bearerMiddleware(api huma.API) func(huma.Context, func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
 		if len(ctx.Operation().Security) == 0 {
 			next(ctx)
 			return
 		}
 		got := strings.TrimPrefix(ctx.Header("Authorization"), "Bearer ")
-		if got == "" || got != token {
+		if !s.tokenOK(got) {
 			_ = huma.WriteErr(api, ctx, http.StatusUnauthorized, "unauthorized")
 			return
 		}

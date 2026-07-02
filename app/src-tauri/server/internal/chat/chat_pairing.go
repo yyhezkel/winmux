@@ -22,7 +22,8 @@ func nowUnix() int64 { return time.Now().Unix() }
 
 func (c *ChatAPI) registerPairingRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/pairing/issue", c.adminGuard(c.handlePairIssue))
-	mux.HandleFunc("/api/pairing/redeem", c.handlePairRedeem) // auth = the one-shot itself
+	// Phase 77 S6: /api/pairing/redeem is served as a typed huma op in the api
+	// package (so it lands in the generated OpenAPI + SDKs) via ChatAPI.Redeem.
 	mux.HandleFunc("/api/pairing/devices", c.adminGuard(c.handlePairDevices))
 	mux.HandleFunc("/api/pairing/devices/", c.adminGuard(c.handlePairDeviceItem))
 }
@@ -67,34 +68,29 @@ func (c *ChatAPI) handlePairIssue(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /api/pairing/redeem → { device_id, long_term_token }
-// No bearer: the one-shot token in the body IS the credential.
-func (c *ChatAPI) handlePairRedeem(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return
-	}
-	var body struct {
-		OneShotToken string `json:"one_shot_token"`
-	}
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&body)
-	}
-	if body.OneShotToken == "" {
-		http.Error(w, "missing one_shot_token", http.StatusBadRequest)
-		return
+// Redeem exchanges a one-shot pairing token for a device id + a long-term
+// device token (the credential the phone stores). The one-shot itself is the
+// auth, so this is safe to expose unauthenticated. Returns ok=false for an
+// invalid/expired token. Backs the /api/pairing/redeem huma op (api package).
+func (c *ChatAPI) Redeem(oneShotToken, clientIP string) (deviceID, longTermToken string, ok bool) {
+	if oneShotToken == "" {
+		return "", "", false
 	}
 	longTerm := randHex(32)
-	id, ok := c.store.redeemDevice(hashToken(body.OneShotToken), hashToken(longTerm), nowUnix())
+	id, ok := c.store.redeemDevice(hashToken(oneShotToken), hashToken(longTerm), nowUnix())
 	if !ok {
-		http.Error(w, "invalid or expired pairing token", http.StatusUnauthorized)
-		return
+		return "", "", false
 	}
-	c.store.touchDevice(id, clientIP(r))
-	writeJSON(w, map[string]any{
-		"device_id":       id,
-		"long_term_token": longTerm, // shown once; the phone stores it
-	})
+	c.store.touchDevice(id, clientIP)
+	return id, longTerm, true
+}
+
+// TokenValid reports whether a bearer token is accepted: the shared (desktop)
+// token OR a registered device's long-term token. Lets the api-layer auth admit
+// paired phones to the /api/v2/* surface with the token they got from Redeem.
+func (c *ChatAPI) TokenValid(token string) bool {
+	_, _, ok := c.authDevice(token)
+	return ok
 }
 
 // GET /api/pairing/devices (admin) → { devices: [...] }

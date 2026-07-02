@@ -36,6 +36,21 @@ new WorkspaceSocket({
 `interrupt`, `unsubscribe`. Frame types are the generated `WinmuxFrame` union —
 narrow on `f.type`.
 
+**Pairing + workspace (the mobile flow):**
+
+```ts
+// 1. redeem the one-shot from the desktop's QR → durable device credential.
+const cred = await new WinmuxClient({ baseUrl }).pairing.redeem(oneShotToken);
+// cred: { device_id, long_term_token, default_workspace_id }
+
+// 2. use the device token for the /api/v2 surface.
+const phone = new WinmuxClient({ baseUrl, token: cred.long_term_token });
+const spaces = await phone.workspaces.list();                       // Workspace[]
+const s = await phone.workspaces.sessions(cred.default_workspace_id).create({ kind: "claude_chat" });
+const detail = await phone.workspaces.getSession(cred.default_workspace_id, s.session_id);
+// then stream it with WorkspaceSocket (sessionId = s.session_id).
+```
+
 ## Kotlin (`sdk/kotlin`, `dev.winmux.sdk`)
 
 ```kotlin
@@ -60,6 +75,25 @@ WorkspaceSocket.subscribe(
 
 Frames deserialize into the sealed `WinmuxFrame` via `WinmuxJson.instance`
 (`classDiscriminator = "type"`, unknown keys ignored for forward-compat).
+
+**Pairing + workspace (the mobile flow):**
+
+```kotlin
+// 1. redeem the one-shot from the desktop's QR.
+val cred = WinmuxClient(baseUrl).pairing.redeem(oneShotToken)
+// cred: PairingRedeemResponse(deviceId, longTermToken, defaultWorkspaceId)
+
+// 2. use the device token for the /api/v2 surface.
+val phone = WinmuxClient(baseUrl, token = cred.longTermToken)
+val spaces: List<Workspace> = phone.workspaces.list()
+val s: SessionCreated = phone.workspaces.sessions(cred.defaultWorkspaceId)
+    .create(CreateSessionRequest(kind = "claude_chat"))
+val detail: Session = phone.workspaces.getSession(cred.defaultWorkspaceId, s.sessionId)
+// then stream it with WorkspaceSocket.subscribe(sessionId = s.sessionId, …).
+```
+
+The `long_term_token` from `redeem` authenticates the whole `/api/v2/*` surface
+(the server accepts the shared desktop token **or** a paired device token).
 
 ## Regenerating
 

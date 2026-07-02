@@ -599,3 +599,28 @@ State model (`internal/workspace`): **Workspace** (server UUID `ws_…`) → **S
     Claude-spawn into a workspace `claude_chat` session so it runs `claude` and
     streams stdout into the workspace event log (engine↔substrate). Kotlin frame
     types are NOT locked, so that wiring uses the cleanest per-`type` schema.
+
+## 17. S6 — SDK coverage of the mobile surface (implemented, 2026-07-02)
+The mobile session flagged an SDK gap: `WinmuxClient` covered only files/logs/
+version, but a phone also needs to pair + drive workspace sessions. Those paths
+lived on **raw** handlers, so they were absent from the generated OpenAPI (hence
+the SDKs). S6 surfaces them as typed huma ops (composing chat + workspace),
+removing the raw duplicates to avoid mux collisions.
+
+**Endpoints added to the generated spec + SDKs:**
+
+| Method + path | Auth | DTO | SDK call |
+|---|---|---|---|
+| `POST /api/pairing/redeem` | public (one-shot) | `PairingRedeemResponse` | `pairing.redeem(t)` |
+| `GET /api/v2/workspace/list` | bearer | `Workspace[]` | `workspaces.list()` |
+| `POST /api/v2/workspace/{id}/sessions` | bearer | `CreateSessionRequest`→`SessionCreated` | `workspaces.sessions(id).create(req)` |
+| `GET /api/v2/workspace/{id}/session/{sid}` | bearer | `Session` | `workspaces.getSession(id, sid)` |
+
+- **`redeem` returns `default_workspace_id`** (= `ws_default`, always ensured) so a
+  freshly paired phone connects without a workspace-list round-trip.
+- **Auth broadened:** the `/api/v2/*` bearer now accepts the shared desktop token
+  **or** a paired device's long-term token (`ChatAPI.TokenValid`), so the
+  credential from `redeem` works on the whole surface. Verified end-to-end in the
+  TS contract test (issue → redeem → device-token list/create/get-session).
+- Desktop-only workspace admin (create/get/delete workspace, list sessions) stays
+  raw + out of the SDK. Version stays **v0.4.3** (additive).

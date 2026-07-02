@@ -739,6 +739,7 @@
   "notif.markAllRead": "تحديد الكل كمقروء",
   "notif.clear": "مسح الكل",
   "notif.close": "إغلاق",
+  "drawer.popout": "فتح في نافذة",
   "notif.jump": "الانتقال إلى مساحة العمل",
   "notif.filter.all": "الكل",
   "notif.filter.agent": "الوكيل",

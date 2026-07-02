@@ -739,6 +739,7 @@
   "notif.markAllRead": "Отметить все",
   "notif.clear": "Очистить",
   "notif.close": "Закрыть",
+  "drawer.popout": "Открепить в окно",
   "notif.jump": "К рабочему пространству",
   "notif.filter.all": "Все",
   "notif.filter.agent": "Агент",

@@ -739,6 +739,7 @@
   "notif.markAllRead": "Mark all read",
   "notif.clear": "Clear all",
   "notif.close": "Close",
+  "drawer.popout": "Pop out to window",
   "notif.jump": "Go to workspace",
   "notif.filter.all": "All",
   "notif.filter.agent": "Agent",

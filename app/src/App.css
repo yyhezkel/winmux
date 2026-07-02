@@ -4453,6 +4453,20 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .mob-status { margin: 8px 0 4px; font-size: 12px; }
 .mob-ok { color: var(--w-success, #9ece6a); }
 .mob-warn { color: var(--w-warning, #e0af68); }
+/* Connected view: shown instead of the setup form once a domain is linked. */
+.mob-connected {
+  margin: 4px 0 6px; padding: 12px 14px; border: 1px solid var(--w-border, #2a2e44);
+  border-radius: 8px; background: var(--w-bg-elev, #1f2335);
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+}
+.mob-conn-row { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+.mob-conn-domain { font-weight: 600; unicode-bidi: isolate; }
+.mob-connected button.ghost-danger {
+  align-self: flex-end; background: transparent; color: var(--w-error, #f7768e);
+  border: 1px solid var(--w-error, #f7768e); border-radius: 6px; padding: 4px 12px; cursor: pointer;
+}
+.mob-connected button.ghost-danger:hover:not(:disabled) { background: rgba(247, 118, 142, 0.14); }
+.mob-connected button.ghost-danger:disabled { opacity: 0.5; cursor: default; }
 .mob-pair { display: flex; gap: 8px; align-items: center; }
 .mob-pair input { flex: 1 1 auto; }
 .mob-qr { display: flex; gap: 14px; align-items: center; margin: 12px 0; padding: 12px;

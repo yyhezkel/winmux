@@ -5620,6 +5620,7 @@ pub fn run() {
             // Phase 70: mobile pairing (nginx + Cloudflare + Let's Encrypt).
             pairing::mobile_pairing_init,
             pairing::mobile_pairing_status,
+            pairing::mobile_pairing_disconnect,
             pairing::mobile_pairing_generate_qr,
             pairing::mobile_pairing_list_devices,
             pairing::mobile_pairing_revoke,

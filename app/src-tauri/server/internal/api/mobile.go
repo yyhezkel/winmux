@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -19,6 +20,16 @@ import (
 )
 
 var mobileSecured = []map[string][]string{{"bearerAuth": {}}}
+
+// OKResponse is a minimal {"ok": true} body.
+type OKResponse struct {
+	OK bool `json:"ok"`
+}
+
+// FCMTokenRequest registers a device's Firebase push registration token.
+type FCMTokenRequest struct {
+	FCMToken string `json:"fcm_token"`
+}
 
 // PairingRedeemResponse is the device credential handed to a freshly paired
 // phone, plus the workspace it should connect to (saves a list round-trip).
@@ -77,6 +88,32 @@ func (s *Server) registerMobileOps(api huma.API) {
 			return &struct{ Body PairingRedeemResponse }{Body: PairingRedeemResponse{
 				DeviceID: id, LongTermToken: longTerm, DefaultWorkspaceID: workspace.DefaultID,
 			}}, nil
+		})
+
+		// POST /api/v2/devices/{id}/fcm-token — a paired device registers its
+		// Firebase push token so the server can wake it when its WS is closed.
+		// A device may only set its OWN token; the shared/admin token may set any.
+		huma.Register(api, huma.Operation{
+			OperationID: "device-register-fcm-token", Method: http.MethodPost,
+			Path:    "/api/v2/devices/{id}/fcm-token",
+			Summary: "Register a device's FCM push token",
+			Tags:    []string{"pairing"}, Security: mobileSecured,
+		}, func(_ context.Context, in *struct {
+			ID            string `path:"id"`
+			Authorization string `header:"Authorization"`
+			Body          FCMTokenRequest
+		}) (*struct{ Body OKResponse }, error) {
+			deviceID, admin, ok := s.deps.Chat.ResolveToken(strings.TrimPrefix(in.Authorization, "Bearer "))
+			if !ok {
+				return nil, huma.Error401Unauthorized("unauthorized")
+			}
+			if !admin && deviceID != in.ID {
+				return nil, huma.Error403Forbidden("cannot register a token for another device")
+			}
+			if !s.deps.Chat.SetDeviceFCMToken(in.ID, strings.TrimSpace(in.Body.FCMToken)) {
+				return nil, huma.Error404NotFound("device not found or not active")
+			}
+			return &struct{ Body OKResponse }{Body: OKResponse{OK: true}}, nil
 		})
 	}
 

@@ -36,6 +36,7 @@ type PairedDevice struct {
 	ExpiresAt  int64 // one-shot expiry (pending only)
 	LastSeen   int64
 	LastIP     string
+	FCMToken   string // Firebase registration token for push (empty = no push)
 }
 
 // SessionRow is the durable record of a Claude chat session.
@@ -78,7 +79,8 @@ func OpenChatStore(path string) (*ChatStore, error) {
 	  created_at INTEGER,
 	  expires_at INTEGER,
 	  last_seen INTEGER,
-	  last_ip TEXT
+	  last_ip TEXT,
+	  fcm_token TEXT DEFAULT ''
 	);
 	CREATE TABLE IF NOT EXISTS sessions (
 	  id TEXT PRIMARY KEY,
@@ -104,6 +106,9 @@ func OpenChatStore(path string) (*ChatStore, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
+	// Migration (Phase 77 §7): add fcm_token to pre-existing DBs. Idempotent —
+	// a "duplicate column name" error means it's already there, which is fine.
+	_, _ = db.Exec(`ALTER TABLE paired_devices ADD COLUMN fcm_token TEXT DEFAULT ''`)
 	return &ChatStore{db: db}, nil
 }
 
@@ -300,6 +305,64 @@ func (s *ChatStore) deviceByTokenHash(hash string) (*PairedDevice, bool) {
 		return nil, false
 	}
 	return d, true
+}
+
+// deviceByID returns any device (any status) by id — for owner scope reads.
+func (s *ChatStore) deviceByID(id string) (*PairedDevice, bool) {
+	d := &PairedDevice{}
+	err := s.db.QueryRow(
+		`SELECT device_id, device_name, scopes, status
+		   FROM paired_devices WHERE device_id=?`, id).
+		Scan(&d.ID, &d.Name, &d.Scopes, &d.Status)
+	if err != nil {
+		return nil, false
+	}
+	return d, true
+}
+
+// setDeviceFCMToken records a device's Firebase registration token (Phase 77
+// §7). Only touches active devices so a revoked device can't re-arm push.
+func (s *ChatStore) setDeviceFCMToken(id, token string) bool {
+	res, err := s.db.Exec(
+		`UPDATE paired_devices SET fcm_token=? WHERE device_id=? AND status='active'`,
+		token, id)
+	if err != nil {
+		return false
+	}
+	n, _ := res.RowsAffected()
+	return n > 0
+}
+
+// fcmTokenForDevice returns an active device's registration token (empty ⇒ no
+// push). Used by the FCM sender's TokenResolver.
+func (s *ChatStore) fcmTokenForDevice(id string) (string, bool) {
+	var tok string
+	err := s.db.QueryRow(
+		`SELECT fcm_token FROM paired_devices WHERE device_id=? AND status='active'`, id).
+		Scan(&tok)
+	if err != nil || tok == "" {
+		return "", false
+	}
+	return tok, true
+}
+
+// activePushDeviceIDs lists active devices that have a registration token —
+// the fan-out targets when a session has no live WS subscriber.
+func (s *ChatStore) activePushDeviceIDs() []string {
+	rows, err := s.db.Query(
+		`SELECT device_id FROM paired_devices WHERE status='active' AND fcm_token != ''`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (s *ChatStore) touchDevice(id, ip string) {

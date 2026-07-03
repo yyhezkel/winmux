@@ -21,14 +21,37 @@ type liveSession struct {
 	subs map[string]chan []byte // client_id → buffered frame channel
 }
 
+// PushLister yields the paired-device IDs eligible for an out-of-band push
+// (active + registered FCM token). Implemented by the chat device store and
+// injected via SetPushLister so the workspace package stays decoupled from chat.
+type PushLister interface {
+	ActivePushDeviceIDs() []string
+}
+
 // Manager is the workspace subsystem entry point.
 type Manager struct {
 	store    *Store
 	notifier core.NotificationSender
+	pusher   PushLister    // nil = no device store wired (no out-of-band push)
 	driver   SessionDriver // optional engine hook (claude_chat); nil = pure pub/sub
 
 	mu   sync.Mutex
 	live map[string]*liveSession // session_id → live subscribers
+}
+
+// SetPushLister wires the device store used to find out-of-band push targets.
+func (m *Manager) SetPushLister(p PushLister) { m.pusher = p }
+
+// shouldNotify reports whether an event type warrants a push when no live WS
+// subscriber is attached: a hook needing a decision, an assistant reply, or an
+// explicit notification. High-frequency stream frames (tool_use/tool_result/
+// status) never push.
+func shouldNotify(typ string) bool {
+	switch typ {
+	case FrameHookRequest, FrameAssistantText, FrameNotification:
+		return true
+	}
+	return false
 }
 
 // NewManager wires the manager over a store + a notification sender (NoopSender
@@ -139,12 +162,35 @@ func (m *Manager) Publish(sessionID, typ string, payload json.RawMessage) (Event
 	}
 	m.store.TouchSession(sessionID, ev.Timestamp)
 	m.fanout(ev)
+	m.maybePush(ev)
 	return ev, nil
 }
 
-// eventFrame flattens an Event into a §4.4 wire frame: the type-specific payload
-// object with seq/type/session_id/ts merged on top.
-func eventFrame(ev Event) []byte {
+// maybePush sends an out-of-band FCM push to every active paired device when a
+// notification-worthy event lands on a session with NO live WS subscriber (the
+// phone is backgrounded / disconnected). Best-effort + async so a slow FCM call
+// never blocks Publish; delivery is fire-and-forget (the client re-syncs the
+// durable log on reconnect regardless).
+func (m *Manager) maybePush(ev Event) {
+	if m.pusher == nil || !shouldNotify(ev.Type) || m.SubscriberCount(ev.SessionID) > 0 {
+		return
+	}
+	targets := m.pusher.ActivePushDeviceIDs()
+	if len(targets) == 0 {
+		return
+	}
+	frame := eventPayloadMap(ev)
+	notifier := m.notifier
+	go func() {
+		for _, id := range targets {
+			_ = notifier.Notify(id, frame)
+		}
+	}()
+}
+
+// eventPayloadMap flattens an Event into a §4.4 wire object: the type-specific
+// payload with seq/type/session_id/ts merged on top.
+func eventPayloadMap(ev Event) map[string]any {
 	m := map[string]any{}
 	if len(ev.Payload) > 0 {
 		_ = json.Unmarshal(ev.Payload, &m)
@@ -153,7 +199,12 @@ func eventFrame(ev Event) []byte {
 	m["type"] = ev.Type
 	m["session_id"] = ev.SessionID
 	m["ts"] = ev.Timestamp
-	b, _ := json.Marshal(m)
+	return m
+}
+
+// eventFrame marshals the §4.4 wire object for live WS fan-out.
+func eventFrame(ev Event) []byte {
+	b, _ := json.Marshal(eventPayloadMap(ev))
 	return b
 }
 

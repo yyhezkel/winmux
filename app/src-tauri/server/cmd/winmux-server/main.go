@@ -19,6 +19,7 @@ import (
 	"winmux-server/internal/chat"
 	"winmux-server/internal/config"
 	"winmux-server/internal/core"
+	"winmux-server/internal/fcm"
 	"winmux-server/internal/files"
 	"winmux-server/internal/hooks"
 	"winmux-server/internal/insights"
@@ -159,7 +160,23 @@ func main() {
 		log.Printf("workspace: open store failed, Workspace API disabled: %v", werr)
 	} else {
 		defer wstore.Close()
-		wmgr := workspace.NewManager(wstore, nil) // NoopSender until FCM lands
+		// Notification sender: real FCM push when a service account is configured
+		// (Phase 77 §7), else a no-op. FCM resolves each device's registration
+		// token via the chat device store.
+		var notifier core.NotificationSender = core.NoopSender{}
+		if fcmCfg := config.LoadFCM(); fcmCfg.Enabled() && chatAPI != nil {
+			if sender, ferr := fcm.NewSender(fcmCfg.ServiceAccountPath, fcmCfg.ProjectID, chatAPI.FCMTokenForDevice); ferr != nil {
+				log.Printf("fcm: push disabled (%v) — using no-op sender", ferr)
+			} else {
+				notifier = sender
+				log.Printf("fcm: push enabled (project=%s)", fcmCfg.ProjectID)
+			}
+		}
+		wmgr := workspace.NewManager(wstore, notifier)
+		// Out-of-band push fan-out targets come from the chat device store.
+		if chatAPI != nil {
+			wmgr.SetPushLister(chatAPI)
+		}
 		// Backward-compat: a stable "default" workspace so legacy chat sessions
 		// (still served at /api/claude/*) have a home in the workspace model as
 		// the deeper chat↔workspace merge lands in a later sprint.

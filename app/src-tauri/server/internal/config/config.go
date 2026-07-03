@@ -23,6 +23,26 @@ func RandHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
+// FCM holds the Firebase Cloud Messaging push config (Phase 77 §7). Read from
+// the environment so the operator supplies a service-account JSON out-of-band
+// (never committed). Enabled() is false when unconfigured → the server falls
+// back to a no-op sender.
+type FCM struct {
+	ServiceAccountPath string
+	ProjectID          string
+}
+
+// Enabled reports whether a service-account path was configured.
+func (f FCM) Enabled() bool { return strings.TrimSpace(f.ServiceAccountPath) != "" }
+
+// LoadFCM reads FCM_SERVICE_ACCOUNT_JSON_PATH + FCM_PROJECT_ID from the env.
+func LoadFCM() FCM {
+	return FCM{
+		ServiceAccountPath: strings.TrimSpace(os.Getenv("FCM_SERVICE_ACCOUNT_JSON_PATH")),
+		ProjectID:          strings.TrimSpace(os.Getenv("FCM_PROJECT_ID")),
+	}
+}
+
 // LoadOrCreateToken reads the token file, creating a fresh 32-byte token on
 // first run (mode 0600).
 func LoadOrCreateToken(path string) string {

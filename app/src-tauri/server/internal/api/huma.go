@@ -16,8 +16,20 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
+	"winmux-server/internal/auth"
 	"winmux-server/internal/core"
 )
+
+// opScopes maps a secured operation to the scope a paired device must hold to
+// call it. Operations absent here need only a valid token. The shared/admin
+// token bypasses scope checks; devices default to "all" (backwards compat), so
+// this only bites once an owner narrows a device's grants.
+var opScopes = map[string]auth.Scope{
+	"workspace-list":           auth.ScopeWorkspaceRead,
+	"workspace-create-session": auth.ScopeSessionWrite,
+	"workspace-get-session":    auth.ScopeSessionRead,
+	"session-resolve-hook":     auth.ScopeHookApprove,
+}
 
 // newHumaAPI builds the shared huma API on the given mux: security scheme,
 // bearer middleware, and the version/health/files/logs operations. It returns
@@ -87,6 +99,16 @@ func (s *Server) bearerMiddleware(api huma.API) func(huma.Context, func(huma.Con
 		if !s.tokenOK(got) {
 			_ = huma.WriteErr(api, ctx, http.StatusUnauthorized, "unauthorized")
 			return
+		}
+		// Per-device scope enforcement (Q6): if this op needs a scope, the
+		// device must grant it. The shared/admin token bypasses; devices
+		// default to "all" until an owner narrows them.
+		if need, needed := opScopes[ctx.Operation().OperationID]; needed && s.deps.Chat != nil {
+			scopes, admin, _ := s.deps.Chat.DeviceScopes(got)
+			if !admin && !auth.HasScope(scopes, need) {
+				_ = huma.WriteErr(api, ctx, http.StatusForbidden, "missing scope: "+string(need))
+				return
+			}
 		}
 		next(ctx)
 	}

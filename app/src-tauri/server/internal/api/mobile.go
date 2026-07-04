@@ -16,8 +16,23 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"winmux-server/internal/auth"
 	"winmux-server/internal/workspace"
 )
+
+// ScopesBody carries a device's grant list (GET response + PUT request).
+type ScopesBody struct {
+	Scopes []string `json:"scopes"`
+}
+
+func scopeStrings(stored string) []string {
+	sc := auth.ParseScopes(stored)
+	out := make([]string, len(sc))
+	for i, s := range sc {
+		out[i] = string(s)
+	}
+	return out
+}
 
 var mobileSecured = []map[string][]string{{"bearerAuth": {}}}
 
@@ -96,6 +111,61 @@ func (s *Server) registerMobileOps(api huma.API) {
 			return &struct{ Body PairingRedeemResponse }{Body: PairingRedeemResponse{
 				DeviceID: id, LongTermToken: longTerm, DefaultWorkspaceID: workspace.DefaultID,
 			}}, nil
+		})
+
+		// GET /api/v2/devices/{id}/scopes — read a device's grants. A device may
+		// read its OWN scopes (id = its device id, or the alias "me"); the
+		// shared/admin token may read any device's.
+		huma.Register(api, huma.Operation{
+			OperationID: "device-get-scopes", Method: http.MethodGet,
+			Path:    "/api/v2/devices/{id}/scopes",
+			Summary: "Read a device's scope grants",
+			Tags:    []string{"pairing"}, Security: mobileSecured,
+		}, func(_ context.Context, in *struct {
+			ID            string `path:"id"`
+			Authorization string `header:"Authorization"`
+		}) (*struct{ Body ScopesBody }, error) {
+			caller, admin, ok := s.deps.Chat.ResolveToken(strings.TrimPrefix(in.Authorization, "Bearer "))
+			if !ok {
+				return nil, huma.Error401Unauthorized("unauthorized")
+			}
+			id := in.ID
+			if id == "me" {
+				id = caller
+			}
+			if !admin && id != caller {
+				return nil, huma.Error403Forbidden("cannot read another device's scopes")
+			}
+			stored, found := s.deps.Chat.GetDeviceScopes(id)
+			if !found {
+				return nil, huma.Error404NotFound("device not found")
+			}
+			return &struct{ Body ScopesBody }{Body: ScopesBody{Scopes: scopeStrings(stored)}}, nil
+		})
+
+		// PUT /api/v2/devices/{id}/scopes — owner-only: set a device's grants.
+		huma.Register(api, huma.Operation{
+			OperationID: "device-set-scopes", Method: http.MethodPut,
+			Path:    "/api/v2/devices/{id}/scopes",
+			Summary: "Set a device's scope grants (owner only)",
+			Tags:    []string{"pairing"}, Security: mobileSecured,
+		}, func(_ context.Context, in *struct {
+			ID            string `path:"id"`
+			Authorization string `header:"Authorization"`
+			Body          ScopesBody
+		}) (*struct{ Body ScopesBody }, error) {
+			_, admin, ok := s.deps.Chat.ResolveToken(strings.TrimPrefix(in.Authorization, "Bearer "))
+			if !ok {
+				return nil, huma.Error401Unauthorized("unauthorized")
+			}
+			if !admin {
+				return nil, huma.Error403Forbidden("owner token required to set scopes")
+			}
+			stored := auth.NormalizeScopes(in.Body.Scopes)
+			if !s.deps.Chat.SetDeviceScopes(in.ID, stored) {
+				return nil, huma.Error404NotFound("device not found or not active")
+			}
+			return &struct{ Body ScopesBody }{Body: ScopesBody{Scopes: scopeStrings(stored)}}, nil
 		})
 	}
 

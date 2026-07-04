@@ -334,6 +334,19 @@ func (s *ChatStore) deviceByID(id string) (*PairedDevice, bool) {
 	return d, true
 }
 
+// setDeviceScopes updates an active device's grants (stored JSON string).
+// Returns false if the device is unknown or not active.
+func (s *ChatStore) setDeviceScopes(id, scopes string) bool {
+	res, err := s.db.Exec(
+		`UPDATE paired_devices SET scopes=? WHERE device_id=? AND status='active'`,
+		scopes, id)
+	if err != nil {
+		return false
+	}
+	n, _ := res.RowsAffected()
+	return n > 0
+}
+
 // activeDeviceIDs lists every active paired device — the native-push fan-out
 // targets (delivery is per-device: live socket now, or queued for reconnect).
 func (s *ChatStore) activeDeviceIDs() []string {

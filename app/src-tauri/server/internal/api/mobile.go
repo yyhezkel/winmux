@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -23,6 +24,19 @@ var mobileSecured = []map[string][]string{{"bearerAuth": {}}}
 // OKResponse is a minimal {"ok": true} body.
 type OKResponse struct {
 	OK bool `json:"ok"`
+}
+
+// HookDecisionRequest resolves a pending hook.
+type HookDecisionRequest struct {
+	Decision string `json:"decision"` // "allow" | "deny"
+}
+
+// HookResolved is the result of a hook resolution (won = this caller's decision
+// was the winner-takes-all one that got broadcast).
+type HookResolved struct {
+	ReqID    string `json:"req_id"`
+	Decision string `json:"decision"`
+	Won      bool   `json:"won"`
 }
 
 // PairingRedeemResponse is the device credential handed to a freshly paired
@@ -139,6 +153,38 @@ func (s *Server) registerMobileOps(api huma.API) {
 			ID: se.ID, Kind: se.Kind, WorkspaceID: se.WorkspaceID,
 			Subscribers: mgr.SubscriberCount(se.ID), PendingRequests: pending, EventCount: mgr.EventCount(se.ID),
 		}}, nil
+	})
+
+	// PUT /api/v2/session/{sid}/hook/{req_id} — approve/deny a pending hook
+	// over REST (the mobile alternative to the workspace-WS hook_decision
+	// frame). Winner-takes-all: `won` reports whether this decision was the
+	// first and got broadcast. resolved_by = the caller's device id.
+	huma.Register(api, huma.Operation{
+		OperationID: "session-resolve-hook", Method: http.MethodPut,
+		Path:    "/api/v2/session/{sid}/hook/{req_id}",
+		Summary: "Approve or deny a pending hook request",
+		Tags:    []string{"workspace"}, Security: mobileSecured,
+	}, func(_ context.Context, in *struct {
+		SID           string `path:"sid"`
+		ReqID         string `path:"req_id"`
+		Authorization string `header:"Authorization"`
+		Body          HookDecisionRequest
+	}) (*struct{ Body HookResolved }, error) {
+		decision := "deny"
+		if in.Body.Decision == "allow" {
+			decision = "allow"
+		}
+		clientID := "desktop" // shared/admin token
+		if s.deps.Chat != nil {
+			if id, _, ok := s.deps.Chat.ResolveToken(strings.TrimPrefix(in.Authorization, "Bearer ")); ok && id != "" {
+				clientID = id
+			}
+		}
+		won, err := mgr.ResolveHook(in.ReqID, clientID, decision)
+		if err != nil {
+			return nil, wsErr(err)
+		}
+		return &struct{ Body HookResolved }{Body: HookResolved{ReqID: in.ReqID, Decision: decision, Won: won}}, nil
 	})
 }
 

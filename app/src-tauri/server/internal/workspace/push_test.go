@@ -30,7 +30,7 @@ func (m *mockNotifier) reset()     { m.mu.Lock(); m.calls = nil; m.mu.Unlock() }
 
 type mockLister struct{ ids []string }
 
-func (m mockLister) ActivePushDeviceIDs() []string { return m.ids }
+func (m mockLister) ActiveDeviceIDs() []string { return m.ids }
 
 func newPushMgr(t *testing.T, notif *mockNotifier, ids []string) (*Manager, Session) {
 	t.Helper()

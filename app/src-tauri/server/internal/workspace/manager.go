@@ -25,7 +25,7 @@ type liveSession struct {
 // (active + registered FCM token). Implemented by the chat device store and
 // injected via SetPushLister so the workspace package stays decoupled from chat.
 type PushLister interface {
-	ActivePushDeviceIDs() []string
+	ActiveDeviceIDs() []string
 }
 
 // Manager is the workspace subsystem entry point.
@@ -175,7 +175,7 @@ func (m *Manager) maybePush(ev Event) {
 	if m.pusher == nil || !shouldNotify(ev.Type) || m.SubscriberCount(ev.SessionID) > 0 {
 		return
 	}
-	targets := m.pusher.ActivePushDeviceIDs()
+	targets := m.pusher.ActiveDeviceIDs()
 	if len(targets) == 0 {
 		return
 	}

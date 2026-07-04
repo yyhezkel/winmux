@@ -36,7 +36,14 @@ type PairedDevice struct {
 	ExpiresAt  int64 // one-shot expiry (pending only)
 	LastSeen   int64
 	LastIP     string
-	FCMToken   string // Firebase registration token for push (empty = no push)
+}
+
+// PendingEvent is a queued push envelope awaiting delivery to an offline device
+// (native push §4). push_seq is the device's monotonic cursor.
+type PendingEvent struct {
+	PushSeq int64
+	Ts      int64
+	Event   string // JSON of the §4.4 event object
 }
 
 // SessionRow is the durable record of a Claude chat session.
@@ -79,8 +86,7 @@ func OpenChatStore(path string) (*ChatStore, error) {
 	  created_at INTEGER,
 	  expires_at INTEGER,
 	  last_seen INTEGER,
-	  last_ip TEXT,
-	  fcm_token TEXT DEFAULT ''
+	  last_ip TEXT
 	);
 	CREATE TABLE IF NOT EXISTS sessions (
 	  id TEXT PRIMARY KEY,
@@ -102,13 +108,21 @@ func OpenChatStore(path string) (*ChatStore, error) {
 	  event TEXT,
 	  PRIMARY KEY (session_id, seq)
 	);
+	CREATE TABLE IF NOT EXISTS pending_events (
+	  device_id TEXT,
+	  push_seq INTEGER,
+	  ts INTEGER,
+	  event TEXT,
+	  PRIMARY KEY (device_id, push_seq)
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
-	// Migration (Phase 77 §7): add fcm_token to pre-existing DBs. Idempotent —
-	// a "duplicate column name" error means it's already there, which is fine.
-	_, _ = db.Exec(`ALTER TABLE paired_devices ADD COLUMN fcm_token TEXT DEFAULT ''`)
+	// Migrations (idempotent; a "duplicate column name" error means it's
+	// already there). push_seq is the per-device monotonic push cursor for the
+	// native push queue (never decreases, even after the queue drains).
+	_, _ = db.Exec(`ALTER TABLE paired_devices ADD COLUMN push_seq INTEGER DEFAULT 0`)
 	return &ChatStore{db: db}, nil
 }
 
@@ -320,37 +334,10 @@ func (s *ChatStore) deviceByID(id string) (*PairedDevice, bool) {
 	return d, true
 }
 
-// setDeviceFCMToken records a device's Firebase registration token (Phase 77
-// §7). Only touches active devices so a revoked device can't re-arm push.
-func (s *ChatStore) setDeviceFCMToken(id, token string) bool {
-	res, err := s.db.Exec(
-		`UPDATE paired_devices SET fcm_token=? WHERE device_id=? AND status='active'`,
-		token, id)
-	if err != nil {
-		return false
-	}
-	n, _ := res.RowsAffected()
-	return n > 0
-}
-
-// fcmTokenForDevice returns an active device's registration token (empty ⇒ no
-// push). Used by the FCM sender's TokenResolver.
-func (s *ChatStore) fcmTokenForDevice(id string) (string, bool) {
-	var tok string
-	err := s.db.QueryRow(
-		`SELECT fcm_token FROM paired_devices WHERE device_id=? AND status='active'`, id).
-		Scan(&tok)
-	if err != nil || tok == "" {
-		return "", false
-	}
-	return tok, true
-}
-
-// activePushDeviceIDs lists active devices that have a registration token —
-// the fan-out targets when a session has no live WS subscriber.
-func (s *ChatStore) activePushDeviceIDs() []string {
-	rows, err := s.db.Query(
-		`SELECT device_id FROM paired_devices WHERE status='active' AND fcm_token != ''`)
+// activeDeviceIDs lists every active paired device — the native-push fan-out
+// targets (delivery is per-device: live socket now, or queued for reconnect).
+func (s *ChatStore) activeDeviceIDs() []string {
+	rows, err := s.db.Query(`SELECT device_id FROM paired_devices WHERE status='active'`)
 	if err != nil {
 		return nil
 	}
@@ -363,6 +350,68 @@ func (s *ChatStore) activePushDeviceIDs() []string {
 		}
 	}
 	return out
+}
+
+// ─── native push queue (§4) ──────────────────────────────────────────────
+
+// enqueuePending assigns the device its next monotonic push_seq, appends the
+// event to its queue, caps the queue (drop-oldest beyond capN), and returns the
+// seq. Atomic under the single-conn store.
+func (s *ChatStore) enqueuePending(deviceID, eventJSON string, capN int) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`UPDATE paired_devices SET push_seq = push_seq + 1 WHERE device_id=?`, deviceID); err != nil {
+		return 0, err
+	}
+	var seq int64
+	if err := tx.QueryRow(`SELECT push_seq FROM paired_devices WHERE device_id=?`, deviceID).Scan(&seq); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO pending_events(device_id, push_seq, ts, event) VALUES(?,?,?,?)`,
+		deviceID, seq, time.Now().Unix(), eventJSON); err != nil {
+		return 0, err
+	}
+	if capN > 0 {
+		_, _ = tx.Exec(`DELETE FROM pending_events WHERE device_id=? AND push_seq <= ?`, deviceID, seq-int64(capN))
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return seq, nil
+}
+
+// pendingAfter returns a device's queued events with push_seq > cursor, oldest
+// first — the reconnect replay.
+func (s *ChatStore) pendingAfter(deviceID string, cursor int64) []PendingEvent {
+	rows, err := s.db.Query(
+		`SELECT push_seq, ts, event FROM pending_events
+		   WHERE device_id=? AND push_seq > ? ORDER BY push_seq ASC`, deviceID, cursor)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []PendingEvent
+	for rows.Next() {
+		var e PendingEvent
+		if rows.Scan(&e.PushSeq, &e.Ts, &e.Event) == nil {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// ackPending drops a device's queued events with push_seq <= upto.
+func (s *ChatStore) ackPending(deviceID string, upto int64) {
+	_, _ = s.db.Exec(`DELETE FROM pending_events WHERE device_id=? AND push_seq <= ?`, deviceID, upto)
+}
+
+// prunePendingOlderThan drops queued events older than cutoff (TTL sweep).
+func (s *ChatStore) prunePendingOlderThan(cutoff int64) {
+	_, _ = s.db.Exec(`DELETE FROM pending_events WHERE ts < ?`, cutoff)
 }
 
 func (s *ChatStore) touchDevice(id, ip string) {

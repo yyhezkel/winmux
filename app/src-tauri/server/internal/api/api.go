@@ -17,6 +17,7 @@ import (
 	"winmux-server/internal/files"
 	"winmux-server/internal/insights"
 	"winmux-server/internal/logs"
+	"winmux-server/internal/push"
 	"winmux-server/internal/workspace"
 )
 
@@ -28,6 +29,7 @@ type Deps struct {
 	Files     *files.Service     // nil if files disabled
 	Logs      *logs.Service      // nil if logs disabled
 	Workspace *workspace.Service // nil if workspace disabled
+	Push      *push.Server       // nil if native push disabled
 }
 
 // Server wires the subsystems into one HTTP listener.
@@ -113,6 +115,11 @@ func (s *Server) Handler() http.Handler {
 		// its legacy /api/claude/* + /ws/claude/* routes. v2 chat aliases land in
 		// a later sprint; legacy paths keep existing clients working (S1 compat).
 		s.deps.Chat.RegisterRoutes(mux)
+	}
+	// Native push WS (§4): self-authenticating (device long-term token via
+	// Bearer/?token=), so it's mounted raw rather than behind authMW.
+	if s.deps.Push != nil {
+		mux.HandleFunc("/api/v2/push/subscribe", s.deps.Push.Handler)
 	}
 	return mux
 }

@@ -388,6 +388,7 @@
   "browser.legacyPane.body": "Браузер перенесён из раскладки панелей в плавающее окно. Открывайте его кнопкой 🌐 в боковой панели — а эту панель закройте, когда закончите.",
   "sidebar.files.label": "Файлы",
   "sidebar.files.tooltip": "Открыть менеджер файлов, привязанный к этому пространству",
+  "panel.connecting": "Подключение…",
   "files.window.title": "Файлы — {workspace}",
   "files.window.resize.tooltip": "Перетащите, чтобы изменить размер",
   "files.legacyPane.title": "Старая панель менеджера файлов",

@@ -113,6 +113,34 @@ function App() {
   const closePanel = (id: PanelId) => setSurface(id, "closed");
   const floatPanel = (id: PanelId) => setSurface(id, "float"); // ⤢ → in-app floating window
   const expandPanel = (id: PanelId) => setSurface(id, "fullscreen"); // ⛶ → maximized-pane overlay
+
+  // v0.4.4 (Task 1): auto-connect on secondary panels. Opening Monitor / Files
+  // / Browser / Ports in a *disconnected* SSH workspace used to fail with
+  // "no active SSH session — connect a terminal pane first". The panels resolve
+  // their SSH handle in the backend (scanning sessions for the workspace_id,
+  // including the headless __headless__<ws> handle), and they fetch once on
+  // mount with no polling — so we headlessly arm the connection FIRST, then
+  // open. `workspace_ensure_connected` is idempotent, PTY-free and tmux-free
+  // (no orphan risk), and silently no-ops on password-only workspaces (can't
+  // connect without a prompt) — those fall back to the existing hint.
+  const [connectingWs, setConnectingWs] = createSignal<string | null>(null);
+  const armWorkspaceConnection = async (): Promise<void> => {
+    const ws = activeWs();
+    if (!ws || ws.connection?.type !== "ssh") return;
+    setConnectingWs(ws.id);
+    try {
+      await invoke("workspace_ensure_connected", { workspaceId: ws.id });
+    } catch (e) {
+      console.warn("armWorkspaceConnection failed", e);
+    } finally {
+      setConnectingWs(null);
+    }
+  };
+  // Arm the SSH connection, then open an SSH-dependent panel.
+  const openPanelConnected = async (id: PanelId): Promise<void> => {
+    await armWorkspaceConnection();
+    openPanel(id);
+  };
   const NOTIF_READ_KEY = "winmux.notif.read";
   const loadNotifRead = (): Set<number> => {
     try {
@@ -701,7 +729,7 @@ function App() {
       { id: "ssh.connect", label: t("cmd.ssh.connect"), enabled: () => hasPane, handler: () => { if (pid) void connectPane(pid); } },
       { id: "ssh.disconnect", label: t("cmd.ssh.disconnect"), enabled: () => hasPane, handler: () => { if (pid) void disconnectPane(pid); } },
       { id: "ssh.provision", label: t("cmd.ssh.provision"), handler: () => setShowProvision(true) },
-      { id: "insights.monitor", label: t("cmd.insights.monitor"), enabled: () => hasWs, handler: () => openPanel("monitor") },
+      { id: "insights.monitor", label: t("cmd.insights.monitor"), enabled: () => hasWs, handler: () => void openPanelConnected("monitor") },
       { id: "settings.open", label: t("cmd.settings.open"), handler: () => setShowSettings(true) },
       { id: "settings.language", label: t("cmd.settings.language"), handler: () => setShowSettings(true) },
       { id: "settings.theme", label: t("cmd.settings.theme"), handler: () => setShowSettings(true) },
@@ -2080,6 +2108,14 @@ function App() {
       class="app"
       style={{ "grid-template-columns": `${sidebarPx()}px 1fr` }}
     >
+      {/* v0.4.4 (Task 1): headless auto-connect indicator — shown while a
+          secondary panel arms the workspace's SSH handle in the background. */}
+      <Show when={connectingWs()}>
+        <div class="connecting-pill" role="status">
+          <span class="connecting-pill-spinner" aria-hidden="true" />
+          {t("panel.connecting")}
+        </div>
+      </Show>
       <ErrorBoundary
         fallback={(err) => (
           <div class="sidebar-error">
@@ -2126,7 +2162,7 @@ function App() {
             void handleSetActive(workspaceId);
             setShowPortsWindow(true);
           }}
-          onOpenPortsGlobal={() => setShowPortsWindow(true)}
+          onOpenPortsGlobal={() => void armWorkspaceConnection().then(() => setShowPortsWindow(true))}
           mode={sidebarMode()}
           onSetMode={setSidebarMode}
         />
@@ -2214,14 +2250,14 @@ function App() {
               <button
                 class="ws-header-btn"
                 title={t("sidebar.browser.tooltip")}
-                onClick={() => setShowBrowserWindow(true)}
+                onClick={() => void armWorkspaceConnection().then(() => setShowBrowserWindow(true))}
               >
                 🌐 {t("sidebar.browser.label")}
               </button>
               <button
                 class="ws-header-btn"
                 title={t("sidebar.files.tooltip")}
-                onClick={() => openPanel("files")}
+                onClick={() => void openPanelConnected("files")}
               >
                 🗂 {t("sidebar.files.label")}
               </button>
@@ -2229,7 +2265,7 @@ function App() {
               <button
                 class="ws-header-btn"
                 title={t("sidebar.insights.tooltip")}
-                onClick={() => openPanel("monitor")}
+                onClick={() => void openPanelConnected("monitor")}
               >
                 📊 {t("sidebar.insights.label")}
               </button>

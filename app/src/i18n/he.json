@@ -388,6 +388,7 @@
   "browser.legacyPane.body": "הדפדפן עבר מתוך פריסת הפאנלים לחלון צף. פתח אותו מכפתור 🌐 בסיידבר — וסגור פאנל זה כשתסיים.",
   "sidebar.files.label": "קבצים",
   "sidebar.files.tooltip": "פותח חלון מנהל קבצים ייעודי לסביבה",
+  "panel.connecting": "מחבר…",
   "files.window.title": "קבצים — {workspace}",
   "files.window.resize.tooltip": "גרור לשינוי גודל",
   "files.legacyPane.title": "פאנל מנהל קבצים ישן",

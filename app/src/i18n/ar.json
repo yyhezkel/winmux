@@ -388,6 +388,7 @@
   "browser.legacyPane.body": "نُقل المتصفح خارج تخطيط اللوحات. افتحه من زر 🌐 في الشريط الجانبي — وأغلق هذه اللوحة عند الانتهاء.",
   "sidebar.files.label": "ملفات",
   "sidebar.files.tooltip": "افتح نافذة مدير ملفات خاصة بمساحة العمل",
+  "panel.connecting": "جارٍ الاتصال…",
   "files.window.title": "ملفات — {workspace}",
   "files.window.resize.tooltip": "اسحب لتغيير الحجم",
   "files.legacyPane.title": "لوحة مدير ملفات قديمة",

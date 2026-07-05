@@ -380,6 +380,7 @@
   "browser.legacyPane.body": "The browser moved out of the pane layout. Open it from the 🌐 Browser button in the sidebar — close this pane when you're done.",
   "sidebar.files.label": "Files",
   "sidebar.files.tooltip": "Open a workspace-scoped file manager window",
+  "panel.connecting": "Connecting…",
   "files.window.title": "Files — {workspace}",
   "files.window.resize.tooltip": "Drag to resize",
   "files.legacyPane.title": "Legacy file manager pane",

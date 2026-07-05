@@ -5065,3 +5065,37 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   0%, 100% { opacity: 0.4; transform: scale(0.9); }
   50%      { opacity: 1;   transform: scale(1.15); }
 }
+
+/* v0.4.4 (Task 1): headless auto-connect indicator. A small floating pill,
+   centred at the top, shown only while a secondary panel arms the workspace's
+   SSH handle in the background (workspace_ensure_connected). */
+.connecting-pill {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--w-surface-hi);
+  border: 1px solid var(--w-border-hi);
+  color: var(--w-text);
+  font-size: var(--w-fs-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  animation: pop-in 0.14s ease-out;
+  pointer-events: none;
+}
+.connecting-pill-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--w-border-hi);
+  border-top-color: var(--w-accent);
+  animation: connecting-spin 0.7s linear infinite;
+}
+@keyframes connecting-spin {
+  to { transform: rotate(360deg); }
+}

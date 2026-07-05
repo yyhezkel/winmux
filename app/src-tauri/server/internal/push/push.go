@@ -11,6 +11,7 @@ package push
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -110,8 +111,11 @@ func (s *Server) Notify(deviceID string, payload map[string]any) error {
 	}
 	seq, err := s.deps.Enqueue(deviceID, string(eventJSON), queueCap)
 	if err != nil {
+		log.Printf("push: enqueue device=%s FAILED: %v", deviceID, err)
 		return err
 	}
+	live := s.get(deviceID) != nil
+	log.Printf("push: notify device=%s seq=%d type=%v live=%v", deviceID, seq, payload["type"], live)
 	if c := s.get(deviceID); c != nil {
 		_ = c.writeJSON(envelope(deviceID, seq, payload))
 	}
@@ -135,14 +139,17 @@ func envelope(deviceID string, seq int64, event any) map[string]any {
 func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 	deviceID, _, ok := s.deps.ResolveToken(bearer(r))
 	if !ok || deviceID == "" {
+		log.Printf("push: subscribe REJECTED (bad/missing token) from %s", r.RemoteAddr)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	cursor := parseCursor(r.URL.Query().Get("cursor"))
 	conn, err := s.up.Upgrade(w, r, nil)
 	if err != nil {
+		log.Printf("push: subscribe upgrade FAILED device=%s: %v", deviceID, err)
 		return // Upgrade already wrote the error
 	}
+	log.Printf("push: device=%s SUBSCRIBED (cursor=%d)", deviceID, cursor)
 	c := &client{deviceID: deviceID, conn: conn}
 	s.register(c)
 	defer func() {
@@ -153,7 +160,11 @@ func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 	_ = c.writeJSON(map[string]any{
 		"v": envelopeVersion, "type": "hello", "device_id": deviceID, "heartbeat_sec": heartbeatSec,
 	})
-	for _, pe := range s.deps.PendingAfter(deviceID, cursor) {
+	pending := s.deps.PendingAfter(deviceID, cursor)
+	if len(pending) > 0 {
+		log.Printf("push: replaying %d queued event(s) to device=%s (cursor=%d)", len(pending), deviceID, cursor)
+	}
+	for _, pe := range pending {
 		var ev any
 		_ = json.Unmarshal([]byte(pe.Event), &ev)
 		if err := c.writeJSON(envelope(deviceID, pe.PushSeq, ev)); err != nil {

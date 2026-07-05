@@ -7,6 +7,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"log"
 	"sync"
 	"time"
 
@@ -172,13 +173,19 @@ func (m *Manager) Publish(sessionID, typ string, payload json.RawMessage) (Event
 // never blocks Publish; delivery is fire-and-forget (the client re-syncs the
 // durable log on reconnect regardless).
 func (m *Manager) maybePush(ev Event) {
-	if m.pusher == nil || !shouldNotify(ev.Type) || m.SubscriberCount(ev.SessionID) > 0 {
+	if m.pusher == nil || !shouldNotify(ev.Type) {
+		return
+	}
+	if n := m.SubscriberCount(ev.SessionID); n > 0 {
+		log.Printf("push: skip event=%s session=%s (%d live subscriber(s))", ev.Type, ev.SessionID, n)
 		return
 	}
 	targets := m.pusher.ActiveDeviceIDs()
 	if len(targets) == 0 {
+		log.Printf("push: skip event=%s session=%s (no active devices)", ev.Type, ev.SessionID)
 		return
 	}
+	log.Printf("push: fanout event=%s session=%s → %d device(s)", ev.Type, ev.SessionID, len(targets))
 	frame := eventPayloadMap(ev)
 	notifier := m.notifier
 	go func() {

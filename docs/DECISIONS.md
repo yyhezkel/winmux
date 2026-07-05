@@ -420,6 +420,26 @@ Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, wi
 
 ## Decided
 
+### 2026-07-05 — v0.4.3 SHIPPED — Phase 77 mobile bridge + design pass + unshipped-fivefer
+Cut **v0.4.3** off `77-winmux-server` (merged into main). Contents:
+- **Native self-hosted push** (no Firebase/APNs): device holds a long-lived WS
+  (`GET /api/v2/push/subscribe`); the server fans notification-worthy events to
+  it + queues per-device (24h TTL) for reconnect replay. `docs/PUSH-PROTOCOL.md`.
+- **A+B hook routing:** A = phone-initiated, server-run Claude sessions; B = a
+  desktop-terminal Claude hook forwarded (CLI → local `/api/v2/hooks/forward`)
+  so phones get a push too; the phone resolves via
+  `PUT /api/v2/session/{sid}/hook/{req_id}`.
+- **Per-device scopes** (default: all) enforced in the huma bearer middleware.
+- **PATH fix:** `config.resolveHome()` falls back to `user.Current()` so a
+  systemd daemon started with `$HOME` unset still finds `~/.local/bin/claude`
+  (NOT a regression of 96a879a — the dir was only added via `os.UserHomeDir()`).
+  winmux-server bumped 2.0.0 → **2.1.2** so the add-on redeploys.
+- **Desktop (unshipped-fivefer):** Notification Center, tray + badge, pop-out
+  terminal (true detach + Ctrl-wheel zoom), unified side-panel lifecycle
+  (drawer/float/fullscreen), browser-session persistence, FM cut/copy/paste.
+- **E2E verified** on a Samsung SM-S938B: pair → session → foreground hook →
+  **background push with Allow/Deny from the notification → PUT hook 200**.
+
 ### 2026-06-18 — Phase 65.B-prep / J experiment: inject hyperlink env at pane spawn
 - **J (Track A experiment):** both pane-spawn paths now inject `FORCE_HYPERLINK=1`, `FORCE_HYPERLINKS=1`, `CLAUDE_CODE_FORCE_HYPERLINKS=1`, `COLORTERM=truecolor` (+ `TERM=xterm-256color` locally) — local PTY via `CommandBuilder.env` (reliable), SSH via `channel.set_env` (best-effort). Engineer-only `tracing::debug` logs the injection (Rule #9). **Caveat:** default OpenSSH `AcceptEnv LANG LC_*` will likely DROP these on SSH — so the SSH result may be inconclusive. To disambiguate, run `export FORCE_HYPERLINK=1; claude` manually in the pane (reliable): if the `OSC8 … detected` diagnostic then fires → forcing works and we wire a reliable path (claude-launcher prefix / remote rc); if not even then → Claude doesn't support it → Track B (regex). The local-PTY path is conclusive on its own.
 

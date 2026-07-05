@@ -61,3 +61,29 @@ Legend: ☐ = to verify.
 **Rollback rehearsal (optional):** on the upgraded host, `mv ~/.winmux/server
 ~/.winmux/insights`, install an older winmux, confirm the 1.x daemon comes back
 with the same token/devices. (See `docs/winmux-server/UPGRADE.md`.)
+
+---
+
+## v0.4.3 — native push + A/B hooks + scopes (winmux-server 2.1.2)
+
+✅ = E2E-verified on a Samsung SM-S938B, 2026-07-05. Un-E2E'd items note their
+coverage (unit test / manual) — nothing below is marked ✅ that wasn't seen work
+device-to-desktop.
+
+- ✅ Pair a device; start a Claude session **from the phone** → the server-run
+  Claude engine spawns + runs (A path; PATH fix — `claude resolved at
+  ~/.local/bin/claude` in Monitor → Logs).
+- ✅ **Foreground hook:** phone-session tool needing approval → hook card on the
+  phone; Allow → Claude continues.
+- ✅ **Background push:** app backgrounded → a permission hook arrives as a
+  system **notification**; Allow/Deny **from the notification** →
+  `PUT /api/v2/session/{sid}/hook/{req_id}` returns 200 → Claude continues.
+- ✅ Add-on **update 2.0.0/2.1.1 → 2.1.2** deploys the new server (Add-ons UI).
+- ☐ **B path** (desktop-terminal hook → phone push): 2a (forward) shipped; the
+  phone-resolves-the-desktop-hook race (2b) not yet built — desktop stays the
+  authority. To verify 2a: run a Bash tool in a dev-5 terminal Claude session →
+  phone gets the push (desktop card still resolves it).
+- ☐ **Per-device scopes:** unit-tested (auth + chat); enforcement in the huma
+  bearer middleware. Not yet E2E'd with a narrowed device.
+- ☐ Migration 1.x/2.0.0 `chat.db` → `pending_events` + `push_seq` columns
+  (idempotent ALTER); verified by unit tests, not on a live 1.x host.

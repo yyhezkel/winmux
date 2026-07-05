@@ -27,11 +27,12 @@ use winmux_addons::{
 
 use crate::{AppState, Session, SshClient};
 
-// Phase 68.C: the cross-compiled insights daemon, embedded so the AddonManager
-// can SFTP-upload the arch-matched binary on install (no GitHub release needed
-// for testing; the eventual release can switch to fetch).
-const INSIGHTS_X64: &[u8] = include_bytes!("../resources/winmux-insights-linux-x64");
-const INSIGHTS_ARM64: &[u8] = include_bytes!("../resources/winmux-insights-linux-arm64");
+// Phase 68.C / Phase 77: the cross-compiled server daemon (`winmux-server`,
+// formerly `winmux-insights`), embedded so the AddonManager can SFTP-upload the
+// arch-matched binary on install. On install we symlink the old
+// `winmux-insights` name → `winmux-server` for backward compatibility.
+const SERVER_X64: &[u8] = include_bytes!("../resources/winmux-server-linux-x64");
+const SERVER_ARM64: &[u8] = include_bytes!("../resources/winmux-server-linux-arm64");
 
 /// A live SSH handle for the workspace (mirrors file_manager's picker).
 pub(crate) fn pick_handle(state: &AppState, workspace_id: &str) -> Option<Arc<SshHandle<SshClient>>> {
@@ -145,9 +146,15 @@ async fn run_builtin(
         }
         routines::HOOKS_UNINSTALL => exec(handle, &hooks_uninstall_script(home), 15).await,
         routines::INSIGHTS_DETECT => {
+            // Phase 77: prefer winmux-server; fall back to the legacy
+            // winmux-insights name (symlink, or a pre-2.x install) so an
+            // existing install is still detected during the upgrade window.
             exec(
                 handle,
-                &format!("\"{home}/.winmux/bin/winmux-insights\" --version 2>/dev/null | head -1"),
+                &format!(
+                    "( \"{home}/.winmux/bin/winmux-server\" --version 2>/dev/null || \
+                       \"{home}/.winmux/bin/winmux-insights\" --version 2>/dev/null ) | head -1"
+                ),
                 8,
             )
             .await
@@ -161,14 +168,19 @@ async fn run_builtin(
             let out = exec(
                 handle,
                 &format!(
-                    "systemctl --user disable --now winmux-insights 2>/dev/null; \
-                     systemctl --user stop winmux-insights 2>/dev/null; \
-                     pkill -x winmux-insights 2>/dev/null; \
-                     pkill -f 'winmux-insights serve' 2>/dev/null; \
-                     rm -f \"{home}/.winmux/bin/winmux-insights\"; \
-                     rm -f \"$HOME/.config/systemd/user/winmux-insights.service\"; \
+                    // Phase 77: tear down BOTH the new winmux-server and the legacy
+                    // winmux-insights (unit, binary, symlink) so an upgraded or a
+                    // pre-2.x install both uninstall cleanly.
+                    "systemctl --user disable --now winmux-server 2>/dev/null; \
+                     systemctl --user disable --now winmux-insights 2>/dev/null; \
+                     pkill -x winmux-server 2>/dev/null; pkill -f 'winmux-server serve' 2>/dev/null; \
+                     pkill -x winmux-insights 2>/dev/null; pkill -f 'winmux-insights serve' 2>/dev/null; \
+                     rm -f \"{home}/.winmux/bin/winmux-server\" \"{home}/.winmux/bin/winmux-insights\"; \
+                     rm -f \"$HOME/.config/systemd/user/winmux-server.service\" \
+                           \"$HOME/.config/systemd/user/winmux-insights.service\"; \
                      systemctl --user daemon-reload 2>/dev/null; \
-                     if [ -e \"{home}/.winmux/bin/winmux-insights\" ]; then echo STILL_PRESENT; else echo removed; fi"
+                     if [ -e \"{home}/.winmux/bin/winmux-server\" ] || [ -e \"{home}/.winmux/bin/winmux-insights\" ]; \
+                       then echo STILL_PRESENT; else echo removed; fi"
                 ),
                 15,
             )
@@ -476,22 +488,31 @@ async fn nginx_proxy_uninstall(handle: &SshHandle<SshClient>) -> Result<String, 
 async fn insights_install(handle: &SshHandle<SshClient>, home: &str) -> Result<String, String> {
     let uname = exec(handle, "uname -m", 8).await.unwrap_or_default();
     let bytes: &[u8] = if uname.contains("aarch64") || uname.contains("arm64") {
-        INSIGHTS_ARM64
+        SERVER_ARM64
     } else {
-        INSIGHTS_X64
+        SERVER_X64
     };
     let _ = exec(
         handle,
-        &format!("mkdir -p \"{home}/.winmux/bin\" \"{home}/.winmux/insights\""),
+        &format!("mkdir -p \"{home}/.winmux/bin\" \"{home}/.winmux/server\""),
         8,
     )
     .await;
-    let final_path = format!("{home}/.winmux/bin/winmux-insights");
+    // Phase 77: install as `winmux-server`; keep a `winmux-insights` symlink so
+    // anything referencing the old name still resolves. Data dir is
+    // ~/.winmux/server (the 2.0 binary's default); on an in-place 1.x→2.x upgrade
+    // the daemon migrates ~/.winmux/insights → ~/.winmux/server on first boot,
+    // preserving the token + chat.db + paired_devices (paired phones keep working).
+    let final_path = format!("{home}/.winmux/bin/winmux-server");
+    let legacy_link = format!("{home}/.winmux/bin/winmux-insights");
     let tmp = format!("{final_path}.tmp");
     sftp_upload(handle, &tmp, bytes).await?;
     let _ = exec(
         handle,
-        &format!("chmod 0755 \"{tmp}\" && mv -f \"{tmp}\" \"{final_path}\""),
+        &format!(
+            "chmod 0755 \"{tmp}\" && mv -f \"{tmp}\" \"{final_path}\" && \
+             ln -sf \"{final_path}\" \"{legacy_link}\""
+        ),
         10,
     )
     .await;
@@ -533,9 +554,13 @@ else
   EXECSTART="$DAEMON serve"
 fi
 mkdir -p "$HOME/.config/systemd/user"
-cat > "$HOME/.config/systemd/user/winmux-insights.service" <<UNIT
+# Phase 77: retire the old winmux-insights unit if present (the daemon is now
+# winmux-server); its data dir is unchanged so nothing is lost.
+systemctl --user disable --now winmux-insights >/dev/null 2>&1
+rm -f "$HOME/.config/systemd/user/winmux-insights.service"
+cat > "$HOME/.config/systemd/user/winmux-server.service" <<UNIT
 [Unit]
-Description=winmux insights daemon
+Description=winmux server daemon
 After=network.target
 [Service]
 ExecStart=$EXECSTART
@@ -545,9 +570,10 @@ RestartSec=5
 WantedBy=default.target
 UNIT
 if command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload 2>/dev/null; then
-  systemctl --user enable winmux-insights >/dev/null 2>&1
-  systemctl --user restart winmux-insights >/dev/null 2>&1 && echo "started (systemd --user)"
+  systemctl --user enable winmux-server >/dev/null 2>&1
+  systemctl --user restart winmux-server >/dev/null 2>&1 && echo "started (systemd --user)"
 else
+  pkill -x winmux-server 2>/dev/null; pkill -f 'winmux-server serve' 2>/dev/null
   pkill -x winmux-insights 2>/dev/null; pkill -f 'winmux-insights serve' 2>/dev/null
   sleep 1
   if [ "$WRAP" = "sg" ] && [ -n "$SG" ]; then
@@ -773,7 +799,7 @@ pub(crate) async fn insights_fetch(
     // clean, and dlog the outcome (Rule #1: status + length only, never body).
     let cmd = format!(
         "curl -s --max-time 6 \
-         -H \"Authorization: Bearer $(cat '{home}/.winmux/insights/token' 2>/dev/null)\" \
+         -H \"Authorization: Bearer $(cat '{home}/.winmux/server/token' 2>/dev/null)\" \
          -w '\\nWINMUX_HTTP=%{{http_code}}' \
          'http://127.0.0.1:7879{path}' 2>/dev/null; \
          command -v curl >/dev/null 2>&1 || echo 'WINMUX_HTTP=nocurl'"
@@ -820,7 +846,7 @@ pub(crate) async fn insights_docker_action(
     let home = remote_home(&handle).await;
     let cmd = format!(
         "curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
-         -H \"Authorization: Bearer $(cat '{home}/.winmux/insights/token' 2>/dev/null)\" \
+         -H \"Authorization: Bearer $(cat '{home}/.winmux/server/token' 2>/dev/null)\" \
          -d '{{\"cmd\":\"{action}\"}}' \
          'http://127.0.0.1:7879/docker/{container_id}/action'"
     );
@@ -850,7 +876,7 @@ pub(crate) async fn insights_hygiene_kill(
     let home = remote_home(&handle).await;
     let cmd = format!(
         "curl -s --max-time 8 -X POST -H 'Content-Type: application/json' \
-         -H \"Authorization: Bearer $(cat '{home}/.winmux/insights/token' 2>/dev/null)\" \
+         -H \"Authorization: Bearer $(cat '{home}/.winmux/server/token' 2>/dev/null)\" \
          -d '{{\"pids\":[{list}]}}' \
          'http://127.0.0.1:7879/hygiene/kill'"
     );
@@ -869,7 +895,7 @@ pub(crate) async fn addon_logs(
         .ok_or("no active SSH session for this workspace")?;
     let home = remote_home(&handle).await;
     let log = match id.as_str() {
-        ids::INSIGHTS => format!("{home}/.winmux/insights/insights.log"),
+        ids::INSIGHTS => format!("{home}/.winmux/server/insights.log"),
         ids::HOOKS => format!("{home}/.winmux/hook-debug.log"),
         ids::NGINX_PROXY => format!("{home}/.winmux/logs/mobile-install.log"),
         _ => return Ok(String::new()),

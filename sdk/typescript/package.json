@@ -1,0 +1,31 @@
+{
+  "name": "@winmux/sdk",
+  "version": "2.0.0",
+  "description": "TypeScript client SDK for winmux-server (REST + WebSocket frames). Types are generated from the server's OpenAPI + frame schema; the client + WS wrapper are hand-written. Version tracks the server.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node test/contract.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.2",
+    "ws": "^8.18.0"
+  }
+}

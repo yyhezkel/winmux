@@ -12,7 +12,7 @@ strip = "symbols"
 
 [package]
 name = "app"
-version = "0.4.2"
+version = "0.4.3"
 description = "winmux"
 authors = ["yossi"]
 edition = "2021"
@@ -34,7 +34,7 @@ tauri-build = { version = "2", features = [] }
 # gate is Tauri's documented path for multi-webview in 2.x. Manual
 # review required before any version bump — `Window::add_child`'s
 # signature can change between minors.
-tauri = { version = "=2.10.3", features = ["unstable"] }
+tauri = { version = "=2.10.3", features = ["unstable", "tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }

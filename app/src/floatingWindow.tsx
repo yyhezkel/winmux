@@ -41,6 +41,40 @@ export function clampToViewport(g: Geometry, minW: number, minH: number): Geomet
   return { x, y, w, h };
 }
 
+/** Load a persisted window rect from localStorage, always clamped into the
+ *  current viewport (stored OR default) so it can't open off-screen. Shared
+ *  by the unified panel floats; the older Browser/File windows keep their
+ *  own inline copies. */
+export function loadGeometry(key: string, def: Geometry, minW: number, minH: number): Geometry {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        typeof (parsed as Geometry).x === "number" &&
+        typeof (parsed as Geometry).y === "number" &&
+        typeof (parsed as Geometry).w === "number" &&
+        typeof (parsed as Geometry).h === "number"
+      ) {
+        return clampToViewport(parsed as Geometry, minW, minH);
+      }
+    }
+  } catch {
+    // Corrupt entry — fall through to default.
+  }
+  return clampToViewport(def, minW, minH);
+}
+
+export function saveGeometry(key: string, g: Geometry): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(g));
+  } catch {
+    // Quota or private mode — ignore.
+  }
+}
+
 /** Pure resize math — given the original rect, a pointer delta, and the
  *  edge being dragged, return the new rect. East/south grow with the
  *  delta directly; west/north move the origin AND shrink, clamped so the

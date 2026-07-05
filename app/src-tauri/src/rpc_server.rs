@@ -603,6 +603,14 @@ async fn dispatch(
                 .get("workspace_id")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            // #1: a coarse category for the Notification Center filter.
+            // Hook/agent callers can pass "kind"; default "agent" since the
+            // RPC notify channel is driven by Claude hooks.
+            let kind = params
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("agent")
+                .to_string();
             let item = NotificationItem {
                 id: NOTIF_COUNTER.fetch_add(1, Ordering::Relaxed),
                 title: title.clone(),
@@ -612,6 +620,7 @@ async fn dispatch(
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_millis())
                     .unwrap_or(0),
+                kind,
             };
             state.notifications.lock().unwrap().push(item.clone());
             let _ = app.emit("notification:new", &item);

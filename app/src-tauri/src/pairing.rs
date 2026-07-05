@@ -16,7 +16,9 @@ use zeroize::Zeroize;
 use crate::addons::{exec, exec_stdin, nginx_proxy_install, pick_handle, remote_home};
 use crate::AppState;
 
-const DOMAIN_FILE: &str = ".winmux/insights/mobile-domain";
+// Phase 77 S5 renamed the daemon data dir ~/.winmux/insights → ~/.winmux/server
+// (migrated in place on first 2.0 boot). The domain marker + token live there.
+const DOMAIN_FILE: &str = ".winmux/server/mobile-domain";
 
 /// Validate a device id coming back from the daemon before it lands in a URL
 /// path (defence in depth — the daemon mints `dev_<hex>`).
@@ -45,7 +47,7 @@ async fn daemon_curl(
     }
     let handle = pick_handle(state, workspace_id).ok_or("no active SSH session for this workspace")?;
     let home = remote_home(&handle).await;
-    let token = format!("$(cat '{home}/.winmux/insights/token' 2>/dev/null)");
+    let token = format!("$(cat '{home}/.winmux/server/token' 2>/dev/null)");
     let base = format!(
         "curl -s --max-time 8 -X {method} -H \"Authorization: Bearer {token}\" "
     );
@@ -108,6 +110,21 @@ pub(crate) async fn mobile_pairing_status(
         "configured": !domain.is_empty(),
     })
     .to_string())
+}
+
+/// Disconnect the mobile proxy: drop the persisted domain marker so the Mobile
+/// tab returns to its setup form. nginx + the cert stay installed on the remote
+/// (a re-install reconfigures them) — this just forgets the linked domain.
+#[tauri::command]
+pub(crate) async fn mobile_pairing_disconnect(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<String, String> {
+    let handle = pick_handle(&state, &workspace_id)
+        .ok_or("no active SSH session for this workspace")?;
+    let home = remote_home(&handle).await;
+    let _ = exec(&handle, &format!("rm -f \"{home}/{DOMAIN_FILE}\""), 8).await;
+    Ok(json!({ "ok": true }).to_string())
 }
 
 /// Issue a one-shot pairing token and assemble the QR payload (§3.2:

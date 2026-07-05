@@ -212,6 +212,9 @@ export interface Settings {
   floating_windows?: FloatingWindows;
   // Phase 75: debug-log retention.
   logs?: LogsSettings;
+  // Unshipped-fivefer (#3): persist workspace-browser sessions (cookies/
+  // logins) across restarts. Backend defaults to true.
+  persist_browser_sessions?: boolean;
 }
 
 // Phase 75: debug.log hygiene.

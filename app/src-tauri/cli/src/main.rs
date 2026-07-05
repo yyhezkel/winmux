@@ -140,6 +140,67 @@ async fn feed_push_with_retry(params: &Value, max_attempts: u32) -> Result<Value
     Err(last)
 }
 
+/// Read the local winmux-server API token (`~/.winmux/server/token`). Used to
+/// authenticate the B-path hook forward. Best-effort — None if absent.
+fn read_server_token() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let path = std::path::Path::new(&home).join(".winmux/server/token");
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// B path (Phase 77 push): fire-and-forget POST of a desktop-origin hook to the
+/// LOCAL winmux-server (127.0.0.1:7879) so paired phones get a push. The desktop
+/// stays the decision authority in this stage. Best-effort over a raw TCP HTTP
+/// request (no extra deps); ANY failure is swallowed so the desktop/A path is
+/// never affected. The token is never logged (Rule #8).
+async fn forward_hook_to_server(
+    req_id: &str,
+    pane_id: &str,
+    tool_name: &str,
+    title: &str,
+    timeout_secs: u64,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let Some(token) = read_server_token() else {
+        return;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let body = json!({
+        "req_id": req_id,
+        "workspace_id": "",
+        "pane_id": pane_id,
+        "tool_name": tool_name,
+        "title": title,
+        "timeout_at": now + timeout_secs,
+    })
+    .to_string();
+    let req = format!(
+        "POST /api/v2/hooks/forward HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+         Authorization: Bearer {token}\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let dur = std::time::Duration::from_secs(3);
+    let Ok(Ok(mut s)) =
+        tokio::time::timeout(dur, tokio::net::TcpStream::connect("127.0.0.1:7879")).await
+    else {
+        return;
+    };
+    if s.write_all(req.as_bytes()).await.is_err() {
+        return;
+    }
+    let _ = s.flush().await;
+    // Read + discard the response so the server finishes processing the request.
+    let mut buf = [0u8; 256];
+    let _ = tokio::time::timeout(dur, s.read(&mut buf)).await;
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "winmux",
@@ -1894,6 +1955,25 @@ async fn real_main() -> ExitCode {
                 ));
                 print_pre_tool_use(decision, Some(&reason));
                 return ExitCode::SUCCESS;
+            }
+
+            // B path (Phase 77 push): also forward a pre-tool-use hook to the
+            // LOCAL winmux-server so paired phones get a push. Fire-and-forget —
+            // the desktop stays the decision authority; a failure never affects
+            // the blocking desktop call below (A path untouched).
+            if subcommand == "pre-tool-use" {
+                let rid = request_id.clone();
+                let pid = pane_id.clone().unwrap_or_default();
+                let ttl = title.clone();
+                let tool = payload
+                    .get("tool_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let to = timeout_secs;
+                tokio::spawn(async move {
+                    forward_hook_to_server(&rid, &pid, &tool, &ttl, to).await;
+                });
             }
 
             // Phase 66 (66.D.2): retry the push on connection failure (not

@@ -117,6 +117,26 @@ export function setTerminalFont(family: string, sizePt: number): void {
 }
 
 /**
+ * Change ONLY the terminal font size (keeps the current family). Used by the
+ * pop-out window's Ctrl+wheel zoom — a separate webview context, so this only
+ * touches that context's terminals, never the main grid. `sizePt` is in
+ * points; converted to px with the same clamp as setTerminalFont.
+ */
+export function setTerminalFontSize(sizePt: number): void {
+  const px = Math.max(8, Math.round(sizePt * PT_TO_PX));
+  g_fontSizePx = px;
+  for (const ti of g_terminals) {
+    try {
+      ti.term.options.fontSize = px;
+      ti.fitAndResize();
+      ti.term.refresh(0, ti.term.rows - 1);
+    } catch (e) {
+      console.warn("setTerminalFontSize: per-instance update failed", e);
+    }
+  }
+}
+
+/**
  * Phase 15.A: switch the RTL handling strategy. Existing terminals
  * keep their previously-constructed renderer (DOM vs WebGL changes
  * require a fresh xterm), so this only affects newly-opened panes —

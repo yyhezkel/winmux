@@ -1,0 +1,346 @@
+package workspace
+
+// manager.go — the live layer over the Store: server-authoritative IDs, the
+// per-session subscriber fan-out (8a), and winner-takes-all hook resolution
+// with broadcast (8b). Persistence goes through Store; live WS channels live
+// here in memory.
+
+import (
+	"encoding/json"
+	"log"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+
+	"winmux-server/internal/core"
+)
+
+// liveSession holds the in-memory fan-out channels for a session's subscribers.
+type liveSession struct {
+	mu   sync.Mutex
+	subs map[string]chan []byte // client_id → buffered frame channel
+}
+
+// PushLister yields the paired-device IDs eligible for an out-of-band push
+// (active + registered FCM token). Implemented by the chat device store and
+// injected via SetPushLister so the workspace package stays decoupled from chat.
+type PushLister interface {
+	ActiveDeviceIDs() []string
+}
+
+// Manager is the workspace subsystem entry point.
+type Manager struct {
+	store    *Store
+	notifier core.NotificationSender
+	pusher   PushLister    // nil = no device store wired (no out-of-band push)
+	driver   SessionDriver // optional engine hook (claude_chat); nil = pure pub/sub
+
+	mu   sync.Mutex
+	live map[string]*liveSession // session_id → live subscribers
+}
+
+// SetPushLister wires the device store used to find out-of-band push targets.
+func (m *Manager) SetPushLister(p PushLister) { m.pusher = p }
+
+// shouldNotify reports whether an event type warrants a push when no live WS
+// subscriber is attached: a hook needing a decision, an assistant reply, or an
+// explicit notification. High-frequency stream frames (tool_use/tool_result/
+// status) never push.
+func shouldNotify(typ string) bool {
+	switch typ {
+	case FrameHookRequest, FrameAssistantText, FrameNotification:
+		return true
+	}
+	return false
+}
+
+// NewManager wires the manager over a store + a notification sender (NoopSender
+// until FCM lands).
+func NewManager(store *Store, notifier core.NotificationSender) *Manager {
+	if notifier == nil {
+		notifier = core.NoopSender{}
+	}
+	return &Manager{store: store, notifier: notifier, live: map[string]*liveSession{}}
+}
+
+func now() int64 { return time.Now().Unix() }
+
+// ─── workspaces ──────────────────────────────────────────────────────────────
+
+// CreateWorkspace mints a server-authoritative UUID (Q5).
+// SessionDriver is an optional consumer of client→server commands on a session
+// (Phase 77 §16). The chat WorkspaceBridge implements it to run Claude for a
+// `claude_chat` session: the manager stays a pure pub/sub substrate; the driver
+// is notified out-of-band so it can spawn/feed the engine. nil = no engine.
+type SessionDriver interface {
+	OnUserInput(sessionID, content, clientID string)
+	OnHookDecision(sessionID, reqID, clientID, decision string)
+	OnInterrupt(sessionID, clientID string)
+}
+
+// SetDriver registers the (single) session driver. Wired in cmd after both the
+// chat engine + workspace manager exist.
+func (m *Manager) SetDriver(d SessionDriver) { m.driver = d }
+
+// Driver returns the registered driver (nil if none).
+func (m *Manager) Driver() SessionDriver { return m.driver }
+
+// DefaultID is the always-present workspace every client falls into when it
+// hasn't chosen one (ensured at startup). Returned by pairing/redeem as
+// default_workspace_id so a freshly paired phone can connect without a
+// workspace-list round-trip.
+const DefaultID = "ws_default"
+
+func (m *Manager) CreateWorkspace(name string) (Workspace, error) {
+	w := Workspace{ID: "ws_" + uuid.NewString(), Name: name, CreatedAt: now()}
+	return w, m.store.CreateWorkspace(w)
+}
+
+// EnsureWorkspace creates a workspace with a fixed id if it doesn't exist (used
+// for the backward-compat "default" workspace, S3.d).
+func (m *Manager) EnsureWorkspace(id, name string) (Workspace, error) {
+	if w, err := m.store.GetWorkspace(id); err == nil {
+		return w, nil
+	}
+	w := Workspace{ID: id, Name: name, CreatedAt: now()}
+	return w, m.store.CreateWorkspace(w)
+}
+
+func (m *Manager) ListWorkspaces() ([]Workspace, error)     { return m.store.ListWorkspaces() }
+func (m *Manager) GetWorkspace(id string) (Workspace, error) { return m.store.GetWorkspace(id) }
+
+// DeleteWorkspace cascades (kills sessions + their state) and drops live subs.
+func (m *Manager) DeleteWorkspace(id string) error {
+	sessions, _ := m.store.ListSessions(id)
+	for _, se := range sessions {
+		m.dropLive(se.ID)
+	}
+	return m.store.DeleteWorkspace(id)
+}
+
+// ─── sessions ────────────────────────────────────────────────────────────────
+
+// CreateSession mints a session UUID under an existing workspace.
+func (m *Manager) CreateSession(wsID, kind string) (Session, error) {
+	if _, err := m.store.GetWorkspace(wsID); err != nil {
+		return Session{}, ErrNotFound
+	}
+	if kind == "" {
+		kind = KindClaudeChat
+	}
+	se := Session{ID: "sess_" + uuid.NewString(), WorkspaceID: wsID, Kind: kind, CreatedAt: now(), LastActivity: now()}
+	if err := m.store.CreateSession(se); err != nil {
+		return Session{}, err
+	}
+	return se, nil
+}
+
+func (m *Manager) GetSession(id string) (Session, error)          { return m.store.GetSession(id) }
+func (m *Manager) ListSessions(wsID string) ([]Session, error)    { return m.store.ListSessions(wsID) }
+func (m *Manager) ListPending(id string) ([]PendingRequest, error) { return m.store.ListPending(id) }
+func (m *Manager) EventCount(sessionID string) int64              { return m.store.EventCount(sessionID) }
+
+// SubscriberCount reports how many clients are live on a session.
+func (m *Manager) SubscriberCount(sessionID string) int {
+	ls := m.liveOf(sessionID, false)
+	if ls == nil {
+		return 0
+	}
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	return len(ls.subs)
+}
+
+// ─── event log + fan-out (8a) ────────────────────────────────────────────────
+
+// Publish appends an event to the session log and fans it out to live
+// subscribers. Returns the stored event (with its assigned seq).
+func (m *Manager) Publish(sessionID, typ string, payload json.RawMessage) (Event, error) {
+	ev, err := m.store.AppendEvent(sessionID, typ, payload)
+	if err != nil {
+		return ev, err
+	}
+	m.store.TouchSession(sessionID, ev.Timestamp)
+	m.fanout(ev)
+	m.maybePush(ev)
+	return ev, nil
+}
+
+// maybePush sends an out-of-band FCM push to every active paired device when a
+// notification-worthy event lands on a session with NO live WS subscriber (the
+// phone is backgrounded / disconnected). Best-effort + async so a slow FCM call
+// never blocks Publish; delivery is fire-and-forget (the client re-syncs the
+// durable log on reconnect regardless).
+func (m *Manager) maybePush(ev Event) {
+	if m.pusher == nil || !shouldNotify(ev.Type) {
+		return
+	}
+	if n := m.SubscriberCount(ev.SessionID); n > 0 {
+		log.Printf("push: skip event=%s session=%s (%d live subscriber(s))", ev.Type, ev.SessionID, n)
+		return
+	}
+	targets := m.pusher.ActiveDeviceIDs()
+	if len(targets) == 0 {
+		log.Printf("push: skip event=%s session=%s (no active devices)", ev.Type, ev.SessionID)
+		return
+	}
+	log.Printf("push: fanout event=%s session=%s → %d device(s)", ev.Type, ev.SessionID, len(targets))
+	frame := eventPayloadMap(ev)
+	notifier := m.notifier
+	go func() {
+		for _, id := range targets {
+			_ = notifier.Notify(id, frame)
+		}
+	}()
+}
+
+// eventPayloadMap flattens an Event into a §4.4 wire object: the type-specific
+// payload with seq/type/session_id/ts merged on top.
+func eventPayloadMap(ev Event) map[string]any {
+	m := map[string]any{}
+	if len(ev.Payload) > 0 {
+		_ = json.Unmarshal(ev.Payload, &m)
+	}
+	m["seq"] = ev.Seq
+	m["type"] = ev.Type
+	m["session_id"] = ev.SessionID
+	m["ts"] = ev.Timestamp
+	return m
+}
+
+// eventFrame marshals the §4.4 wire object for live WS fan-out.
+func eventFrame(ev Event) []byte {
+	b, _ := json.Marshal(eventPayloadMap(ev))
+	return b
+}
+
+func (m *Manager) fanout(ev Event) {
+	ls := m.liveOf(ev.SessionID, false)
+	if ls == nil {
+		return
+	}
+	frame := eventFrame(ev)
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	for _, ch := range ls.subs {
+		select {
+		case ch <- frame:
+		default:
+			// Slow subscriber: drop the live frame. It's durable in the log, so
+			// the client re-syncs via cursor replay on reconnect.
+		}
+	}
+}
+
+// Subscribe registers a client on a session and returns the replay (events
+// after cursor) plus a live channel + a cancel func. The caller dedups live
+// frames by seq (any frame with seq <= the last replayed seq is a repeat of a
+// just-replayed event and is skipped).
+func (m *Manager) Subscribe(sessionID, clientID, deviceName string, cursor int64) ([]Event, <-chan []byte, func(), error) {
+	if _, err := m.store.GetSession(sessionID); err != nil {
+		return nil, nil, nil, ErrNotFound
+	}
+	replay, err := m.store.ReplayEvents(sessionID, cursor, 0)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	ch := make(chan []byte, 256)
+	ls := m.liveOf(sessionID, true)
+	ls.mu.Lock()
+	ls.subs[clientID] = ch
+	ls.mu.Unlock()
+	t := now()
+	_, _ = m.store.db.Exec(
+		`INSERT OR REPLACE INTO subscribers(session_id,client_id,device_name,connected_at,last_seen) VALUES(?,?,?,?,?)`,
+		sessionID, clientID, deviceName, t, t)
+
+	cancel := func() {
+		ls.mu.Lock()
+		if c, ok := ls.subs[clientID]; ok {
+			delete(ls.subs, clientID)
+			close(c)
+		}
+		ls.mu.Unlock()
+		_, _ = m.store.db.Exec(`DELETE FROM subscribers WHERE session_id=? AND client_id=?`, sessionID, clientID)
+	}
+	return replay, ch, cancel, nil
+}
+
+func (m *Manager) liveOf(sessionID string, create bool) *liveSession {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ls := m.live[sessionID]
+	if ls == nil && create {
+		ls = &liveSession{subs: map[string]chan []byte{}}
+		m.live[sessionID] = ls
+	}
+	return ls
+}
+
+func (m *Manager) dropLive(sessionID string) {
+	m.mu.Lock()
+	ls := m.live[sessionID]
+	delete(m.live, sessionID)
+	m.mu.Unlock()
+	if ls != nil {
+		ls.mu.Lock()
+		for id, c := range ls.subs {
+			delete(ls.subs, id)
+			close(c)
+		}
+		ls.mu.Unlock()
+	}
+}
+
+// ─── hooks: winner-takes-all + broadcast (8b) ────────────────────────────────
+
+// CreateHookRequest records a pending hook and publishes a hook_request event so
+// every subscriber sees the ask. payload should carry req_id/tool_name/etc.
+func (m *Manager) CreateHookRequest(sessionID, reqID string, payload json.RawMessage, timeoutAt int64) error {
+	if err := m.store.CreatePending(PendingRequest{
+		ReqID: reqID, SessionID: sessionID, Type: "hook_approval",
+		CreatedAt: now(), TimeoutAt: timeoutAt,
+	}); err != nil {
+		return err
+	}
+	_, err := m.Publish(sessionID, FrameHookRequest, payload)
+	return err
+}
+
+// ForwardHook records + publishes a hook_request that ORIGINATED on the desktop
+// (B path). It reuses CreateHookRequest against a virtual session id, so the
+// no-subscriber fan-out (maybePush) reaches every paired phone. The desktop
+// keeps the authoritative local hook and polls HookResolution for the phone's
+// decision.
+func (m *Manager) ForwardHook(virtualSession, reqID string, payload json.RawMessage, timeoutAt int64) error {
+	return m.CreateHookRequest(virtualSession, reqID, payload, timeoutAt)
+}
+
+// HookResolution reports a hook's decision — resolved=false until a
+// winner-takes-all resolution lands. Lets the desktop poll for a phone decision
+// on a forwarded (B-path) hook.
+func (m *Manager) HookResolution(reqID string) (decision string, resolved bool) {
+	p, ok := m.store.GetPending(reqID)
+	if !ok || p.ResolvedBy == "" {
+		return "", false
+	}
+	return p.Resolution, true
+}
+
+// ResolveHook records the FIRST decision for reqID (winner-takes-all) and, if it
+// won, broadcasts a hook_resolved event to all subscribers. Returns whether this
+// caller was the winner.
+func (m *Manager) ResolveHook(reqID, clientID, decision string) (bool, error) {
+	if decision != "allow" {
+		decision = "deny"
+	}
+	won, err := m.store.ResolvePending(reqID, clientID, decision)
+	if err != nil || !won {
+		return won, err
+	}
+	p, _ := m.store.GetPending(reqID)
+	payload, _ := json.Marshal(hookResolvedPayload{ReqID: reqID, Decision: decision, ResolvedBy: clientID})
+	_, err = m.Publish(p.SessionID, FrameHookResolved, payload)
+	return true, err
+}

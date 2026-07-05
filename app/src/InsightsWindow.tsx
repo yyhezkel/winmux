@@ -3,12 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
 import { MobilePairing } from "./MobilePairing";
 import { HygienePanel } from "./HygienePanel";
-import {
-  clampToViewport,
-  makeWindowControls,
-  ResizeHandles,
-  type Geometry,
-} from "./floatingWindow";
+import { PanelSurface } from "./PanelSurface";
+import type { Surface } from "./panels";
+import type { Geometry } from "./floatingWindow";
 
 // Phase 68.D: Server Insights monitor. Pull-based — fetches the live
 // snapshot from the remote `winmux-insights` daemon (via the insights_fetch
@@ -38,10 +35,14 @@ interface DockerContainer {
 }
 
 interface Props {
-  open: boolean;
+  /** Unified surface: closed | drawer | float | fullscreen (see panels.ts). */
+  surface: Surface;
   workspaceId?: string;
   workspaceName?: string;
   onClose: () => void;
+  onDrawer: () => void;
+  onFloat: () => void;
+  onFullscreen: () => void;
   /** Phase 68 (UX): open the Add-ons window to install the daemon. */
   onInstall?: () => void;
 }
@@ -64,17 +65,6 @@ function fmtBytes(n: number): string {
 const fmtBps = (n: number) => `${fmtBytes(n)}/s`;
 
 export function InsightsWindow(p: Props) {
-  const [geom, setGeom] = createSignal<Geometry>(
-    clampToViewport(DEFAULT_GEOMETRY, MIN_W, MIN_H),
-  );
-  const { onDragStart, onResizeStart } = makeWindowControls({
-    geom,
-    setGeom,
-    minW: MIN_W,
-    minH: MIN_H,
-    closeGuardSelector: ".insights-x",
-  });
-
   const [snap, setSnap] = createSignal<Snapshot | null>(null);
   const [docker, setDocker] = createSignal<DockerContainer[]>([]);
   const [dockerOk, setDockerOk] = createSignal(false);
@@ -134,6 +124,8 @@ export function InsightsWindow(p: Props) {
     URL.revokeObjectURL(url);
   };
 
+  const isOpen = () => p.surface !== "closed";
+
   // Load logs when the Logs tab is opened.
   createEffect(() => {
     if (view() === "logs" && p.workspaceId) void refreshLogs();
@@ -191,7 +183,7 @@ export function InsightsWindow(p: Props) {
 
   // Refresh on open; optional 5s auto-refresh while focused.
   createEffect(() => {
-    if (!p.open || !p.workspaceId) return;
+    if (!isOpen() || !p.workspaceId) return;
     void refresh();
     if (!auto()) return;
     const id = setInterval(() => void refresh(), 5000);
@@ -221,51 +213,41 @@ export function InsightsWindow(p: Props) {
     </div>
   );
 
-  return (
-    <Show when={p.open}>
-      <div
-        class="fm-window insights-window"
-        style={{
-          left: `${geom().x}px`,
-          top: `${geom().y}px`,
-          width: `${geom().w}px`,
-          height: `${geom().h}px`,
-        }}
-      >
-        <div class="fm-window-header" onMouseDown={onDragStart}>
-          <span class="fm-window-title">
-            📊 {t("insights.title")}
-            {p.workspaceName ? ` — ${p.workspaceName}` : ""}
-          </span>
-          <div class="ins-tabs">
-            <button class={view() === "metrics" ? "active" : ""} onClick={() => setView("metrics")}>
-              {t("insights.tab.metrics")}
-            </button>
-            <button class={view() === "mobile" ? "active" : ""} onClick={() => setView("mobile")}>
-              📱 {t("insights.tab.mobile")}
-            </button>
-            <button class={view() === "logs" ? "active" : ""} onClick={() => setView("logs")}>
-              📄 {t("insights.tab.logs")}
-            </button>
-            <button class={view() === "health" ? "active" : ""} onClick={() => setView("health")}>
-              🧹 {t("insights.tab.health")}
-            </button>
-          </div>
-          <Show when={view() === "metrics"}>
-            <label class="ins-auto">
-              <input type="checkbox" checked={auto()} onChange={(e) => setAuto(e.currentTarget.checked)} />
-              <span>{t("insights.auto")}</span>
-            </label>
-            <button class="ins-refresh" onClick={() => void refresh()} title={t("insights.refresh")}>
-              {loading() ? "…" : "⟳"}
-            </button>
-          </Show>
-          <button class="fm-window-x insights-x" onClick={p.onClose} title={t("common.close")}>
-            ×
-          </button>
-        </div>
-        <div class="fm-window-body insights-body">
-          <Show when={view() === "mobile"}>
+  const titleText = () =>
+    `${t("insights.title")}${p.workspaceName ? ` — ${p.workspaceName}` : ""}`;
+
+  const tabsEl = () => (
+    <div class="ins-tabs">
+      <button class={view() === "metrics" ? "active" : ""} onClick={() => setView("metrics")}>
+        {t("insights.tab.metrics")}
+      </button>
+      <button class={view() === "mobile" ? "active" : ""} onClick={() => setView("mobile")}>
+        📱 {t("insights.tab.mobile")}
+      </button>
+      <button class={view() === "logs" ? "active" : ""} onClick={() => setView("logs")}>
+        📄 {t("insights.tab.logs")}
+      </button>
+      <button class={view() === "health" ? "active" : ""} onClick={() => setView("health")}>
+        🧹 {t("insights.tab.health")}
+      </button>
+    </div>
+  );
+
+  const metricsControlsEl = () => (
+    <Show when={view() === "metrics"}>
+      <label class="ins-auto">
+        <input type="checkbox" checked={auto()} onChange={(e) => setAuto(e.currentTarget.checked)} />
+        <span>{t("insights.auto")}</span>
+      </label>
+      <button class="ins-refresh" onClick={() => void refresh()} title={t("insights.refresh")}>
+        {loading() ? "…" : "⟳"}
+      </button>
+    </Show>
+  );
+
+  const bodyContent = () => (
+    <>
+      <Show when={view() === "mobile"}>
             <MobilePairing workspaceId={p.workspaceId} />
           </Show>
           <Show when={view() === "health"}>
@@ -435,9 +417,31 @@ export function InsightsWindow(p: Props) {
             )}
           </Show>
           </Show>
-        </div>
-        <ResizeHandles onStart={onResizeStart} />
-      </div>
-    </Show>
+    </>
+  );
+
+  return (
+    <PanelSurface
+      surface={p.surface}
+      icon="📊"
+      title={titleText()}
+      drawerWidth="min(600px, 96vw)"
+      bodyClass="insights-body"
+      floatStorageKey={`winmux.panel-monitor-geometry.${p.workspaceId ?? "none"}`}
+      floatDefault={DEFAULT_GEOMETRY}
+      floatMinW={MIN_W}
+      floatMinH={MIN_H}
+      onClose={p.onClose}
+      onDrawer={p.onDrawer}
+      onFloat={p.onFloat}
+      onFullscreen={p.onFullscreen}
+      headerActions={() => (
+        <>
+          {tabsEl()}
+          {metricsControlsEl()}
+        </>
+      )}
+      body={bodyContent}
+    />
   );
 }

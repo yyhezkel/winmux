@@ -140,6 +140,22 @@ export function findPane(
   return findPane(node.first, paneId) ?? findPane(node.second, paneId);
 }
 
+// Unshipped-fivefer (#4): remove the given pane_ids from a layout tree and
+// collapse their parent splits onto the surviving sibling, so the grid reflows
+// to fill the vacated space. Used when a pane is "popped out" into its own OS
+// window — it leaves the grid entirely and returns on popout close. Returns
+// null only when every pane is hidden. Pure — never mutates the input.
+export function pruneLayout(
+  node: LayoutNode,
+  hidden: Set<string>
+): LayoutNode | null {
+  if (node.kind === "pane") return hidden.has(node.pane_id) ? null : node;
+  const first = pruneLayout(node.first, hidden);
+  const second = pruneLayout(node.second, hidden);
+  if (first && second) return { ...node, first, second };
+  return first ?? second;
+}
+
 // Phase 31: a pane's effective identity is its own override falling
 // back to its workspace's. Used by the pane header, the rename dialog's
 // "inheriting" hint, and the OS window title.

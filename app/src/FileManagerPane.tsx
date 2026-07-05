@@ -45,6 +45,15 @@ type Side = "local" | "remote";
 export function FileManagerPane(p: Props) {
   const [localPath, setLocalPath] = createSignal("");
   const [remotePath, setRemotePath] = createSignal("");
+  // Feedback (cut/copy/paste): a single-item clipboard for moving/copying
+  // files between locations. Same-side paste (local→local, remote→remote) and
+  // local→remote upload are supported; remote→local uses the Download action.
+  const [clip, setClip] = createSignal<{
+    op: "cut" | "copy";
+    side: Side;
+    path: string;
+    name: string;
+  } | null>(null);
   const [localEntries, setLocalEntries] = createSignal<FileEntry[]>([]);
   const [remoteEntries, setRemoteEntries] = createSignal<FileEntry[]>([]);
   const [localSel, setLocalSel] = createSignal<string | null>(null);
@@ -283,30 +292,17 @@ export function FileManagerPane(p: Props) {
         if (side === "remote" && dropPaths.length > 0) {
           void dropUploadToRemote(dropPaths);
         } else if (side === "local" && dropPaths.length > 0) {
-          // Local → local: copy each dropped file into the displayed
-          // local dir. Use Rust-side fs::copy via a tiny helper —
-          // for simplicity we read the bytes via file_read_local +
-          // file_write_local. Skip if it'd overwrite itself.
+          // Local → local: copy each dropped file into the displayed local
+          // dir. Unshipped-fivefer (#5): uses the backend file_copy_local
+          // (std::fs::copy) so binary files and any size work — no more
+          // read-as-text limitation. Skip a copy onto itself.
           (async () => {
             for (const host of dropPaths) {
               const basename = host.split(/[\\/]/).filter(Boolean).pop() || "dropped";
               const dest = fullLocal(basename);
               if (dest.toLowerCase() === host.toLowerCase()) continue;
               await wrap(`copy ${basename}`, async () => {
-                // Cheapest path: shell out via cmd /C copy /Y.
-                // We don't have a dedicated backend command yet —
-                // instead we read+write the file. Works for any size
-                // tauri-IPC can stomach (~megabytes).
-                const fc = await invoke<{ text: string; is_binary: boolean }>(
-                  "file_read_local",
-                  { path: host }
-                );
-                if (fc.is_binary) {
-                  throw new Error(
-                    "binary drop into local column not yet supported — use remote column"
-                  );
-                }
-                await invoke("file_write_local", { path: dest, text: fc.text });
+                await invoke("file_copy_local", { src: host, dest });
               });
             }
             await refreshLocal();
@@ -781,6 +777,59 @@ export function FileManagerPane(p: Props) {
     }
   };
 
+  // Feedback (cut/copy/paste): put a file on the internal clipboard.
+  const clipSet = (side: Side, name: string, op: "cut" | "copy") => {
+    const path = side === "local" ? fullLocal(name) : fullRemote(name);
+    setClip({ op, side, path, name });
+    setStatus(`${op === "cut" ? "cut" : "copied"} ${name}`);
+  };
+
+  // Paste the clipboard entry into `targetSide`'s current directory. Resolves
+  // the source/target combo to the right backend op; cut clears the source.
+  const pasteInto = async (targetSide: Side) => {
+    const c = clip();
+    if (!c) return;
+    const dest = targetSide === "local" ? fullLocal(c.name) : fullRemote(c.name);
+    if (dest === c.path) {
+      setErr(t("fm.paste.same_location"));
+      return;
+    }
+    if (c.side === "remote" && targetSide === "local") {
+      setErr(t("fm.paste.use_download"));
+      return;
+    }
+    const ok = await wrap(`${c.op === "cut" ? "move" : "copy"} ${c.name}`, async () => {
+      if (c.side === "local" && targetSide === "local") {
+        await invoke("file_copy_local", { src: c.path, dest });
+        if (c.op === "cut") await invoke("file_delete_local", { path: c.path });
+      } else if (c.side === "remote" && targetSide === "remote") {
+        if (c.op === "cut") {
+          await invoke("file_rename_remote", {
+            workspaceId: p.workspaceId,
+            oldPath: c.path,
+            newPath: dest,
+          });
+        } else {
+          await invoke("file_copy_remote", { workspaceId: p.workspaceId, src: c.path, dest });
+        }
+      } else {
+        // local → remote: upload, then delete local on cut.
+        await invoke<number>("file_upload", {
+          workspaceId: p.workspaceId,
+          localPath: c.path,
+          remotePath: dest,
+        });
+        if (c.op === "cut") await invoke("file_delete_local", { path: c.path });
+      }
+      return true;
+    });
+    if (ok) {
+      if (c.op === "cut") setClip(null);
+      await refreshLocal();
+      await refreshRemote();
+    }
+  };
+
   // Phase 23: copy the absolute path of a file/dir to the system
   // clipboard. Pure-frontend operation — uses navigator.clipboard
   // since Tauri 2 exposes it in WebView2 with the same async API as
@@ -983,6 +1032,29 @@ export function FileManagerPane(p: Props) {
 
   return (
     <div class="fm-pane">
+      {/* Feedback: persistent clipboard bar so Paste is one click from
+          anywhere — no need to hunt for a context menu after copy/cut. */}
+      <Show when={clip()}>
+        <div class="fm-clip-bar">
+          <span class="fm-clip-label">
+            {clip()!.op === "cut" ? "✂" : "📋"} {clip()!.name}
+            <span class="fm-clip-src">({clip()!.side})</span>
+          </span>
+          <span class="fm-clip-actions">
+            <button class="fm-clip-btn" onClick={() => void pasteInto("local")}>
+              {t("fm.paste.to_local")}
+            </button>
+            <Show when={p.hasSsh}>
+              <button class="fm-clip-btn" onClick={() => void pasteInto("remote")}>
+                {t("fm.paste.to_remote")}
+              </button>
+            </Show>
+            <button class="fm-clip-btn fm-clip-x" title={t("fm.paste.clear")} onClick={() => setClip(null)}>
+              ✕
+            </button>
+          </span>
+        </div>
+      </Show>
       <div class="fm-toolbar">
         <label class="fm-checkbox">
           <input
@@ -1323,6 +1395,20 @@ export function FileManagerPane(p: Props) {
                   {t("fm.btn.download")}
                 </button>
               </Show>
+              <div class="fm-ctx-sep" />
+              {/* Feedback: cut / copy / paste to move files between locations. */}
+              <button class="fm-ctx-item" onClick={fire(() => clipSet(side, e.name, "copy"))}>
+                {t("fm.action.copy")}
+              </button>
+              <button class="fm-ctx-item" onClick={fire(() => clipSet(side, e.name, "cut"))}>
+                {t("fm.action.cut")}
+              </button>
+              <Show when={clip()}>
+                <button class="fm-ctx-item" onClick={fire(() => void pasteInto(side))}>
+                  {t("fm.action.paste")}
+                </button>
+              </Show>
+              <div class="fm-ctx-sep" />
               <button class="fm-ctx-item" onClick={fire(() => void copyPathOf(side, e.name))}>
                 {t("fm.action.copy_path")}
               </button>
@@ -1373,6 +1459,12 @@ export function FileManagerPane(p: Props) {
                   ? t("fm.btn.upload_from_disk_remote")
                   : t("fm.btn.upload_from_disk_local")}
               </button>
+              <Show when={clip()}>
+                <div class="fm-ctx-sep" />
+                <button class="fm-ctx-item" onClick={fire(() => void pasteInto(side))}>
+                  📋  {t("fm.action.paste")}
+                </button>
+              </Show>
             </div>
           );
         })()}
@@ -1414,6 +1506,11 @@ export function FileManagerPane(p: Props) {
                   ? t("fm.btn.upload_from_disk_remote")
                   : t("fm.btn.upload_from_disk_local")}
               </button>
+              <Show when={clip()}>
+                <button class="fm-ctx-item" onClick={fire(() => void pasteInto(side))}>
+                  📋  {t("fm.action.paste")}
+                </button>
+              </Show>
               <div class="fm-ctx-sep" />
               <button class="fm-ctx-item" onClick={fire(() => void copyPathOf(side, ""))}>
                 {t("fm.btn.copy_path_current")}

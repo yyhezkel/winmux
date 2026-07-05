@@ -492,10 +492,26 @@ pub(crate) struct Settings {
     /// settings.json files load with the built-in defaults.
     #[serde(default)]
     pub logs: LogsSettings,
+    /// Unshipped-fivefer (#3): keep workspace-browser cookies/logins across
+    /// restarts. Backed by a single app-wide WebView2 profile folder (NOT a
+    /// per-workspace `--user-data-dir` — that reintroduces the 0x8007139F
+    /// crash). When false, the profile folder is wiped on the next launch.
+    /// `default = true`.
+    #[serde(default = "default_true")]
+    pub persist_browser_sessions: bool,
 }
 
 fn default_sidebar_mode() -> String {
     "full".to_string()
+}
+
+/// Unshipped-fivefer (#3): read just the `persist_browser_sessions` flag as
+/// early as possible in `run()` — before the WebView2 environment is created —
+/// without needing app state. Missing file / parse error → default true.
+pub(crate) fn persist_browser_sessions_flag() -> bool {
+    load_from_disk()
+        .map(|s| s.persist_browser_sessions)
+        .unwrap_or(true)
 }
 
 /// Phase 75: debug.log retention. The log auto-rotates at a size cap and is
@@ -767,6 +783,7 @@ impl Default for Settings {
             sidebar_mode: default_sidebar_mode(),
             floating_windows: FloatingWindows::default(),
             logs: LogsSettings::default(),
+            persist_browser_sessions: true,
         }
     }
 }

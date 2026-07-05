@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -99,6 +100,14 @@ func main() {
 	// systemd gives the daemon a minimal PATH; merge the user's login-shell PATH
 	// so subprocesses (the claude_chat engine) resolve `claude` like the terminal.
 	config.AugmentUserPath()
+	// Diagnostic: surface whether `claude` is resolvable after the augment, and
+	// the PATH we ended up with — so a "claude not found" mobile error is
+	// debuggable from Monitor → Logs instead of invisible.
+	if p, lerr := exec.LookPath("claude"); lerr == nil {
+		log.Printf("claude resolved at %s", p)
+	} else {
+		log.Printf("claude NOT resolved after PATH augment: %v; PATH=%s", lerr, os.Getenv("PATH"))
+	}
 
 	token := config.LoadOrCreateToken(filepath.Join(*base, "token"))
 

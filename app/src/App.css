@@ -3587,6 +3587,58 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 
 [dir="rtl"] .connect-menu { right: auto; left: 0; }
 
+/* v0.4.4 (Task 2): the unified "New connection…" entry sits at the top of the
+   Smart Connect menu, emphasised over the à-la-carte shortcuts below it. */
+.connect-menu button.connect-menu-primary {
+  font-family: inherit;
+  font-weight: 600;
+  color: var(--w-accent);
+}
+.connect-menu button.connect-menu-primary:hover {
+  background: rgba(122, 162, 247, 0.22);
+}
+
+/* v0.4.4 (Task 2): unified new-connection modal — directory + command. */
+.new-conn-modal { min-width: 380px; max-width: 460px; }
+.new-conn-section { margin: 12px 0; }
+.new-conn-label {
+  display: block;
+  font-size: var(--w-fs-xs);
+  color: var(--w-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.new-conn-dir-row { display: flex; gap: 8px; align-items: center; }
+.new-conn-dir-row input { flex: 1; }
+.new-conn-browse {
+  flex: 0 0 auto;
+  background: var(--w-surface-hi);
+  border: 1px solid var(--w-border-hi);
+  color: var(--w-text);
+  border-radius: var(--w-r-sm);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: var(--w-fs-sm);
+  white-space: nowrap;
+}
+.new-conn-browse:hover { border-color: var(--w-accent); color: var(--w-accent); }
+.new-conn-cmd-list { display: flex; flex-direction: column; gap: 2px; }
+.new-conn-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--w-r-sm);
+  cursor: pointer;
+  font-family: var(--w-font-mono);
+  font-size: var(--w-fs-md);
+}
+.new-conn-radio:hover { background: rgba(122, 162, 247, 0.12); }
+.new-conn-radio input { accent-color: var(--w-accent); cursor: pointer; }
+.new-conn-custom { margin-top: 6px; width: 100%; }
+
 /* smart-connect prompt */
 .smart-prompt {
   width: 460px;

@@ -260,6 +260,27 @@ export function PaneView(p: Props) {
   const [smartModal, setSmartModal] = createSignal<null | "cwd" | "cmd" | "claude_args">(null);
   const [smartInput, setSmartInput] = createSignal("");
   const [showClaudePicker, setShowClaudePicker] = createSignal(false);
+  // v0.4.4 (Task 2): unified "new connection" picker. One modal to choose a
+  // directory AND a launch command together, then connect — instead of the
+  // à-la-carte menu that only ever set one at a time. Connect-time only,
+  // nothing persisted. The backend build_smart_connect_script already
+  // combines cwd_override + claude/cmd ("cd … && claude"), so this is pure
+  // UI. Attaching to an existing tmux session stays a direct action (no
+  // picker) via the separate tmux path below.
+  type NcCmd =
+    | "plain"
+    | "claude"
+    | "claude-continue"
+    | "claude-resume"
+    | "claude-skip"
+    | "custom";
+  const [newConnModal, setNewConnModal] = createSignal(false);
+  const [ncDir, setNcDir] = createSignal("");
+  const [ncCmd, setNcCmd] = createSignal<NcCmd>("claude");
+  const [ncCustom, setNcCustom] = createSignal("");
+  // When true, the folder picker returns its choice into the new-connection
+  // modal (ncDir) instead of connecting immediately.
+  const [dirPickForNewConn, setDirPickForNewConn] = createSignal(false);
   // Phase 23.F: tmux session picker state.
   const [tmuxSessions, setTmuxSessions] = createSignal<import("./types").TmuxSessionInfo[] | null>(null);
   const [tmuxPickerLoading, setTmuxPickerLoading] = createSignal(false);
@@ -394,7 +415,59 @@ export function PaneView(p: Props) {
   const chooseDir = (dir: string) => {
     pushRecentDir(dir);
     setDirPicker(null);
+    // v0.4.4 (Task 2): when the picker was opened from the new-connection
+    // modal, feed the choice back into it rather than connecting.
+    if (dirPickForNewConn()) {
+      setDirPickForNewConn(false);
+      setNcDir(dir);
+      setNewConnModal(true);
+      return;
+    }
     p.onConnect(p.pane.pane_id, { cwdOverride: dir });
+  };
+  // v0.4.4 (Task 2): close the folder picker; if it was serving the
+  // new-connection modal, reopen that modal (keeping the previous ncDir).
+  const closeDirPicker = () => {
+    setDirPicker(null);
+    if (dirPickForNewConn()) {
+      setDirPickForNewConn(false);
+      setNewConnModal(true);
+    }
+  };
+  // v0.4.4 (Task 2): open the unified new-connection modal with defaults.
+  const openNewConnModal = () => {
+    setNcDir("");
+    setNcCmd("claude");
+    setNcCustom("");
+    setNewConnModal(true);
+  };
+  // Browse for a remote directory from within the new-connection modal.
+  const browseNewConnDir = () => {
+    setNewConnModal(false);
+    setDirPickForNewConn(true);
+    void openDirPicker();
+  };
+  // Translate the modal's choices into a single ConnectOpts and connect.
+  const submitNewConn = () => {
+    const dir = ncDir().trim();
+    const opts: ConnectOpts = {};
+    if (dir) opts.cwdOverride = dir;
+    const c = ncCmd();
+    if (c === "plain") {
+      opts.mode = "plain";
+    } else if (c === "custom") {
+      const cmd = ncCustom().trim();
+      if (!cmd) return; // custom requires a command
+      opts.mode = "cmd";
+      opts.cmd = cmd;
+    } else {
+      opts.mode = "claude";
+      if (c === "claude-continue") opts.claudeArgs = "--continue";
+      else if (c === "claude-resume") opts.claudeArgs = "--resume";
+      else if (c === "claude-skip") opts.claudeArgs = "--dangerously-skip-permissions";
+    }
+    setNewConnModal(false);
+    p.onConnect(p.pane.pane_id, opts);
   };
   const openMeta = () => {
     setTitleDraft(p.pane.title ?? "");
@@ -1037,9 +1110,17 @@ export function PaneView(p: Props) {
                       class="connect-menu"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {/* v0.4.4 (Task 2): unified new-connection picker —
+                          directory + launch command chosen together. The
+                          à-la-carte shortcuts below stay for power users. */}
+                      <button class="connect-menu-primary" onClick={() => { closeConnectMenu(); openNewConnModal(); }}>
+                        {t("connect.newConnection")}
+                      </button>
+                      <hr />
                       <Show when={isSsh()}>
                         {/* Phase 23.F: open picker instead of attaching
-                             to the auto-named session. */}
+                             to the auto-named session. Existing tmux session
+                             = direct attach, no new-connection picker. */}
                         <button onClick={() => { closeConnectMenu(); openTmuxPicker(); }}>
                           {t("common.connect_tmux")}
                         </button>
@@ -1124,9 +1205,91 @@ export function PaneView(p: Props) {
         </div>
       </Show>
 
+      {/* v0.4.4 (Task 2): unified new-connection modal — pick a directory AND
+          a launch command together, then connect. Connect-time only, nothing
+          persisted. */}
+      <Show when={newConnModal()}>
+        <div class="modal-backdrop" onClick={() => setNewConnModal(false)}>
+          <div
+            class="modal new-conn-modal"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div class="settings-head">
+              <h3>{t("connect.newConn.title")}</h3>
+              <button class="feed-x" title={t("common.close")} onClick={() => setNewConnModal(false)}>×</button>
+            </div>
+
+            <div class="new-conn-section">
+              <label class="new-conn-label">{t("connect.newConn.directory")}</label>
+              <div class="new-conn-dir-row">
+                <input
+                  class="pane-meta-title"
+                  placeholder={t("connect.newConn.dirDefault")}
+                  value={ncDir()}
+                  onInput={(e) => setNcDir(e.currentTarget.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") submitNewConn(); }}
+                />
+                <Show when={isSsh()}>
+                  <button class="new-conn-browse" onClick={browseNewConnDir}>
+                    {t("connect.newConn.browse")}
+                  </button>
+                </Show>
+              </div>
+            </div>
+
+            <div class="new-conn-section">
+              <label class="new-conn-label">{t("connect.newConn.command")}</label>
+              <div class="new-conn-cmd-list">
+                <For each={[
+                  { v: "claude", label: "claude" },
+                  { v: "claude-continue", label: "claude --continue" },
+                  { v: "claude-resume", label: "claude --resume" },
+                  { v: "claude-skip", label: "claude --dangerously-skip-permissions" },
+                  { v: "plain", label: t("connect.plainShell") },
+                  { v: "custom", label: t("connect.newConn.custom") },
+                ] as { v: NcCmd; label: string }[]}>
+                  {(opt) => (
+                    <label class="new-conn-radio">
+                      <input
+                        type="radio"
+                        name="nc-cmd"
+                        checked={ncCmd() === opt.v}
+                        onChange={() => setNcCmd(opt.v)}
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  )}
+                </For>
+                <Show when={ncCmd() === "custom"}>
+                  <input
+                    class="pane-meta-title new-conn-custom"
+                    placeholder="npm run dev"
+                    value={ncCustom()}
+                    onInput={(e) => setNcCustom(e.currentTarget.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") submitNewConn(); }}
+                  />
+                </Show>
+              </div>
+            </div>
+
+            <div class="modal-buttons">
+              <button onClick={() => setNewConnModal(false)}>{t("common.cancel")}</button>
+              <button
+                class="primary"
+                disabled={ncCmd() === "custom" && !ncCustom().trim()}
+                onClick={submitNewConn}
+              >
+                {t("common.connect")}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
       {/* Phase 65 (bug AA): remote folder picker for "Open in directory". */}
       <Show when={dirPicker()}>
-        <div class="modal-backdrop" onClick={() => setDirPicker(null)}>
+        <div class="modal-backdrop" onClick={closeDirPicker}>
           <div
             class="modal claude-picker"
             onClick={(e) => e.stopPropagation()}
@@ -1134,7 +1297,7 @@ export function PaneView(p: Props) {
           >
             <div class="settings-head">
               <h3>{t("connect.dirPicker.title")}</h3>
-              <button class="feed-x" title={t("common.close")} onClick={() => setDirPicker(null)}>×</button>
+              <button class="feed-x" title={t("common.close")} onClick={closeDirPicker}>×</button>
             </div>
             <div class="dir-picker-path" title={dirPicker()!.path}>{dirPicker()!.path}</div>
             <Show when={recentDirs().length > 0}>
@@ -1178,7 +1341,7 @@ export function PaneView(p: Props) {
               </ul>
             </div>
             <div class="modal-buttons">
-              <button onClick={() => setDirPicker(null)}>{t("common.cancel")}</button>
+              <button onClick={closeDirPicker}>{t("common.cancel")}</button>
               <button class="primary" onClick={() => chooseDir(dirPicker()!.path)}>
                 {t("connect.dirPicker.useThis")}
               </button>

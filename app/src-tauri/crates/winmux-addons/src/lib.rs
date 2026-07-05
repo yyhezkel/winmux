@@ -132,7 +132,7 @@ pub const NGINX_PROXY_VERSION: &str = "1.0.0";
 /// check compares the remote's `winmux-server --version` (falling back to the
 /// legacy `winmux-insights` symlink) against this. Major 2 = the API-stability
 /// guarantee; existing 1.2.x installs are offered the 2.0.0 upgrade.
-pub const INSIGHTS_VERSION: &str = "2.0.0";
+pub const INSIGHTS_VERSION: &str = "2.1.0";
 
 /// The add-ons winmux knows about, in dependency-friendly order
 /// (winmux-cli first — everything else needs the remote CLI present).

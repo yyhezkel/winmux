@@ -12,7 +12,9 @@ import (
 
 // Version is the winmux-server release version. Major 2 marks the API-stability
 // guarantee introduced in Phase 77. One constant, shared by every package + cmd.
-const Version = "2.0.0"
+// 2.1.0 (v0.4.3): native self-hosted push + REST hook resolution + per-device
+// scopes. Bumped so the add-on offers the update (remote pulls the new binary).
+const Version = "2.1.0"
 
 // FrameVersion is the WebSocket frame-contract version (PHASE-77-DESIGN §4.4).
 // It is sent in the WS `hello` frame; a client that refuses an unknown value

@@ -308,6 +308,26 @@ func (m *Manager) CreateHookRequest(sessionID, reqID string, payload json.RawMes
 	return err
 }
 
+// ForwardHook records + publishes a hook_request that ORIGINATED on the desktop
+// (B path). It reuses CreateHookRequest against a virtual session id, so the
+// no-subscriber fan-out (maybePush) reaches every paired phone. The desktop
+// keeps the authoritative local hook and polls HookResolution for the phone's
+// decision.
+func (m *Manager) ForwardHook(virtualSession, reqID string, payload json.RawMessage, timeoutAt int64) error {
+	return m.CreateHookRequest(virtualSession, reqID, payload, timeoutAt)
+}
+
+// HookResolution reports a hook's decision — resolved=false until a
+// winner-takes-all resolution lands. Lets the desktop poll for a phone decision
+// on a forwarded (B-path) hook.
+func (m *Manager) HookResolution(reqID string) (decision string, resolved bool) {
+	p, ok := m.store.GetPending(reqID)
+	if !ok || p.ResolvedBy == "" {
+		return "", false
+	}
+	return p.Resolution, true
+}
+
 // ResolveHook records the FIRST decision for reqID (winner-takes-all) and, if it
 // won, broadcasts a hook_resolved event to all subscribers. Returns whether this
 // caller was the winner.

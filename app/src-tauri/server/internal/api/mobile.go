@@ -10,6 +10,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -19,6 +20,45 @@ import (
 	"winmux-server/internal/auth"
 	"winmux-server/internal/workspace"
 )
+
+// HookForwardRequest is a desktop-origin hook forwarded to paired devices (B).
+type HookForwardRequest struct {
+	ReqID       string `json:"req_id"`
+	WorkspaceID string `json:"workspace_id"`
+	PaneID      string `json:"pane_id"`
+	ToolName    string `json:"tool_name"`
+	Title       string `json:"title"`
+	TimeoutAt   int64  `json:"timeout_at"`
+}
+
+// HookForwardResponse returns the virtual session id the hook was published on.
+type HookForwardResponse struct {
+	OK        bool   `json:"ok"`
+	SessionID string `json:"session_id"`
+}
+
+// HookStatus is a forwarded hook's resolution, polled by the desktop.
+type HookStatus struct {
+	Resolved bool   `json:"resolved"`
+	Decision string `json:"decision"`
+}
+
+// virtualDesktopSession is the synthetic session id a desktop-forwarded hook is
+// published on — stable per (workspace, pane) so the phone sees a consistent
+// session. Non-identifier bytes are mapped to '_'.
+func virtualDesktopSession(ws, pane string) string {
+	safe := func(s string) string {
+		return strings.Map(func(r rune) rune {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+				return r
+			default:
+				return '_'
+			}
+		}, s)
+	}
+	return "desktop-" + safe(ws) + "-" + safe(pane)
+}
 
 // ScopesBody carries a device's grant list (GET response + PUT request).
 type ScopesBody struct {
@@ -255,6 +295,54 @@ func (s *Server) registerMobileOps(api huma.API) {
 			return nil, wsErr(err)
 		}
 		return &struct{ Body HookResolved }{Body: HookResolved{ReqID: in.ReqID, Decision: decision, Won: won}}, nil
+	})
+
+	// POST /api/v2/hooks/forward — B path: the desktop forwards a hook that
+	// fired in a desktop-terminal Claude session so paired phones get a push.
+	// Owner/shared-token only (only the desktop forwards). The desktop keeps
+	// the authoritative local hook and polls hooks-status for the decision.
+	huma.Register(api, huma.Operation{
+		OperationID: "hooks-forward", Method: http.MethodPost, Path: "/api/v2/hooks/forward",
+		Summary: "Forward a desktop-origin hook to paired devices",
+		Tags:    []string{"workspace"}, Security: mobileSecured,
+	}, func(_ context.Context, in *struct {
+		Authorization string `header:"Authorization"`
+		Body          HookForwardRequest
+	}) (*struct{ Body HookForwardResponse }, error) {
+		if s.deps.Chat != nil {
+			if _, admin, ok := s.deps.Chat.ResolveToken(strings.TrimPrefix(in.Authorization, "Bearer ")); !ok || !admin {
+				return nil, huma.Error403Forbidden("owner token required to forward hooks")
+			}
+		}
+		if in.Body.ReqID == "" {
+			return nil, huma.Error400BadRequest("req_id required")
+		}
+		vsess := virtualDesktopSession(in.Body.WorkspaceID, in.Body.PaneID)
+		payload, _ := json.Marshal(map[string]any{
+			"req_id":            in.Body.ReqID,
+			"tool_name":         in.Body.ToolName,
+			"title":             in.Body.Title,
+			"decision_required": true,
+			"origin":            "desktop",
+		})
+		if err := mgr.ForwardHook(vsess, in.Body.ReqID, payload, in.Body.TimeoutAt); err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		return &struct{ Body HookForwardResponse }{Body: HookForwardResponse{OK: true, SessionID: vsess}}, nil
+	})
+
+	// GET /api/v2/hooks/{req_id} — poll a forwarded hook's resolution. The
+	// desktop polls this to learn a phone's allow/deny for a B-path hook and
+	// then resolves its authoritative local hook.
+	huma.Register(api, huma.Operation{
+		OperationID: "hooks-status", Method: http.MethodGet, Path: "/api/v2/hooks/{req_id}",
+		Summary: "Poll a forwarded hook's resolution",
+		Tags:    []string{"workspace"}, Security: mobileSecured,
+	}, func(_ context.Context, in *struct {
+		ReqID string `path:"req_id"`
+	}) (*struct{ Body HookStatus }, error) {
+		decision, resolved := mgr.HookResolution(in.ReqID)
+		return &struct{ Body HookStatus }{Body: HookStatus{Resolved: resolved, Decision: decision}}, nil
 	})
 }
 

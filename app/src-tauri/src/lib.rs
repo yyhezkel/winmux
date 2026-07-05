@@ -19,6 +19,7 @@ mod remote_bootstrap;
 mod rpc_server;
 mod settings;
 mod stt;
+mod tray;
 mod updater;
 // Phase 51.C: `mod tunnel` moved to its own crate winmux-tunnel.
 // Existing crate::tunnel::* callsites still resolve via this alias.
@@ -71,6 +72,10 @@ pub(crate) struct NotificationItem {
     pub(crate) body: String,
     pub(crate) workspace_id: Option<String>,
     pub(crate) timestamp_ms: u128,
+    // Unshipped-fivefer (#1): coarse category for the Notification Center
+    // filter — "agent" (hooks/Claude), "notification" (OSC/generic),
+    // "error", "build", "mention".
+    pub(crate) kind: String,
 }
 
 #[derive(Clone, Serialize, Debug, PartialEq, Eq, ts_rs::TS)]
@@ -5306,6 +5311,117 @@ fn pty_resize(
     }
 }
 
+/// Round B (#4): pop a live terminal pane out into its own OS window.
+///
+/// The popout loads `index.html?popout=<sid>`; index.tsx early-bails to a
+/// full-screen `<PopoutTerminal>` that attaches to the SAME session_id.
+/// `pty:data` / `pty:exit` are emitted app-wide (see `emit_data` /
+/// `emit_exit`), so the popout receives the stream alongside the main
+/// window. The popout owns input + resize while open; the origin pane
+/// detaches to a read-only mirror (frontend) to avoid a SIGWINCH tug-of-war.
+///
+/// Scoped by `capabilities/popout.json` (`windows: ["popout-*"]`) to the
+/// minimum: core events (listen/emit) + window close. Does not touch the
+/// `main` capability.
+// IMPORTANT: this MUST stay `async`. On Windows, `WebviewWindowBuilder`
+// deadlocks when driven from a SYNCHRONOUS command (documented on docs.rs) —
+// the window shell appears but the webview never initializes (blank white).
+// An async command runs off the main event-loop thread and builds cleanly,
+// which is also why the workspace Browser (add_child) command is async.
+#[tauri::command]
+async fn popout_pane(
+    app: AppHandle,
+    session_id: String,
+    title: String,
+    cols: Option<u32>,
+    rows: Option<u32>,
+    dir: Option<String>,
+) -> Result<(), String> {
+    // Window labels only allow [a-zA-Z0-9-/:_]. session_id is our own
+    // UUID-ish token, but sanitize defensively.
+    let safe: String = session_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if safe.is_empty() {
+        return Err("invalid session id".into());
+    }
+    let label = format!("popout-{safe}");
+
+    // Already popped out? Focus the existing window instead of erroring on
+    // the duplicate label.
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    // Rough pixel size from the pane's current grid. The terminal fits
+    // itself on mount, so this only needs to be in the right ballpark.
+    let cols = f64::from(cols.unwrap_or(100).clamp(20, 400));
+    let rows = f64::from(rows.unwrap_or(30).clamp(6, 200));
+    let win_w = (cols * 8.5 + 24.0).clamp(480.0, 2400.0);
+    let win_h = (rows * 18.0 + 48.0).clamp(320.0, 1600.0);
+
+    // CLEAN url — no query, no fragment. In a built app Tauri's asset
+    // protocol treats ANY suffix (`index.html?x` or `index.html#x`) as a
+    // literal path and serves a blank page. The frontend reads the session
+    // id from the window LABEL (`popout-<sid>`) instead, so the URL never
+    // needs to carry it. (`dir` is currently derived frontend-side from the
+    // per-line RTL observer, so it isn't threaded through the URL.)
+    let _ = &dir;
+
+    // Retry the transient WebView2 0x8007139F (ERROR_INVALID_STATE) a few
+    // times with a short backoff, mirroring workspace_browser_show. The
+    // builder is consumed by build(), so it's rebuilt each attempt.
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut last_err = String::new();
+    let mut built = None;
+    for attempt in 1..=MAX_ATTEMPTS {
+        dlog(&format!(
+            "popout_pane: building window label={label} size={win_w}x{win_h} (attempt {attempt}/{MAX_ATTEMPTS})"
+        ));
+        match tauri::WebviewWindowBuilder::new(
+            &app,
+            &label,
+            tauri::WebviewUrl::App("index.html".into()),
+        )
+        .title(title.clone())
+        .inner_size(win_w, win_h)
+        .center()
+        .build()
+        {
+            Ok(w) => {
+                built = Some(w);
+                break;
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                dlog(&format!(
+                    "popout_pane: build attempt {attempt}/{MAX_ATTEMPTS} FAILED: {last_err}"
+                ));
+                if attempt < MAX_ATTEMPTS {
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                }
+            }
+        }
+    }
+    let win = built
+        .ok_or_else(|| format!("popout window failed after {MAX_ATTEMPTS} attempts: {last_err}"))?;
+    dlog(&format!("popout_pane: window {label} built ok"));
+
+    // Tell the app when the popout closes (user X, or the frontend closing
+    // itself on pty:exit) so the origin pane can re-attach input + resize.
+    let app2 = app.clone();
+    let sid = session_id.clone();
+    win.on_window_event(move |e| {
+        if matches!(e, tauri::WindowEvent::Destroyed) {
+            let _ = app2.emit("popout:closed", sid.clone());
+        }
+    });
+
+    Ok(())
+}
+
 // ─── Entrypoint ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -5353,6 +5469,26 @@ pub fn run() {
         eprintln!("PANIC at {location}: {msg}");
     }));
 
+    // Unshipped-fivefer (#3): browser session persistence. Point WebView2 at a
+    // single stable profile folder under our config dir so cookies/logins in
+    // workspace browsers survive restarts. One app-wide folder (shared by the
+    // main window + every workspace browser) — deliberately NOT a per-workspace
+    // --user-data-dir, which reintroduces the 0x8007139F "user data folder in
+    // use" crash (WebView2 allows one environment per process). Must be set
+    // before any webview is created, hence here at the top of run().
+    if let Ok(base) = config_dir() {
+        let profile = base.join("webview2");
+        // Toggle off → wipe the profile on this launch (clear-on-restart), then
+        // keep using the same path so the next session starts clean too until
+        // re-enabled.
+        if !settings::persist_browser_sessions_flag() {
+            let _ = std::fs::remove_dir_all(&profile);
+        }
+        let _ = std::fs::create_dir_all(&profile);
+        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &profile);
+        dlog(&format!("webview2 profile folder: {}", profile.display()));
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -5389,6 +5525,12 @@ pub fn run() {
             .build()
             .map_err(|e| Box::<dyn std::error::Error>::from(format!("main window: {e}")))?;
             dlog("setup: main webview created");
+            // Unshipped-fivefer (#2): system tray. Best-effort — a failure
+            // just means no tray + no close-to-tray (see on_window_event).
+            match tray::init(app.handle()) {
+                Ok(()) => dlog("setup: system tray created"),
+                Err(e) => dlog(&format!("setup: tray init failed (continuing): {e}")),
+            }
             match load_from_disk() {
                 Ok(file) => {
                     *state.workspaces.lock().unwrap() = file;
@@ -5719,7 +5861,9 @@ pub fn run() {
             file_manager::file_delete_remote,
             file_manager::file_rename_local,
             file_manager::file_rename_remote,
+            file_manager::file_copy_remote,
             file_manager::file_mkdir_local,
+            file_manager::file_copy_local,
             file_manager::file_mkdir_remote,
             file_manager::file_create_local,
             file_manager::file_create_remote,
@@ -5756,7 +5900,15 @@ pub fn run() {
             local_wizard::detect_local_shells,
             local_wizard::list_recent_paths,
             local_wizard::record_recent_path,
+            // Unshipped-fivefer (#2): taskbar badge from the frontend.
+            tray::set_tray_badge,
+            // Unshipped-fivefer (#4): pop a terminal pane into its own window.
+            popout_pane,
         ])
+        // #2 (feedback): close-to-tray removed — closing the window quits
+        // normally (the minimize-to-tray surprise was confusing). The tray
+        // icon + badge stay for quick access; quit is either the window close
+        // or the tray menu.
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

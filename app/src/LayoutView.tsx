@@ -46,6 +46,8 @@ interface Props {
   onConnect: (paneId: string, opts?: ConnectOpts) => void;
   onSplit: (paneId: string, direction: SplitDirection) => void;
   onClose: (paneId: string) => void;
+  // Unshipped-fivefer (#4): pop this pane's terminal into its own window.
+  onPopOut: (paneId: string) => void;
   onDisconnect: (paneId: string) => void;
   // Phase 11.A: tmux session map keyed by pane_id; presence = persistent.
   panePersistence: Record<string, string>;
@@ -139,6 +141,7 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           onConnect={props.all.onConnect}
           onSplit={props.all.onSplit}
           onClose={props.all.onClose}
+          onPopOut={props.all.onPopOut}
           onDisconnect={props.all.onDisconnect}
           tmuxSession={props.all.panePersistence[props.pane.pane_id] ?? null}
           onKillSession={props.all.onKillSession}

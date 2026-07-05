@@ -1330,6 +1330,264 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 
 /* ─── Phase 6.5: agent feed cards ─── */
 
+/* ─── Unshipped-fivefer (#1): Notification Center ─── */
+.notif-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(0, 0, 0, 0.28);
+}
+.notif-center {
+  position: fixed;
+  top: 0;
+  inset-inline-end: 0;
+  height: 100vh;
+  width: min(400px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--w-surface);
+  border-inline-start: 1px solid var(--w-border-hi);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
+  animation: notif-slide 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+[dir="rtl"] .notif-center { box-shadow: 8px 0 32px rgba(0, 0, 0, 0.4); }
+@keyframes notif-slide {
+  from { transform: translateX(16px); opacity: 0.4; }
+  to { transform: translateX(0); opacity: 1; }
+}
+[dir="rtl"] .notif-center { animation-name: notif-slide-rtl; }
+@keyframes notif-slide-rtl {
+  from { transform: translateX(-16px); opacity: 0.4; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* Unshipped-fivefer (#4): pop-out terminal window — full-screen fill. */
+.popout-terminal-host {
+  position: fixed;
+  inset: 0;
+  background: #0e1116;
+  overflow: hidden;
+}
+.popout-terminal-host .terminal-container {
+  position: absolute;
+  inset: 0;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+/* Round B: generic side-drawer shell (generalizes the notif slide-in). */
+.side-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(0, 0, 0, 0.28);
+}
+.side-drawer {
+  position: fixed;
+  top: 0;
+  inset-inline-end: 0;
+  height: 100vh;
+  width: min(400px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--w-surface);
+  border-inline-start: 1px solid var(--w-border-hi);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
+  animation: notif-slide 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+[dir="rtl"] .side-drawer {
+  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.4);
+  animation-name: notif-slide-rtl;
+}
+.side-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--w-border);
+  flex: 0 0 auto;
+}
+.side-drawer-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--w-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-drawer-icon { flex: 0 0 auto; }
+.side-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.side-drawer-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--w-text-dim);
+  font-size: 14px;
+  line-height: 1;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.side-drawer-btn:hover {
+  background: var(--w-surface-hi);
+  color: var(--w-text);
+  border-color: var(--w-border);
+}
+.side-drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.notif-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--w-border);
+}
+.notif-head-title { font-size: 14px; font-weight: 600; color: var(--w-text); display: flex; align-items: center; gap: 8px; }
+.notif-head-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--w-accent);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.notif-head-actions { display: flex; gap: 4px; }
+.notif-head-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--w-text-dim);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.notif-head-btn:hover { background: var(--w-surface-hi); color: var(--w-text); }
+.notif-filters {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--w-border);
+  overflow-x: auto;
+}
+.notif-filter {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border: 1px solid var(--w-border);
+  background: transparent;
+  color: var(--w-text-dim);
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.notif-filter:hover { color: var(--w-text); }
+.notif-filter.active {
+  background: rgba(122, 162, 247, 0.14);
+  border-color: var(--w-accent);
+  color: var(--w-accent-hi);
+}
+.notif-filter-count { font-size: 10px; opacity: 0.8; }
+.notif-list { flex: 1; overflow-y: auto; padding: 6px; }
+.notif-item {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: default;
+  transition: background 100ms ease;
+}
+.notif-item.jumpable { cursor: pointer; }
+.notif-item:hover { background: var(--w-surface-hi); }
+.notif-item.unread { background: rgba(122, 162, 247, 0.06); }
+.notif-item-icon { font-size: 15px; flex-shrink: 0; line-height: 1.4; }
+.notif-item-body { flex: 1; min-width: 0; }
+.notif-item-title {
+  font-size: 13px;
+  color: var(--w-text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notif-item.unread .notif-item-title { font-weight: 600; }
+.notif-item-summary {
+  font-size: 12px;
+  color: var(--w-text-dim);
+  margin-top: 2px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.notif-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--w-text-faint);
+}
+.notif-item-kind { text-transform: capitalize; }
+.notif-item-jump { color: var(--w-accent); }
+.notif-item-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--w-accent);
+  flex-shrink: 0;
+  align-self: center;
+}
+.notif-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 48px 24px;
+  color: var(--w-text-dim);
+}
+.notif-empty-icon { font-size: 30px; opacity: 0.5; }
+.notif-empty-title { font-size: 14px; font-weight: 600; color: var(--w-text); }
+.notif-empty-desc { font-size: 12px; line-height: 1.5; max-width: 240px; }
+/* bell badge in the sidebar action button */
+.notif-bell { position: relative; }
+.notif-bell-badge {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: 6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--w-error);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .feed-panel {
   position: fixed;
   top: 12px;
@@ -2063,6 +2321,42 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
    double-click second tap then landed on the wrong row.
    On narrow panes, overflow-x: auto scrolls the toolbar
    horizontally instead of wrapping. */
+/* Feedback: file-manager clipboard bar (cut/copy → one-click paste). */
+.fm-clip-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(122, 162, 247, 0.1);
+  border-bottom: 1px solid var(--w-border);
+  flex-shrink: 0;
+  font-size: var(--w-fs-sm, 12px);
+}
+.fm-clip-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--w-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fm-clip-src { color: var(--w-text-faint); font-size: 0.9em; }
+.fm-clip-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.fm-clip-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--w-border-hi);
+  background: var(--w-surface);
+  color: var(--w-text);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.fm-clip-btn:hover { background: var(--w-surface-hi); border-color: var(--w-accent); }
+.fm-clip-x { padding: 3px 8px; color: var(--w-text-dim); }
+
 .fm-toolbar {
   display: flex;
   align-items: center;
@@ -4386,6 +4680,94 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   position: relative;
 }
 .fm-window-body > * { flex: 1; min-height: 0; }
+
+/* ── Unified side-panel lifecycle: float + fullscreen surfaces ──────────
+   The drawer surface reuses .side-drawer / .side-drawer-* above. Float
+   mirrors the .fm-window chrome; fullscreen fills the viewport like a
+   maximized pane. Body classes (.notif-body / .files-body / .insights-body)
+   tune per-panel layout on top of these. */
+.panel-float {
+  position: fixed;
+  z-index: 90;
+  background: var(--w-surface);
+  border: 1px solid var(--w-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panel-float-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+@keyframes panel-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.panel-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  background: var(--w-surface);
+  display: flex;
+  flex-direction: column;
+  animation: panel-fade 140ms ease;
+}
+.panel-fullscreen-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+/* Shared chrome header for float + fullscreen (mirrors .side-drawer-head). */
+.panel-chrome-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--w-border);
+  flex: 0 0 auto;
+  user-select: none;
+}
+.panel-float .panel-chrome-head { cursor: grab; }
+.panel-float .panel-chrome-head:active { cursor: grabbing; }
+.panel-chrome-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--w-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel-chrome-icon { flex: 0 0 auto; }
+.panel-chrome-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+/* Files body must be a sized, positioned box across every surface:
+   FileManagerPane's root (.fm-pane) is position:absolute; inset:0. */
+.files-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  overflow: hidden;
+}
+.files-body > * { flex: 1; min-height: 0; }
 
 /* ── Phase 68.D: Server Insights monitor (reuses .fm-window chrome) ──── */
 .insights-window { min-width: 460px; min-height: 360px; z-index: 95; }

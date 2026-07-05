@@ -162,6 +162,8 @@ interface Props {
   onConnect: (paneId: string, opts?: ConnectOpts) => void;
   onSplit: (paneId: string, direction: "horizontal" | "vertical") => void;
   onClose: (paneId: string) => void;
+  // Unshipped-fivefer (#4): pop this pane's terminal into its own window.
+  onPopOut: (paneId: string) => void;
   onDisconnect: (paneId: string) => void;
   // Phase 11.A: hard-kill the remote tmux session. No-op for plain panes.
   onKillSession: (paneId: string) => void;
@@ -768,6 +770,20 @@ export function PaneView(p: Props) {
         </button>
         <button class="pane-btn" title="Split right (Ctrl+Shift+D)" onClick={() => p.onSplit(p.pane.pane_id, "horizontal")}>↔</button>
         <button class="pane-btn" title="Split down (Ctrl+Shift+E)" onClick={() => p.onSplit(p.pane.pane_id, "vertical")}>↕</button>
+        {/* Unshipped-fivefer (#4): pop this terminal into its own window.
+            Only meaningful for a live session — hidden until connected. */}
+        <Show when={p.isConnected}>
+          <button
+            class="pane-btn"
+            title={t("pane.tooltip.popout")}
+            onClick={(e) => {
+              e.stopPropagation();
+              void p.onPopOut(p.pane.pane_id);
+            }}
+          >
+            ⧉
+          </button>
+        </Show>
         <button class="pane-btn pane-close" title={t("pane.tooltip.close")} onClick={() => p.onClose(p.pane.pane_id)}>×</button>
       </div>
       <Show when={editingMeta()}>

@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "popout",
+  "description": "Terminal pop-out windows (popout-*). Mirrors the main window's capability so the webview bootstraps its IPC identically, plus window close/focus for self-management.",
+  "windows": ["popout-*"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:allow-set-title",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "opener:default",
+    "dialog:allow-save"
+  ]
+}

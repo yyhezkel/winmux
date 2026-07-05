@@ -87,4 +87,8 @@ floating_windows: FloatingWindows,
  * Phase 75: debug-log hygiene (retention). `#[serde(default)]` so older
  * settings.json files load with the built-in defaults.
  */
-logs: LogsSettings, };
+logs: LogsSettings,
+/**
+ * Unshipped-fivefer (#3): persist workspace-browser sessions across restarts.
+ */
+persist_browser_sessions: boolean, };

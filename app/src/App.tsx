@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
+import { NotificationCenter, NotifHeaderActions, type NotifItem } from "./NotificationCenter";
 import { LayoutView } from "./LayoutView";
 import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
@@ -16,7 +17,10 @@ import { SshKeyOfferModal } from "./SshKeyOfferModal";
 import { CommandPalette, type Command } from "./CommandPalette";
 import { PortsWindow } from "./PortsWindow";
 import { BrowserWindow } from "./BrowserWindow";
-import { FileManagerWindow } from "./FileManagerWindow";
+import { FileManagerPane } from "./FileManagerPane";
+import { PanelSurface } from "./PanelSurface";
+import type { Geometry } from "./floatingWindow";
+import { closeOtherDrawers, type PanelId, type Surface, type PanelSurfaces } from "./panels";
 import {
   TerminalInstance,
   copyTerminalSelection,
@@ -45,6 +49,7 @@ import {
   describeConnection,
   effectiveIdentity,
   findPane,
+  pruneLayout,
   type Connection,
   type EnvVar,
   type FeedItem,
@@ -91,6 +96,83 @@ function App() {
     workspaces: [],
   });
   const [showCreate, setShowCreate] = createSignal(false);
+  // Unshipped-fivefer (#1): Notification Center. Session-accumulating store
+  // fed by both notification streams (OSC + RPC/agent); read-state persists
+  // per-machine in localStorage (the items themselves are in-memory only, so
+  // disk-persisting read-state would outlive its subjects).
+  const [notifications, setNotifications] = createSignal<NotifItem[]>([]);
+  // Unified side-panel lifecycle (see panels.ts). One registry replaces the
+  // former scattered per-panel booleans (showNotifCenter / showInsights +
+  // insightsMode / showFilesWindow). Each panel opens docked as a drawer,
+  // then floats out or expands to fullscreen; only one drawer at a time.
+  const [panels, setPanels] = createSignal<PanelSurfaces>({});
+  const surfaceOf = (id: PanelId): Surface => panels()[id] ?? "closed";
+  const setSurface = (id: PanelId, s: Surface) => setPanels((p) => ({ ...p, [id]: s }));
+  const openPanel = (id: PanelId) =>
+    setPanels((p) => ({ ...closeOtherDrawers(p, id), [id]: "drawer" })); // rule: opens docked
+  const closePanel = (id: PanelId) => setSurface(id, "closed");
+  const floatPanel = (id: PanelId) => setSurface(id, "float"); // ⤢ → in-app floating window
+  const expandPanel = (id: PanelId) => setSurface(id, "fullscreen"); // ⛶ → maximized-pane overlay
+  const NOTIF_READ_KEY = "winmux.notif.read";
+  const loadNotifRead = (): Set<number> => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(NOTIF_READ_KEY) ?? "[]") as number[]);
+    } catch {
+      return new Set();
+    }
+  };
+  const [notifRead, setNotifRead] = createSignal<Set<number>>(loadNotifRead());
+  const persistNotifRead = (s: Set<number>) => {
+    try {
+      localStorage.setItem(NOTIF_READ_KEY, JSON.stringify([...s]));
+    } catch {
+      /* private mode / quota */
+    }
+  };
+  const pushNotif = (n: NotifItem) =>
+    setNotifications((prev) =>
+      prev.some((x) => x.id === n.id) ? prev : [n, ...prev].slice(0, 300),
+    );
+  const markNotifRead = (id: number) =>
+    setNotifRead((prev) => {
+      const n = new Set(prev);
+      n.add(id);
+      persistNotifRead(n);
+      return n;
+    });
+  const markAllNotifRead = () =>
+    setNotifRead(() => {
+      const n = new Set(notifications().map((x) => x.id));
+      persistNotifRead(n);
+      return n;
+    });
+  const clearNotifs = () => {
+    void invoke("notifications_clear").catch(() => {});
+    setNotifications([]);
+  };
+  const unreadNotifs = () => notifications().filter((n) => !notifRead().has(n.id)).length;
+  // #2: mirror the unread count to the Windows taskbar badge.
+  createEffect(() => {
+    const c = unreadNotifs();
+    void invoke("set_tray_badge", { count: c }).catch(() => {});
+  });
+  // #1 fix: map a FeedItem (hooks/permissions/passive) to a NotifItem so the
+  // Notification Center shows the same stream the user sees in the feed. The
+  // id is a stable hash of request_id so an add+resolve don't duplicate.
+  const feedToNotif = (f: FeedItem): NotifItem => {
+    let h = 0;
+    for (let i = 0; i < f.request_id.length; i++) h = (h * 31 + f.request_id.charCodeAt(i)) | 0;
+    const kind =
+      f.kind === "notification" ? "notification" : f.kind === "error" ? "error" : "agent";
+    return {
+      id: Math.abs(h),
+      title: f.title || f.summary || "",
+      body: f.title ? f.summary : "",
+      workspace_id: f.workspace_id ?? null,
+      timestamp_ms: f.created_ms,
+      kind,
+    };
+  };
   const [editingWorkspace, setEditingWorkspace] = createSignal<Workspace | null>(null);
   const [activePaneId, setActivePaneId] = createSignal<string | null>(null);
   // Phase 55-A: pane maximize toggle. When set, LayoutView gets just
@@ -99,6 +181,10 @@ function App() {
   // pane in the workspace after enter/exit so xterm geometry catches
   // up to the new available area.
   const [maximizedPaneId, setMaximizedPaneId] = createSignal<string | null>(null);
+  // Unshipped-fivefer (#4): pane_ids currently living in their own pop-out OS
+  // window. They're pruned from the grid render tree (siblings reflow to fill),
+  // and returned to their slot on `popout:closed`.
+  const [poppedOut, setPoppedOut] = createSignal<Set<string>>(new Set());
   const [pendingPwFor, setPendingPwFor] = createSignal<string | null>(null);
   const [pendingPassphraseFor, setPendingPassphraseFor] = createSignal<{
     paneId: string;
@@ -173,7 +259,8 @@ function App() {
   // "Connect to existing server" flow into this wizard's "existing"
   // mode, so there's no separate connect-existing modal anymore.
   const [showProvision, setShowProvision] = createSignal(false);
-  const [showInsights, setShowInsights] = createSignal(false);
+  // Monitor's open/drawer/float state now lives in the unified `panels`
+  // registry (see panels.ts) under the "monitor" id.
   const [addonsWin, setAddonsWin] = createSignal<{ id: string; name: string } | null>(null);
   // Phase 35 (#1.3): command palette (Ctrl+Shift+P).
   const [showPalette, setShowPalette] = createSignal(false);
@@ -192,9 +279,9 @@ function App() {
   // (the native Webview is hidden on close, not destroyed — page state
   // survives across open/close cycles).
   const [showBrowserWindow, setShowBrowserWindow] = createSignal(false);
-  // Phase 53 (rebased): workspace-level File Manager floating window.
-  // Pure HTML — wraps the existing FileManagerPane component.
-  const [showFilesWindow, setShowFilesWindow] = createSignal(false);
+  // Phase 53 (rebased): workspace-level File Manager. Pure HTML — wraps
+  // the existing FileManagerPane. Its open/drawer/float state now lives in
+  // the unified `panels` registry (see panels.ts) under the "files" id.
   // Phase 62.B (item I): sidebar mode lives in settings.json; full-mode
   // width lives in localStorage. Phase 65.P: two modes only (full /
   // icons). Any legacy "hidden" value migrates to "icons" on read so
@@ -452,6 +539,53 @@ function App() {
     return ti;
   };
 
+  // Unshipped-fivefer (#4): pop a live pane's terminal into its own OS
+  // window. The popout (index.html?popout=<sid>) becomes the input + resize
+  // authority; this pane detaches to a read-only mirror — the global
+  // pty:data listener keeps rendering it. Re-attaches on `popout:closed`.
+  const popOutPane = async (paneId: string) => {
+    const sid = paneToSession.get(paneId);
+    const ti = terms.get(paneId);
+    if (!sid || !ti) return;
+    const label = activeWs()?.name ?? "winmux";
+    const dir = document.documentElement.dir === "rtl" ? "rtl" : "ltr";
+    // Seed the popout's Ctrl+wheel zoom from the configured terminal size the
+    // first time only — later wheel zooms own it (localStorage, shared origin).
+    if (localStorage.getItem("winmux.popout.font_size_pt") == null) {
+      localStorage.setItem(
+        "winmux.popout.font_size_pt",
+        String(settings()?.font.terminal_size_pt ?? 13),
+      );
+    }
+    try {
+      await invoke("popout_pane", {
+        sessionId: sid,
+        title: `${label} — winmux`,
+        cols: ti.term.cols,
+        rows: ti.term.rows,
+        dir,
+      });
+      // The pane now lives in its own OS window — vacate its grid slot so the
+      // siblings reflow to fill it (it returns on popout:closed). detach() so
+      // the hidden grid terminal is no longer the input/resize authority.
+      ti.detach();
+      const nextHidden = new Set(poppedOut());
+      nextHidden.add(paneId);
+      setPoppedOut(nextHidden);
+      // If we just hid the active pane, move focus to a still-visible one.
+      const wsLayout = activeWs()?.layout;
+      if (activePaneId() === paneId && wsLayout) {
+        const survivor = collectPanes(wsLayout).find((p) => !nextHidden.has(p));
+        if (survivor) {
+          setActivePaneId(survivor);
+          terms.get(survivor)?.focus();
+        }
+      }
+    } catch (e) {
+      console.error("popout_pane failed", e);
+    }
+  };
+
   // Phase 65.O (round 6): the tmux wheel-proxy was deleted — xterm.js
   // handles the wheel natively in every case. No per-pane flag to sync.
 
@@ -567,7 +701,7 @@ function App() {
       { id: "ssh.connect", label: t("cmd.ssh.connect"), enabled: () => hasPane, handler: () => { if (pid) void connectPane(pid); } },
       { id: "ssh.disconnect", label: t("cmd.ssh.disconnect"), enabled: () => hasPane, handler: () => { if (pid) void disconnectPane(pid); } },
       { id: "ssh.provision", label: t("cmd.ssh.provision"), handler: () => setShowProvision(true) },
-      { id: "insights.monitor", label: t("cmd.insights.monitor"), enabled: () => hasWs, handler: () => setShowInsights(true) },
+      { id: "insights.monitor", label: t("cmd.insights.monitor"), enabled: () => hasWs, handler: () => openPanel("monitor") },
       { id: "settings.open", label: t("cmd.settings.open"), handler: () => setShowSettings(true) },
       { id: "settings.language", label: t("cmd.settings.language"), handler: () => setShowSettings(true) },
       { id: "settings.theme", label: t("cmd.settings.theme"), handler: () => setShowSettings(true) },
@@ -1280,6 +1414,18 @@ function App() {
       toggleMaximize();
       return;
     }
+    // A fullscreen side panel sits above the panes (z 95), so Esc collapses
+    // it back to a drawer first — before the pane-maximize restore below.
+    if (e.key === "Escape") {
+      const fs = (Object.keys(panels()) as PanelId[]).find(
+        (id) => panels()[id] === "fullscreen",
+      );
+      if (fs) {
+        e.preventDefault();
+        setSurface(fs, "drawer");
+        return;
+      }
+    }
     if (e.key === "Escape" && maximizedPaneId()) {
       e.preventDefault();
       toggleMaximize();
@@ -1530,6 +1676,14 @@ function App() {
       setSettings(s);
       applyTheme(s);
       applyI18nSettings(s.i18n);
+      // #1: seed the Notification Center with any notifications already
+      // collected this session (RPC/agent items live in the backend Vec).
+      try {
+        const seed = await invoke<NotifItem[]>("notifications_list");
+        setNotifications(seed.map((n) => ({ ...n, kind: n.kind || "agent" })).reverse());
+      } catch (e) {
+        console.warn("notifications_list failed", e);
+      }
       setShortcutTable(buildShortcutTable(s.shortcuts ?? DEFAULT_SHORTCUTS));
       setCtrlCCopyOnSelect(
         (s.shortcuts ?? DEFAULT_SHORTCUTS).copy_on_select_with_ctrl_c,
@@ -1559,6 +1713,16 @@ function App() {
         if (!pid) return;
         sessionToPane.delete(e.payload.session_id);
         paneToSession.delete(pid);
+        // If the pane was popped out, its window is closing too — return the
+        // (now-dead) pane to the grid so it isn't pruned away forever. Done
+        // here because popout:closed can't map the sid once the maps are gone.
+        if (poppedOut().has(pid)) {
+          setPoppedOut((s) => {
+            const n = new Set(s);
+            n.delete(pid);
+            return n;
+          });
+        }
         const ti = terms.get(pid);
         ti?.notice(
           `[disconnected${e.payload.reason ? ` (${e.payload.reason})` : ""}]`
@@ -1566,6 +1730,30 @@ function App() {
         ti?.detach();
         bump();
         void refreshPersistence();
+      })
+    );
+    // Unshipped-fivefer (#4): a pop-out window closed — re-attach the origin
+    // pane's terminal (input + resize) if its session is still live. If the
+    // popout closed *because* of pty:exit, the exit handler above already
+    // cleared the maps, so this is a no-op.
+    unlistens.push(
+      await listen<string>("popout:closed", (e) => {
+        const sid = e.payload;
+        const pid = sessionToPane.get(sid);
+        // pty:exit-driven close already cleared the maps AND un-pruned the
+        // pane (see the pty:exit handler); nothing left to do here.
+        if (!pid || paneToSession.get(pid) !== sid) return;
+        // Return the pane to its grid slot, then re-attach input + resize.
+        setPoppedOut((s) => {
+          const n = new Set(s);
+          n.delete(pid);
+          return n;
+        });
+        const ti = terms.get(pid);
+        if (!ti) return;
+        ti.attach(sid);
+        ti.notice(t("pane.popout.reattached"));
+        requestAnimationFrame(() => ti.fitAndResize(true));
       })
     );
     // Initial feed load.
@@ -1585,6 +1773,10 @@ function App() {
       await listen<FeedItem>("feed:item-added", (e) => {
         setFeedItems((prev) => [e.payload, ...prev.filter((i) => i.request_id !== e.payload.request_id)]);
         if (e.payload.state !== "pending") scheduleFeedDismiss(e.payload.request_id);
+        // #1 fix: feed items (Claude hooks / permissions / passive) are the
+        // stream the user actually sees — mirror them into the Notification
+        // Center too (it previously only tapped OSC + RPC notifications).
+        pushNotif(feedToNotif(e.payload));
       })
     );
     unlistens.push(
@@ -1628,8 +1820,29 @@ function App() {
           };
           setFeedItems((prev) => [item, ...prev]);
           scheduleFeedDismiss(item.request_id);
+          // #1: also record it in the Notification Center timeline.
+          pushNotif({
+            id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
+            title: hasTitle ? title : body,
+            body: hasTitle ? body : "",
+            workspace_id: null,
+            timestamp_ms: Date.now(),
+            kind: "notification",
+          });
         },
       ),
+    );
+    // #1: RPC/agent notifications (Claude hooks). Backend pushes to
+    // state.notifications AND emits this — the center mirrors it live.
+    unlistens.push(
+      await listen<NotifItem>("notification:new", (e) => pushNotif(e.payload)),
+    );
+    // #2: tray menu actions routed from the Rust tray handler.
+    unlistens.push(
+      await listen<string>("tray:action", (e) => {
+        if (e.payload === "new_workspace") setShowCreate(true);
+        else if (e.payload === "settings") setShowSettings(true);
+      }),
     );
     // Phase 36 (#2.2): auto port-forward lifecycle. The backend opens a
     // local SSH forward when the remote watcher reports a new listening
@@ -2008,7 +2221,7 @@ function App() {
               <button
                 class="ws-header-btn"
                 title={t("sidebar.files.tooltip")}
-                onClick={() => setShowFilesWindow(true)}
+                onClick={() => openPanel("files")}
               >
                 🗂 {t("sidebar.files.label")}
               </button>
@@ -2016,9 +2229,22 @@ function App() {
               <button
                 class="ws-header-btn"
                 title={t("sidebar.insights.tooltip")}
-                onClick={() => setShowInsights(true)}
+                onClick={() => openPanel("monitor")}
               >
                 📊 {t("sidebar.insights.label")}
+              </button>
+              {/* Feedback reorg: Notifications button lives at the header edge,
+                  after Monitor. Moved here from the sidebar so all workspace
+                  tools sit together. Badge shows the unread count. */}
+              <button
+                class="ws-header-btn notif-bell"
+                title={t("notif.title")}
+                onClick={() => openPanel("notifications")}
+              >
+                🔔 {t("notif.title")}
+                <Show when={unreadNotifs() > 0}>
+                  <span class="notif-bell-badge">{unreadNotifs() > 99 ? "99+" : unreadNotifs()}</span>
+                </Show>
               </button>
               {/* Phase 24.D: removed + chat / + claude log buttons.
                   The two pane kinds + their backends are rolled back
@@ -2080,8 +2306,19 @@ function App() {
                     workspaceId={activeWs()!.id}
                     node={(() => {
                       const ws = activeWs()!;
+                      // Unshipped-fivefer (#4): prune panes that are popped out
+                      // into their own OS window so the grid reflows to fill
+                      // their slot. The pane_ids stay in ws.layout, so closing
+                      // the popout un-prunes and restores them in place. Fall
+                      // back to the full layout if EVERY pane is popped out
+                      // (sole-pane workspace) so we never render an empty grid.
+                      const hidden = poppedOut();
+                      const base =
+                        hidden.size > 0
+                          ? pruneLayout(ws.layout!, hidden) ?? ws.layout!
+                          : ws.layout!;
                       const max = maximizedPaneId();
-                      if (!max) return ws.layout!;
+                      if (!max) return base;
                       // Phase 55-A: when a pane is maximized, swap
                       // the tree for that one leaf so it fills the
                       // workspace area. Splits + the other panes are
@@ -2089,8 +2326,8 @@ function App() {
                       // straight back without re-creating any
                       // TerminalInstance (those are keyed by pane_id
                       // in the `terms` map, surviving the DOM detach).
-                      const node = findPane(ws.layout!, max);
-                      return node ?? ws.layout!;
+                      const node = findPane(base, max);
+                      return node ?? base;
                     })()}
                     activePaneId={activePaneId()}
                     connectedPaneIds={connectedPanes()}
@@ -2137,6 +2374,7 @@ function App() {
                     onConnect={(pid, opts) => connectPane(pid, opts)}
                     onSplit={splitPane}
                     onClose={closePane}
+                    onPopOut={popOutPane}
                     onDisconnect={disconnectPane}
                     onKillSession={killSession}
                     onSetTitle={(pid, title) => {
@@ -2181,6 +2419,64 @@ function App() {
       {/* Phase GG: in-app Markdown viewer (floating window). Reads its
           own global store, opened by FileManager .md double-click. */}
       <MarkdownViewer />
+
+      {/* Unified side-panel lifecycle (see panels.ts): Notifications + Files
+          each open docked as a drawer, then float out or expand to fullscreen.
+          One PanelSurface per panel drives all three surfaces. Monitor is the
+          InsightsWindow above; Diff + Browser follow on their own tracks. */}
+      <PanelSurface
+        surface={surfaceOf("notifications")}
+        icon="🔔"
+        title={t("notif.title")}
+        bodyClass="notif-body"
+        floatStorageKey="winmux.panel-notifications-geometry"
+        floatDefault={{ x: 220, y: 90, w: 440, h: 640 } satisfies Geometry}
+        floatMinW={320}
+        floatMinH={360}
+        onClose={() => closePanel("notifications")}
+        onDrawer={() => openPanel("notifications")}
+        onFloat={() => floatPanel("notifications")}
+        onFullscreen={() => expandPanel("notifications")}
+        headerActions={() => (
+          <NotifHeaderActions onMarkAllRead={markAllNotifRead} onClear={clearNotifs} />
+        )}
+        body={() => (
+          <NotificationCenter
+            items={notifications()}
+            readIds={notifRead()}
+            onClose={() => closePanel("notifications")}
+            onJump={(wsId) => void handleSetActive(wsId)}
+            onMarkRead={markNotifRead}
+          />
+        )}
+      />
+      <PanelSurface
+        surface={surfaceOf("files")}
+        icon="🗂"
+        title={t("files.window.title", { workspace: activeWs()?.name ?? "" })}
+        drawerWidth="min(1100px, 96vw)"
+        bodyClass="files-body"
+        floatStorageKey={`winmux.panel-files-geometry.${file().active_workspace_id ?? "none"}`}
+        floatDefault={{ x: 160, y: 100, w: 1100, h: 700 } satisfies Geometry}
+        floatMinW={600}
+        floatMinH={380}
+        onClose={() => closePanel("files")}
+        onDrawer={() => openPanel("files")}
+        onFloat={() => floatPanel("files")}
+        onFullscreen={() => expandPanel("files")}
+        body={() => {
+          const ws = activeWs();
+          return ws ? (
+            <FileManagerPane
+              workspaceId={ws.id}
+              hasSsh={ws.connection?.type === "ssh"}
+              hasActiveSession={liveWorkspaceIds().has(ws.id)}
+            />
+          ) : (
+            <></>
+          );
+        }}
+      />
 
       <CreateWorkspaceModal
         open={showCreate()}
@@ -2267,12 +2563,16 @@ function App() {
         />
       </Show>
 
-      {/* Phase 68.D: Server Insights monitor (floating window). */}
+      {/* Phase 68.D: Server Insights monitor. Round B: docks as a side
+          drawer by default; ⤢ pops it out into the floating window. */}
       <InsightsWindow
-        open={showInsights()}
+        surface={surfaceOf("monitor")}
         workspaceId={file().active_workspace_id ?? undefined}
         workspaceName={activeWs()?.name}
-        onClose={() => setShowInsights(false)}
+        onClose={() => closePanel("monitor")}
+        onDrawer={() => openPanel("monitor")}
+        onFloat={() => floatPanel("monitor")}
+        onFullscreen={() => expandPanel("monitor")}
         onInstall={() => {
           const ws = activeWs();
           if (ws) setAddonsWin({ id: ws.id, name: ws.name });
@@ -2351,20 +2651,6 @@ function App() {
           if (!id) return Promise.reject(new Error("no active workspace"));
           return startForward(id, remotePort);
         }}
-      />
-
-      {/* Phase 53 (rebased): floating workspace-level File Manager
-          window. Pure HTML chrome around the existing dual-column
-          FileManagerPane (local + remote SFTP). hasActiveSession
-          drives whether the remote column lights up. */}
-      <FileManagerWindow
-        open={showFilesWindow()}
-        workspace={activeWs()}
-        hasActiveSession={(() => {
-          const id = file().active_workspace_id;
-          return id ? liveWorkspaceIds().has(id) : false;
-        })()}
-        onClose={() => setShowFilesWindow(false)}
       />
 
       {/* Phase 58: voice-input recording indicator + error toast.

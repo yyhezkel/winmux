@@ -383,6 +383,8 @@
   "settings.terminal.rtl.off.desc": "WebGL renderer без reorder. Иврит выводится слева направо, как записано.",
   "settings.terminal.use_winmux_tmux_config.label": "Использовать конфиг tmux от winmux (рекомендуется)",
   "settings.terminal.use_winmux_tmux_config.hint": "Загружает tmux.conf в ~/.winmux/tmux.conf — колесо прокручивает scrollback (вместо истории shell), буфер на 50,000 строк, truecolour. Отключите, чтобы вернуться к собственному ~/.tmux.conf. Применяется при следующем подключении панели.",
+  "settings.terminal.auto_direction.label": "Авто-направление для каждой строки",
+  "settings.terminal.auto_direction.hint": "Строка с ивритом/арабским (в т.ч. смешанная) отображается справа налево; строка только из латиницы — слева направо. Применяется к режиму «авто по строкам».",
   "settings.terminal.mirror_arrows_rtl.label": "Зеркалить стрелки на RTL-строках",
   "settings.terminal.mirror_arrows_rtl.hint": "В строке на иврите/арабском физические стрелки влево/вправо двигают курсор в противоположную логическую сторону; это их зеркалит под то, что вы видите. Активно только на RTL-строках — английские строки не затрагиваются.",
   "settings.autoConnect.label": "Автоподключение при выборе среды",

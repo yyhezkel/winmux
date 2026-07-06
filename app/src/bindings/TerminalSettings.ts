@@ -27,4 +27,12 @@ use_winmux_tmux_config: boolean,
  * this the arrows feel inverted. Only takes effect on RTL lines —
  * LTR lines are unaffected — so it's safe to leave on (default true).
  */
-mirror_arrows_rtl: boolean, };
+mirror_arrows_rtl: boolean, 
+/**
+ * v0.4.4 (RTL Approach C): auto-flip each terminal line's paragraph
+ * direction from its text — a line with any Hebrew/Arabic char renders
+ * RTL (mixed or pure), a pure-Latin line renders LTR. Only affects the
+ * `auto_per_line` rtl_mode. Default true; set false for classic
+ * LTR-only terminal behaviour.
+ */
+auto_direction: boolean, };

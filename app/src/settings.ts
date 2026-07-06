@@ -3,7 +3,7 @@
 // this file is the typed mirror used by the frontend.
 
 import { invoke } from "@tauri-apps/api/core";
-import { setTerminalFont, setRtlMode, type RtlMode } from "./terminalInstance";
+import { setTerminalFont, setRtlMode, setAutoDirection, type RtlMode } from "./terminalInstance";
 
 export interface AnsiPalette {
   black: string;
@@ -61,6 +61,10 @@ export interface TerminalSettings {
   /** Phase HH: mirror Left/Right arrows on RTL (Hebrew/Arabic) lines.
    *  Only active when the cursor's line is RTL; default true. */
   mirror_arrows_rtl?: boolean;
+  /** v0.4.4 (RTL Approach C): auto-flip each terminal line's direction
+   *  (mixed/pure-Hebrew → RTL, pure-Latin → LTR). Only affects the
+   *  `auto_per_line` rtl_mode. Default true. */
+  auto_direction?: boolean;
 }
 
 export interface HooksSettings {
@@ -340,6 +344,8 @@ export function applyTheme(s: Settings): void {
   // per pane and only affects newly-opened terminals.
   const mode = (s.terminal.rtl_mode ?? "auto_per_line") as RtlMode;
   setRtlMode(mode);
+  // v0.4.4: per-line auto-direction escape hatch (default on).
+  setAutoDirection(s.terminal.auto_direction ?? true);
 
   // Phase font-bug-fix v2 (stretch): if a web font URL is configured,
   // inject a single <link rel="stylesheet"> tag so that font becomes

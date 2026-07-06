@@ -383,6 +383,8 @@
   "settings.terminal.rtl.off.desc": "WebGL renderer، بدون إعادة ترتيب. بايتات العبرية تُعرض من اليسار إلى اليمين كما تُكتب.",
   "settings.terminal.use_winmux_tmux_config.label": "استخدام إعدادات tmux الخاصة بـ winmux (مستحسن)",
   "settings.terminal.use_winmux_tmux_config.hint": "ينشر ملف tmux.conf إلى ~/.winmux/tmux.conf بحيث يقوم تمرير العجلة بالتمرير في الذاكرة المؤقتة بدلاً من سجل الصدفة، buffer بحجم 50,000 سطر، دعم truecolour. أوقف للعودة إلى ~/.tmux.conf الخاص بك. يسري عند الاتصال التالي للوحة.",
+  "settings.terminal.auto_direction.label": "اتجاه تلقائي لكل سطر",
+  "settings.terminal.auto_direction.hint": "السطر الذي يحتوي عبرية/عربية (بما في ذلك المختلط) يُعرض من اليمين إلى اليسار؛ والسطر اللاتيني الصِّرف من اليسار إلى اليمين. ينطبق على وضع \"تلقائي لكل سطر\".",
   "settings.terminal.mirror_arrows_rtl.label": "عكس مفاتيح الأسهم في الأسطر RTL",
   "settings.terminal.mirror_arrows_rtl.hint": "في سطر عربي/عبري يتحرك سهما اليسار/اليمين الفعليان في الاتجاه المنطقي المعاكس؛ هذا يعكسهما ليطابقا ما تراه. نشط فقط في أسطر RTL — أسطر الإنجليزية غير متأثرة.",
   "settings.autoConnect.label": "اتصال تلقائي عند تحديد بيئة العمل",

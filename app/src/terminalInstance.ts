@@ -31,6 +31,7 @@ const g_oscClipboardProvider: IClipboardProvider = {
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { reorderRtlForDisplay } from "./bidi";
+import { detectDirection } from "./textDirection";
 import { t } from "./i18n";
 
 // Phase 62.B (item J): parse a `file://` URI (as emitted in Claude Code's
@@ -159,6 +160,22 @@ export function getRtlMode(): RtlMode {
   return g_rtlMode;
 }
 
+// v0.4.4 (RTL Approach C): the per-line auto-direction escape hatch. When ON
+// (default), each terminal row in `auto_per_line` mode gets an explicit
+// `dir` computed by detectDirection (mixed→RTL, pure-Latin→LTR). When OFF,
+// rows fall back to plain `dir="ltr"` (classic terminal, no BiDi flipping).
+// Only meaningful in `auto_per_line` mode — the other RtlMode paths ignore it.
+let g_autoDirection = true;
+export function setAutoDirection(on: boolean): void {
+  if (g_autoDirection === on) return;
+  g_autoDirection = on;
+  // Re-run the direction pass on every live terminal so the change is live.
+  for (const ti of g_terminals) ti.applyRowDirections(true);
+}
+export function getAutoDirection(): boolean {
+  return g_autoDirection;
+}
+
 /** Phase 16: flip the Ctrl+C-copies-on-selection behavior at runtime. */
 export function setCtrlCCopyOnSelect(enabled: boolean): void {
   g_ctrlCCopyOnSelect = enabled;
@@ -169,15 +186,6 @@ export function setMirrorArrowsRtl(enabled: boolean): void {
   g_mirrorArrowsRtl = enabled;
 }
 
-/** Phase HH: is the string predominantly RTL (Hebrew/Arabic + related)?
- *  Counts strong-RTL vs Latin code points (matches the heuristic used by
- *  the dir="auto" per-line renderer). */
-function isRtlText(s: string): boolean {
-  const rtl = (s.match(/[֐-׿؀-ۿ܀-ࣿיִ-ﻼ]/g) || [])
-    .length;
-  const ltr = (s.match(/[A-Za-z]/g) || []).length;
-  return rtl > ltr;
-}
 
 /** Phase HH: swap a Left/Right cursor-key escape sequence to the other
  *  direction. Handles both normal (`\e[C`/`\e[D`) and application-cursor
@@ -340,6 +348,12 @@ export class TerminalInstance {
   private dataDisposable: IDisposable | null = null;
   private ro: ResizeObserver | null = null;
   private dirObserver: MutationObserver | null = null;
+  // v0.4.4 (RTL Approach C): rAF handle + per-row text cache for the
+  // per-line direction pass. The MutationObserver coalesces a burst of cell
+  // mutations into a single applyDir() per animation frame; the cache lets
+  // that pass skip any row whose text is unchanged since we last set its dir.
+  private dirRafId: number | null = null;
+  private dirCache: WeakMap<Element, string> = new WeakMap();
   // Phase 23.E: keep a handle to the WebGL addon so we can flush its
   // glyph atlas on resize. Without that, the GPU canvas keeps painting
   // the previous viewport's grid metrics — visible as "stuck" lines
@@ -597,11 +611,15 @@ export class TerminalInstance {
   }
 
   /**
-   * Attach `dir="auto"` to every row div under `.xterm-rows`, both the
-   * ones present now and any that appear later. xterm.js's DOM
-   * renderer recycles its row divs as the buffer scrolls, so we use a
-   * MutationObserver to keep up. This is what gives us Termius-style
-   * "first strong directional char wins per line".
+   * v0.4.4 (RTL Approach C): give every VISIBLE row div under `.xterm-rows`
+   * an explicit `dir` computed from its text by detectDirection (mixed→RTL,
+   * pure-Latin→LTR), instead of the old `dir="auto"` (which used the browser's
+   * "first strong char wins" rule and mis-rendered mixed lines starting with
+   * Latin). xterm.js's DOM renderer recycles its row divs as the buffer
+   * scrolls and rewrites their text in place, so a MutationObserver
+   * (childList + characterData) re-triggers the pass; it is coalesced to one
+   * run per animation frame and a per-row text cache skips unchanged rows.
+   * Only visible rows carry DOM nodes, so scrollback size is irrelevant.
    */
   ensureDirObserver(): void {
     // Only relevant in auto-per-line mode AND when we built with the
@@ -621,17 +639,46 @@ export class TerminalInstance {
       requestAnimationFrame(() => this.ensureDirObserver());
       return;
     }
-    rowsHost.setAttribute("dir", "auto");
-    const apply = () => {
-      for (const child of Array.from(rowsHost.children)) {
-        const el = child as HTMLElement;
-        if (el.getAttribute("dir") !== "auto") el.setAttribute("dir", "auto");
-      }
-    };
-    apply();
-    const obs = new MutationObserver(apply);
-    obs.observe(rowsHost, { childList: true, subtree: false });
+    // The rows host stays LTR so the grid geometry (column origin) is stable;
+    // only the per-row paragraph direction flips.
+    rowsHost.setAttribute("dir", "ltr");
+    this.applyRowDirections(true);
+    const obs = new MutationObserver(() => this.scheduleRowDirections());
+    obs.observe(rowsHost, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
     this.dirObserver = obs;
+  }
+
+  /** Coalesce a burst of row mutations into one direction pass per frame. */
+  private scheduleRowDirections(): void {
+    if (this.dirRafId != null) return;
+    this.dirRafId = requestAnimationFrame(() => {
+      this.dirRafId = null;
+      this.applyRowDirections(false);
+    });
+  }
+
+  /**
+   * Set `dir` on each visible row from its text. `force` recomputes every
+   * row (used on first attach and when the setting toggles); otherwise the
+   * per-row cache skips rows whose text is unchanged since the last pass.
+   */
+  applyRowDirections(force: boolean): void {
+    if (this.rtlModeAtConstruct !== "auto_per_line") return;
+    const rowsHost = this.container.querySelector(".xterm-rows") as HTMLElement | null;
+    if (!rowsHost) return;
+    const auto = g_autoDirection;
+    for (const child of rowsHost.children) {
+      const el = child as HTMLElement;
+      const text = el.textContent ?? "";
+      if (!force && this.dirCache.get(el) === text) continue;
+      this.dirCache.set(el, text);
+      const dir = auto ? detectDirection(text) : "ltr";
+      if (el.getAttribute("dir") !== dir) el.setAttribute("dir", dir);
+    }
   }
 
   attach(sessionId: string) {
@@ -672,7 +719,11 @@ export class TerminalInstance {
       const buf = this.term.buffer.active;
       const line = buf.getLine(buf.baseY + buf.cursorY);
       if (!line) return false;
-      return isRtlText(line.translateToString(true));
+      // v0.4.4: use the SAME rule as the per-line display direction
+      // (detectDirection) so the caret/arrow behavior matches what the user
+      // sees — a line rendered RTL also gets its Left/Right arrows mirrored.
+      // Candidate fix for the PARKED "RTL caret" item (verify live).
+      return detectDirection(line.translateToString(true)) === "rtl";
     } catch {
       return false;
     }
@@ -805,6 +856,12 @@ export class TerminalInstance {
     this.ro = null;
     this.dirObserver?.disconnect();
     this.dirObserver = null;
+    // v0.4.4: cancel a pending per-line direction pass so a freed terminal
+    // doesn't touch detached DOM after disposal.
+    if (this.dirRafId != null) {
+      cancelAnimationFrame(this.dirRafId);
+      this.dirRafId = null;
+    }
     this.detach();
     g_terminals.delete(this);
     // Phase 25: release the WebGL addon BEFORE term.dispose() so we

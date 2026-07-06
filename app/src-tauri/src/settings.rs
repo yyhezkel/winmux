@@ -200,6 +200,13 @@ pub(crate) struct TerminalSettings {
     /// LTR lines are unaffected — so it's safe to leave on (default true).
     #[serde(default = "default_true")]
     pub mirror_arrows_rtl: bool,
+    /// v0.4.4 (RTL Approach C): auto-flip each terminal line's paragraph
+    /// direction from its text — a line with any Hebrew/Arabic char renders
+    /// RTL (mixed or pure), a pure-Latin line renders LTR. Only affects the
+    /// `auto_per_line` rtl_mode. Default true; set false for classic
+    /// LTR-only terminal behaviour.
+    #[serde(default = "default_true")]
+    pub auto_direction: bool,
 }
 
 fn default_rtl_mode() -> String {
@@ -709,6 +716,7 @@ impl Default for TerminalSettings {
             rtl_mode: default_rtl_mode(),
             use_winmux_tmux_config: true,
             mirror_arrows_rtl: true,
+            auto_direction: true,
         }
     }
 }
@@ -732,7 +740,11 @@ impl Default for Notifications {
             toast_enabled: true,
             sound_enabled: false,
             toast_session_start: false,
-            toast_session_end: false,
+            // v0.4.4: SessionEnd ("session closed") is a rare, meaningful
+            // signal — default it ON so the user actually learns a session
+            // ended. (SessionStart stays OFF; that hook is no longer even
+            // registered.)
+            toast_session_end: true,
             toast_stop: true,
             toast_notification: true,
             toast_gate: true,

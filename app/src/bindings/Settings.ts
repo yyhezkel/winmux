@@ -87,8 +87,12 @@ floating_windows: FloatingWindows,
  * Phase 75: debug-log hygiene (retention). `#[serde(default)]` so older
  * settings.json files load with the built-in defaults.
  */
-logs: LogsSettings,
+logs: LogsSettings, 
 /**
- * Unshipped-fivefer (#3): persist workspace-browser sessions across restarts.
+ * Unshipped-fivefer (#3): keep workspace-browser cookies/logins across
+ * restarts. Backed by a single app-wide WebView2 profile folder (NOT a
+ * per-workspace `--user-data-dir` — that reintroduces the 0x8007139F
+ * crash). When false, the profile folder is wiped on the next launch.
+ * `default = true`.
  */
 persist_browser_sessions: boolean, };

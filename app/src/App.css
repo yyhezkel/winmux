@@ -1676,6 +1676,62 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .feed-x:hover { background: var(--w-surface-hi); color: var(--w-text); }
 .feed-verdict + .feed-x { margin-left: 0; }
 
+/* v0.4.4 (Change 3): feed toolbar + per-workspace grouping + session badge.
+   The panel itself is pointer-events:none (clicks fall through the gaps), so
+   every interactive child re-enables them. */
+.feed-toolbar {
+  pointer-events: auto;
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 2px 0;
+}
+.feed-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--w-fs-xs);
+  color: var(--w-text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.feed-filter-toggle input { accent-color: var(--w-accent); cursor: pointer; }
+.feed-group { display: flex; flex-direction: column; gap: 8px; }
+.feed-group-head {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--w-text-dim);
+  font-size: var(--w-fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  padding: 2px 2px;
+  cursor: pointer;
+}
+.feed-group-head:hover { color: var(--w-text); }
+.feed-group-caret { width: 10px; color: var(--w-text-faint); }
+.feed-group-emoji { text-transform: none; }
+.feed-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-group-count {
+  background: var(--w-border);
+  color: var(--w-text-dim);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: var(--w-fs-xs);
+}
+.feed-session {
+  font-size: var(--w-fs-xs);
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(122, 162, 247, 0.14);
+  color: var(--w-accent);
+  font-family: var(--w-font-mono);
+  letter-spacing: 0.3px;
+}
+
 .feed-title {
   color: var(--w-text);
   font-weight: 500;
@@ -3587,6 +3643,58 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 
 [dir="rtl"] .connect-menu { right: auto; left: 0; }
 
+/* v0.4.4 (Task 2): the unified "New connection…" entry sits at the top of the
+   Smart Connect menu, emphasised over the à-la-carte shortcuts below it. */
+.connect-menu button.connect-menu-primary {
+  font-family: inherit;
+  font-weight: 600;
+  color: var(--w-accent);
+}
+.connect-menu button.connect-menu-primary:hover {
+  background: rgba(122, 162, 247, 0.22);
+}
+
+/* v0.4.4 (Task 2): unified new-connection modal — directory + command. */
+.new-conn-modal { min-width: 380px; max-width: 460px; }
+.new-conn-section { margin: 12px 0; }
+.new-conn-label {
+  display: block;
+  font-size: var(--w-fs-xs);
+  color: var(--w-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.new-conn-dir-row { display: flex; gap: 8px; align-items: center; }
+.new-conn-dir-row input { flex: 1; }
+.new-conn-browse {
+  flex: 0 0 auto;
+  background: var(--w-surface-hi);
+  border: 1px solid var(--w-border-hi);
+  color: var(--w-text);
+  border-radius: var(--w-r-sm);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: var(--w-fs-sm);
+  white-space: nowrap;
+}
+.new-conn-browse:hover { border-color: var(--w-accent); color: var(--w-accent); }
+.new-conn-cmd-list { display: flex; flex-direction: column; gap: 2px; }
+.new-conn-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--w-r-sm);
+  cursor: pointer;
+  font-family: var(--w-font-mono);
+  font-size: var(--w-fs-md);
+}
+.new-conn-radio:hover { background: rgba(122, 162, 247, 0.12); }
+.new-conn-radio input { accent-color: var(--w-accent); cursor: pointer; }
+.new-conn-custom { margin-top: 6px; width: 100%; }
+
 /* smart-connect prompt */
 .smart-prompt {
   width: 460px;
@@ -5064,4 +5172,38 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 @keyframes stt-pulse {
   0%, 100% { opacity: 0.4; transform: scale(0.9); }
   50%      { opacity: 1;   transform: scale(1.15); }
+}
+
+/* v0.4.4 (Task 1): headless auto-connect indicator. A small floating pill,
+   centred at the top, shown only while a secondary panel arms the workspace's
+   SSH handle in the background (workspace_ensure_connected). */
+.connecting-pill {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--w-surface-hi);
+  border: 1px solid var(--w-border-hi);
+  color: var(--w-text);
+  font-size: var(--w-fs-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  animation: pop-in 0.14s ease-out;
+  pointer-events: none;
+}
+.connecting-pill-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--w-border-hi);
+  border-top-color: var(--w-accent);
+  animation: connecting-spin 0.7s linear infinite;
+}
+@keyframes connecting-spin {
+  to { transform: rotate(360deg); }
 }

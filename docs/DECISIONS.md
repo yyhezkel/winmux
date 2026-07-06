@@ -25,6 +25,13 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-07-06 — v0.4.4 UX wave (branch `ux-improvements-v0.4.4`, NOT merged to main)
+A cohort-feedback wave off main. **DONE + committed on the branch:** (1) Task 1 auto-connect on secondary panels (`dfe45b5`); (2) Task 2 unified new-connection picker (`b36e693`); (3) hook-debug.log verbosity cut to concise one-liners + `WINMUX_HOOK_VERBOSE=1` gate + Rule-#1 reason scrub (`94ba208`); (4) i18n for feed-card kind/subkind/state (`f399b6e`); (5) hook notifications — Stop "your turn" toast gated by window-focus, SessionEnd toast+duration default-ON, SessionStart+Notification dropped (CLI silent-ack + spec 1.1.0→1.2.0) (`350f670`); (6) feed cards show workspace name + session badge + per-ws grouping + "current workspace only" filter (`8ebcf24`). DEBUG exe rebuilt + live-tested each round.
+- **PENDING Yossi approval before implementing (all v0.4.4):**
+  - **RTL per-line direction — Approach C (recommended).** Replace `dir="auto"` per row (xterm.js "first strong char wins") with an explicit per-row `dir` computed from the row text: **any RTL char → `rtl` (pure-Hebrew OR mixed), else `ltr` (pure Latin/digits/punct)** — Yossi's rule (mixed→RTL, pure-Latin→LTR). Pure fn `lineDirection()` in `bidi.ts` (reuses `RTL_RE`) + unit tests; ~5 lines in `terminalInstance.ts` `ensureDirObserver`. DOM-renderer only (already forced in `auto_per_line`), copy-paste unaffected. Rejected: (A) Unicode BiDi controls — corrupts buffer/copy; (B) native xterm dir/bidi — confirmed absent from `ITerminalOptions`.
+  - **Mouse-escape leak on bare SSH shell (medium-high).** Symptom: `\e[<0;x;yM` (SGR) appears as literal text. **Root cause:** an app (vim `mouse=a`, fzf, less, htop) enabled mouse tracking (`\e[?1000h`/`?1006h`) and exited uncleanly (Ctrl+C / SSH drop / kill) without the disable seq → xterm.js keeps mouse reporting on → clicks in the bare shell send mouse seqs the shell renders as text. NOT tmux (bundled conf is `mouse off`) and NOT TERM (correctly `xterm-256color`). Note: `term.modes.mouseTrackingMode` exposes the live mode (enables a reactive watchdog if wanted). **Fix (Preventive, recommended):** on pane connect/attach, `term.write` the disable set `\e[?1000l\e[?1002l\e[?1003l\e[?1006l\e[?1015l\e[?9l` (safe — live apps re-assert on redraw) + a Command-Palette "Reset terminal" entry (disable set + `\e[0m`, optional `\ec`). Frontend only.
+- **Related PARKED:** RTL caret (2026-06-26, §II) — Approach C may fix it by aligning the cursor-arrow mirroring to the same `lineDirection()`; verify live, leave the mirror alone if it complicates.
+
 ### 2026-07-02 — Phase 77 S4.1 — huma migration DONE (autopilot S4→S5)
 Yossi authorized **autopilot through S4→S5** (report at milestones; no auto-merge to main; pause only on a product-blocking decision). **S4.1 complete.** The **client-SDK HTTP surface** — version/health + Files (5) + Logs (3) — is now **typed huma operations**; `/api/openapi.json` is **generated from the handlers** (OpenAPI 3.1) and the hand-authored spec is deleted. Emit via `winmux-server openapi` (nil providers, no server) — feeds the SDK pipeline + CI drift-guard. New `OpenAPISpec()` + `TestOpenAPISpecComplete` drift-guard. **Contract preserved byte-for-byte; all pre-existing tests pass unchanged** (kept each subsystem's `RegisterRoutes(mux,auth)` as a local-huma shim for its own tests; production uses `RegisterHuma(sharedAPI)`).
 - **Scope call (mine, documented):** **Insights excluded from the SDK spec** — desktop-internal Monitor API (dynamic metric/docker/process maps, consumed by the Rust desktop client via `insights_fetch`, never by a generated SDK). Kept on raw stdlib handlers, untouched → zero contract risk. SDK spec = exactly the client contract; Insights documented separately.
@@ -419,6 +426,20 @@ Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, wi
 ---
 
 ## Decided
+
+### 2026-07-06 — v0.4.4-beta.1 — desktop UX wave (cut off `ux-improvements-v0.4.4`)
+Public beta of a cohort-feedback UX wave. **8 changes, all on `ux-improvements-v0.4.4`, merged to main for the beta cut:**
+- **Auto-connect on secondary panels** (`dfe45b5`) — opening Monitor/Files/Browser/Ports in a disconnected SSH workspace headlessly arms the SSH handle first (idempotent, PTY/tmux-free) with a "מחבר…" pill; no more "no active SSH session".
+- **Unified new-connection picker** (`b36e693`) — one modal to pick directory + launch command (claude/--continue/--resume/--skip-permissions/plain/custom) together; existing-tmux attach stays a direct action. Connect-time, no persistence.
+- **hook-debug.log trimmed** (`94ba208`) — concise one-liners (REQ/ACK/auto-allow/passive), ~50-65% fewer lines; full trace behind `WINMUX_HOOK_VERBOSE=1`. Rule-#1: dropped the policy `reason` (can embed command text) from the static-fallback log lines.
+- **i18n hook feed-cards** (`f399b6e`) — kind/subkind/state codes translated en/he/ar/ru.
+- **Hook notifications** (`350f670`) — Stop → "your turn" toast **gated by window focus** (Stop fires per-turn; no toast while winmux is focused) + response_summary; SessionEnd → toast default-ON with elapsed duration; SessionStart + Notification **dropped** (CLI silent-ack, removed from bundled spec, BUNDLED_CLAUDE_VERSION 1.1.0→1.2.0).
+- **Feed grouping** (`8ebcf24`) — cards show workspace **name** + session badge, collapsible per-workspace groups + "current workspace only" filter.
+- **RTL per-line auto-direction — Approach C** (`521e116`) — each visible row gets an explicit `dir` from `detectDirection()` (any Hebrew/Arabic → RTL incl. mixed; pure-Latin → LTR), replacing xterm's "first strong char wins". Safeguards: 23 unit tests (`node:test`), visible-rows-only + rAF-coalesced + per-row cache, Settings escape-hatch `terminal.auto_direction` (default on, i18n ×4), `docs/RTL-TEST.md`. Also aligned the caret arrow-mirroring to the same rule (candidate fix for the PARKED "RTL caret", verify live).
+- **Version bump** to 0.4.4 (`703b105`) — app/cli/mcp/tauri.conf/package.json.
+- **Deferred to beta.2/next:** mouse-escape leak fix (design ready — Preventive reset-on-connect + Command-Palette "Reset terminal"). See the Open entry.
+- **manifest.json intentionally NOT bumped** — beta ships as a manual GitHub download; stable auto-updater users are not pushed the beta. Mobile APK not attached (release APK not yet built).
+- **CLI deploy note:** the hook-log + hook-notification changes are in the remote CLI (`winmux-linux-x64`, rebaked at 0.4.4) — they take effect on a remote only after the CLI is redeployed there.
 
 ### 2026-07-05 — v0.4.3 SHIPPED — Phase 77 mobile bridge + design pass + unshipped-fivefer
 Cut **v0.4.3** off `77-winmux-server` (merged into main). Contents:

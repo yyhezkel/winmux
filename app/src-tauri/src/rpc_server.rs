@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
@@ -257,19 +257,44 @@ fn humanize_notification(subkind: &str, payload: &Value, lang: &str) -> (String,
         .and_then(|c| c.as_str())
         .unwrap_or("");
     let msg = payload.get("message").and_then(|v| v.as_str()).unwrap_or("");
+    // v0.4.4: Stop carries `response_summary`; SessionEnd carries
+    // `session_duration_seconds` + `end_reason`.
+    let summary = payload
+        .get("response_summary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let dur_secs = payload
+        .get("session_duration_seconds")
+        .and_then(|v| v.as_u64());
     let he = lang == "he";
+    let fmt_dur = |secs: u64| -> String {
+        let m = secs / 60;
+        let s = secs % 60;
+        if m > 0 { format!("{m}m {s}s") } else { format!("{s}s") }
+    };
     match subkind {
         "session-start" => (
             "Claude".into(),
             if he { format!("סשן התחיל ב-{cwd}") } else { format!("Session started in {cwd}") },
         ),
         "session-end" => (
-            "Claude".into(),
-            if he { format!("סשן הסתיים — {cwd}") } else { format!("Session ended — {cwd}") },
+            if he { "🎯 Session נסגר".into() } else { "🎯 Session ended".into() },
+            match dur_secs {
+                Some(d) if he => format!("{cwd} · משך {}", fmt_dur(d)),
+                Some(d) => format!("{cwd} · {} elapsed", fmt_dur(d)),
+                None if he => format!("סשן הסתיים — {cwd}"),
+                None => format!("Session ended — {cwd}"),
+            },
         ),
         "stop" => (
-            "Claude".into(),
-            if he { format!("סיים משימה ב-{cwd}") } else { format!("Finished task in {cwd}") },
+            if he { "🎯 Claude סיים — התור שלך".into() } else { "🎯 Claude finished — your turn".into() },
+            if !summary.is_empty() {
+                clip(summary, 120)
+            } else if he {
+                format!("סיים ב-{cwd}")
+            } else {
+                format!("Finished in {cwd}")
+            },
         ),
         "notification" => (
             "Claude".into(),
@@ -1203,9 +1228,23 @@ async fn dispatch(
             {
                 let s = settings::load_from_disk().unwrap_or_default();
                 if hook_toast_enabled(&s.notifications, &subkind) {
-                    let (tt, tb) =
-                        humanize_notification(&subkind, &item.payload, &s.i18n.language);
-                    show_toast(&tt, &tb);
+                    // v0.4.4: `stop` fires at the END OF EVERY TURN, so a toast
+                    // per turn would be noise when the user is already watching
+                    // winmux (they see the feed card + sidebar highlight).
+                    // Suppress the stop toast when the main window is focused;
+                    // still toast when winmux is in the background ("your turn"
+                    // while you're doing something else). SessionEnd (rare)
+                    // always toasts.
+                    let suppress_stop = subkind == "stop"
+                        && app
+                            .get_webview_window("main")
+                            .and_then(|w| w.is_focused().ok())
+                            .unwrap_or(false);
+                    if !suppress_stop {
+                        let (tt, tb) =
+                            humanize_notification(&subkind, &item.payload, &s.i18n.language);
+                        show_toast(&tt, &tb);
+                    }
                 }
             }
 

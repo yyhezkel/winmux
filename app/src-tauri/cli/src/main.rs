@@ -1923,6 +1923,18 @@ async fn real_main() -> ExitCode {
                 }
             }
 
+            // v0.4.4: drop pure-noise passive hooks entirely. SessionStart and
+            // Notification are observability-only — they filled the feed and
+            // hook-debug.log without anyone acting on them (Notification in
+            // particular: the agent is driven by the main session, not by these
+            // alerts). Silent-ack with NO feed.push and NO log line. The
+            // meaningful lifecycle signals (Stop = "your turn", SessionEnd =
+            // "session closed") still dispatch below. errors/timeouts are on
+            // the pre-tool-use path and are unaffected.
+            if matches!(subcommand.as_str(), "session-start" | "notification") {
+                return ExitCode::SUCCESS;
+            }
+
             let blocking = matches!(subcommand.as_str(), "tool-permission" | "pre-tool-use");
             let kind = if blocking { "permission_request" } else { "passive" };
 

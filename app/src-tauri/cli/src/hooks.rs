@@ -88,7 +88,7 @@ pub struct HookEvent {
 /// `source=bundled` AND as the version recorded when no fetched spec
 /// was applied. Bump whenever you ship a new hook in a release with a
 /// matching `hooks/claude-code.json` change.
-const BUNDLED_CLAUDE_VERSION: &str = "1.1.0";
+const BUNDLED_CLAUDE_VERSION: &str = "1.2.0";
 
 /// The bundled fallback spec for Claude Code. Mirrors what
 /// `hooks/claude-code.json` carries at the same `winmux_hooks_version`
@@ -104,9 +104,13 @@ fn bundled_claude_spec() -> HookSpec {
             command: "${WINMUX_BIN} claude-hook pre-tool-use".into(),
         },
     );
+    // v0.4.4: no longer register Notification / SessionStart — they were
+    // observability-only noise (the agent is driven by the main session, not
+    // by these alerts). Only the actionable lifecycle signals remain: Stop
+    // ("your turn") and SessionEnd ("session closed"). Any stale settings.json
+    // that still calls `claude-hook notification|session-start` is silent-acked
+    // by the CLI, so dropping them here is safe on already-set-up machines.
     for (ev, sub) in [
-        ("Notification", "notification"),
-        ("SessionStart", "session-start"),
         ("SessionEnd", "session-end"),
         ("Stop", "stop"),
     ] {

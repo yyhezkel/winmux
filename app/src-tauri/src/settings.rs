@@ -732,7 +732,11 @@ impl Default for Notifications {
             toast_enabled: true,
             sound_enabled: false,
             toast_session_start: false,
-            toast_session_end: false,
+            // v0.4.4: SessionEnd ("session closed") is a rare, meaningful
+            // signal — default it ON so the user actually learns a session
+            // ended. (SessionStart stays OFF; that hook is no longer even
+            // registered.)
+            toast_session_end: true,
             toast_stop: true,
             toast_notification: true,
             toast_gate: true,

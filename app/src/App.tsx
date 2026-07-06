@@ -2843,6 +2843,8 @@ function App() {
 
       <FeedPanel
         items={feedItems()}
+        workspaces={file().workspaces}
+        activeWorkspaceId={activeWs()?.id ?? null}
         onDecide={(rid, dec) => {
           // Optimistic local update — backend event will reaffirm.
           setFeedItems((prev) =>

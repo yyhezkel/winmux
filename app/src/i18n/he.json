@@ -202,6 +202,8 @@
   "feed.state.denied": "נדחה",
   "feed.state.timedout": "פג תוקף",
   "feed.state.passive": "מידע",
+  "feed.filter.currentWs": "רק הסביבה הנוכחית",
+  "feed.group.unknown": "כללי",
   "notes.title": "הערות",
   "notes.placeholder": "רעיון, באג או todo… Ctrl+Enter לשמור.",
   "notes.btn.close": "סגור",

@@ -202,6 +202,8 @@
   "feed.state.denied": "مرفوض",
   "feed.state.timedout": "انتهت المهلة",
   "feed.state.passive": "معلومة",
+  "feed.filter.currentWs": "مساحة العمل الحالية فقط",
+  "feed.group.unknown": "أخرى",
   "notes.title": "الملاحظات",
   "notes.placeholder": "فكرة، خطأ أو todo… Ctrl+Enter للحفظ.",
   "notes.btn.close": "إغلاق",

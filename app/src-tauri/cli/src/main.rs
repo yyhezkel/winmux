@@ -47,6 +47,29 @@ fn hook_dlog(msg: &str) {
     }
 }
 
+/// v0.4.4: deep-debug gate for the hook logger. The default hook path now
+/// writes only concise one-line summaries (REQ/ACK/auto-allow/passive) to
+/// keep hook-debug.log readable — a normal 4-minute Claude pipeline used to
+/// spew ~4 lines PER tool call (BEGIN + branch + dispatch + rpc-ok). Set
+/// `WINMUX_HOOK_VERBOSE=1` (or true/yes) in the pane's environment to restore
+/// the full per-branch trace for diagnosing matcher / permission-mode issues.
+fn hook_verbose() -> bool {
+    matches!(
+        std::env::var("WINMUX_HOOK_VERBOSE").ok().as_deref(),
+        Some("1") | Some("true") | Some("yes")
+    )
+}
+
+/// Verbose-only variant of [`hook_dlog`]: writes the full trace line ONLY when
+/// `WINMUX_HOOK_VERBOSE` is set. Interesting/rare events (denials, timeouts,
+/// static fallbacks, RPC errors) stay on `hook_dlog` so they always land.
+/// Like `hook_dlog`, callers pass metadata only — never PTY / prompt content.
+fn hook_vlog(msg: &str) {
+    if hook_verbose() {
+        hook_dlog(msg);
+    }
+}
+
 /// Phase 66 (66.D.1): the CLI's own copy of the permission policy, used
 /// ONLY when the desktop is unreachable. The historical failure mode was
 /// that hook calls never reached the desktop, the blocking request timed
@@ -1814,7 +1837,7 @@ async fn real_main() -> ExitCode {
                 .as_object()
                 .map(|m| m.keys().map(|s| s.as_str()).collect())
                 .unwrap_or_default();
-            hook_dlog(&format!(
+            hook_vlog(&format!(
                 "claude-hook BEGIN subcommand={subcommand} \
                  pane_id={pane_id_log} tool_name={tool_name_log} \
                  permission_mode={perm_mode_log} session_id={session_id_log} \
@@ -1835,7 +1858,7 @@ async fn real_main() -> ExitCode {
             // reason the hooks were hated. If winmux isn't involved there's no
             // policy to apply, so get out of the way and let Claude run.
             if std::env::var("WINMUX_PANE_ID").is_err() {
-                hook_dlog(&format!(
+                hook_vlog(&format!(
                     "claude-hook BRANCH=env-gate (WINMUX_PANE_ID unset) \
                      decision=allow-or-noop subcommand={subcommand}"
                 ));
@@ -1875,10 +1898,10 @@ async fn real_main() -> ExitCode {
                     permission_mode,
                     "acceptEdits" | "bypassPermissions" | "skip"
                 ) {
+                    // v0.4.4: expected path (agent runs with its own
+                    // permission mode) — one concise line, not two.
                     hook_dlog(&format!(
-                        "claude-hook BRANCH=permission_mode-shortcircuit \
-                         permission_mode={permission_mode} \
-                         decision=allow tool_name={tool_name_log}"
+                        "auto-allow tool={tool_name_log} mode={permission_mode} session={session_id_log}"
                     ));
                     let out = json!({
                         "hookSpecificOutput": {
@@ -1892,7 +1915,7 @@ async fn real_main() -> ExitCode {
                     println!("{}", serde_json::to_string(&out).unwrap_or_default());
                     return ExitCode::SUCCESS;
                 } else {
-                    hook_dlog(&format!(
+                    hook_vlog(&format!(
                         "claude-hook BRANCH=permission_mode-passthrough \
                          permission_mode={permission_mode} tool_name={tool_name_log} \
                          (will dispatch to winmux card)"
@@ -1926,7 +1949,22 @@ async fn real_main() -> ExitCode {
             // The same data is already captured server-side via the feed.push
             // RPC and shows up in `winmux dev debug-log-tail`.
 
-            hook_dlog(&format!(
+            // v0.4.4: concise always-on summary — one line per request.
+            // Blocking permission requests get a REQ line (paired with the
+            // ACK line at rpc-ok); passive lifecycle hooks (stop / session-*
+            // / notification) get a single line and nothing more.
+            if blocking {
+                hook_dlog(&format!(
+                    "REQ {subcommand} tool={tool_name_log} pane={pane_id_log} \
+                     req_id={request_id} mode={perm_mode_log}"
+                ));
+            } else {
+                hook_dlog(&format!(
+                    "{subcommand} pane={pane_id_log} session={session_id_log} \
+                     req_id={request_id}"
+                ));
+            }
+            hook_vlog(&format!(
                 "claude-hook BRANCH=dispatch kind={kind} blocking={blocking} \
                  subcommand={subcommand} request_id={request_id} \
                  timeout_secs={timeout_secs}"
@@ -1949,9 +1987,12 @@ async fn real_main() -> ExitCode {
             // — the exact stall that wedged Claude historically.
             if subcommand == "pre-tool-use" && !tunnel_healthy().await {
                 let (decision, reason) = static_fallback_decision(&payload);
+                // Rule #1: `reason` can embed a truncated segment of the tool
+                // command (winmux_policy) — never write it to the log file.
+                // Metadata only. (It still goes to Claude via print below.)
                 hook_dlog(&format!(
-                    "claude-hook BRANCH=static-fallback-healthcheck \
-                     decision={decision} request_id={request_id} reason={reason:?}"
+                    "static-fallback decision={decision} req_id={request_id} \
+                     (desktop unreachable)"
                 ));
                 print_pre_tool_use(decision, Some(&reason));
                 return ExitCode::SUCCESS;
@@ -1990,7 +2031,15 @@ async fn real_main() -> ExitCode {
                         .get("decision")
                         .and_then(|x| x.as_str())
                         .unwrap_or("unknown");
-                    hook_dlog(&format!(
+                    // v0.4.4: concise ACK line for blocking requests (pairs
+                    // with the REQ line). Passive hooks already logged their
+                    // single line at dispatch — no ACK for them. The decision
+                    // (allow/deny/timeout) is captured here; the full branch
+                    // trace is verbose-only.
+                    if blocking {
+                        hook_dlog(&format!("ACK {decision} req_id={request_id}"));
+                    }
+                    hook_vlog(&format!(
                         "claude-hook BRANCH=rpc-ok decision={decision} \
                          subcommand={subcommand} request_id={request_id}"
                     ));
@@ -2082,10 +2131,11 @@ async fn real_main() -> ExitCode {
                             // CLI's static policy so Claude keeps moving on
                             // safe defaults rather than denying everything.
                             let (decision, reason) = static_fallback_decision(&payload);
+                            // Rule #1: never log `reason` (can embed command
+                            // text). Metadata only — the error kind is safe.
                             hook_dlog(&format!(
-                                "claude-hook BRANCH=static-fallback-rpc-error \
-                                 decision={decision} request_id={request_id} \
-                                 reason={reason:?} error={e}"
+                                "static-fallback decision={decision} req_id={request_id} \
+                                 error={e}"
                             ));
                             print_pre_tool_use(decision, Some(&reason));
                             return ExitCode::SUCCESS;

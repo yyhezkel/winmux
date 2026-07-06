@@ -427,6 +427,20 @@ Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, wi
 
 ## Decided
 
+### 2026-07-06 — v0.4.4-beta.1 — desktop UX wave (cut off `ux-improvements-v0.4.4`)
+Public beta of a cohort-feedback UX wave. **8 changes, all on `ux-improvements-v0.4.4`, merged to main for the beta cut:**
+- **Auto-connect on secondary panels** (`dfe45b5`) — opening Monitor/Files/Browser/Ports in a disconnected SSH workspace headlessly arms the SSH handle first (idempotent, PTY/tmux-free) with a "מחבר…" pill; no more "no active SSH session".
+- **Unified new-connection picker** (`b36e693`) — one modal to pick directory + launch command (claude/--continue/--resume/--skip-permissions/plain/custom) together; existing-tmux attach stays a direct action. Connect-time, no persistence.
+- **hook-debug.log trimmed** (`94ba208`) — concise one-liners (REQ/ACK/auto-allow/passive), ~50-65% fewer lines; full trace behind `WINMUX_HOOK_VERBOSE=1`. Rule-#1: dropped the policy `reason` (can embed command text) from the static-fallback log lines.
+- **i18n hook feed-cards** (`f399b6e`) — kind/subkind/state codes translated en/he/ar/ru.
+- **Hook notifications** (`350f670`) — Stop → "your turn" toast **gated by window focus** (Stop fires per-turn; no toast while winmux is focused) + response_summary; SessionEnd → toast default-ON with elapsed duration; SessionStart + Notification **dropped** (CLI silent-ack, removed from bundled spec, BUNDLED_CLAUDE_VERSION 1.1.0→1.2.0).
+- **Feed grouping** (`8ebcf24`) — cards show workspace **name** + session badge, collapsible per-workspace groups + "current workspace only" filter.
+- **RTL per-line auto-direction — Approach C** (`521e116`) — each visible row gets an explicit `dir` from `detectDirection()` (any Hebrew/Arabic → RTL incl. mixed; pure-Latin → LTR), replacing xterm's "first strong char wins". Safeguards: 23 unit tests (`node:test`), visible-rows-only + rAF-coalesced + per-row cache, Settings escape-hatch `terminal.auto_direction` (default on, i18n ×4), `docs/RTL-TEST.md`. Also aligned the caret arrow-mirroring to the same rule (candidate fix for the PARKED "RTL caret", verify live).
+- **Version bump** to 0.4.4 (`703b105`) — app/cli/mcp/tauri.conf/package.json.
+- **Deferred to beta.2/next:** mouse-escape leak fix (design ready — Preventive reset-on-connect + Command-Palette "Reset terminal"). See the Open entry.
+- **manifest.json intentionally NOT bumped** — beta ships as a manual GitHub download; stable auto-updater users are not pushed the beta. Mobile APK not attached (release APK not yet built).
+- **CLI deploy note:** the hook-log + hook-notification changes are in the remote CLI (`winmux-linux-x64`, rebaked at 0.4.4) — they take effect on a remote only after the CLI is redeployed there.
+
 ### 2026-07-05 — v0.4.3 SHIPPED — Phase 77 mobile bridge + design pass + unshipped-fivefer
 Cut **v0.4.3** off `77-winmux-server` (merged into main). Contents:
 - **Native self-hosted push** (no Firebase/APNs): device holds a long-lived WS

@@ -9,7 +9,22 @@ interface Props {
   onDismiss: (request_id: string) => void;
 }
 
+// v0.4.4 (i18n): the card's kind / subkind / state were rendered as raw
+// English codes ("pre-tool-use", "denied"). Translate them, falling back to
+// the raw code for any value without a key (t() returns the key itself on a
+// miss, so key-equality detects that).
+function tr(key: string, raw: string): string {
+  const v = t(key);
+  return v === key ? raw : v;
+}
+
 export function FeedPanel(p: Props) {
+  const subkindLabel = (item: FeedItem): string =>
+    item.subkind
+      ? tr(`feed.subkind.${item.subkind}`, item.subkind)
+      : tr(`feed.kind.${item.kind}`, item.kind);
+  const stateLabel = (item: FeedItem): string =>
+    tr(`feed.state.${item.state}`, item.state);
   return (
     <Show when={p.items.length > 0}>
       <div class="feed-panel">
@@ -20,11 +35,11 @@ export function FeedPanel(p: Props) {
             >
               <div class="feed-head">
                 <span class={`feed-kind feed-kind-${item.kind}`}>
-                  {item.subkind || item.kind}
+                  {subkindLabel(item)}
                 </span>
                 <Show when={item.state !== "pending"}>
                   <span class={`feed-verdict feed-verdict-${item.state}`}>
-                    {item.state}
+                    {stateLabel(item)}
                   </span>
                 </Show>
                 <button

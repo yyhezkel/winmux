@@ -3679,6 +3679,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: rgba(0, 0, 0, 0.55);
   animation: backdrop-in 120ms ease-out;
 }
+.nc-modal-sm { min-width: min(420px, 92vw) !important; max-width: 520px !important; }
 .nc-modal {
   display: flex;
   flex-direction: column;
@@ -3724,6 +3725,7 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   margin-bottom: 8px;
 }
 .nc-req { color: var(--w-error); }
+.nc-optional { color: var(--w-text-faint); font-size: var(--w-fs-xs); font-weight: 400; }
 .nc-hint { margin: 6px 2px 0; font-size: var(--w-fs-xs); color: var(--w-text-faint); }
 /* segmented control */
 .nc-segmented { display: flex; gap: 6px; }

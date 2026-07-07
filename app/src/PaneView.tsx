@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid
 import { Portal } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { Connection, LayoutNode } from "./types";
+import type { Connection, LayoutNode, TmuxSessionInfo } from "./types";
 import { describeConnection, effectiveIdentity } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
 import { t } from "./i18n";
@@ -226,6 +226,14 @@ export function PaneView(p: Props) {
   const [ncFilter, setNcFilter] = createSignal<NcFilter>("user");
   const [ncPickedSession, setNcPickedSession] = createSignal<ClaudeSessionInfo | null>(null);
   const ncShowsList = (): boolean => ncCmd() === "from-list";
+  // v0.4.4-beta.2: SMART [Connect] flow. Clicking Connect first arms the SSH
+  // handle headlessly, probes for live tmux sessions, and — if any exist — pops
+  // a small picker so the user can RE-ATTACH to one or open a plain terminal.
+  // If none exist (or the workspace can't connect headlessly, e.g. password
+  // auth) it falls straight through to a regular shell. Reconnect-to-open-tmux
+  // lives here, not in the wizard, so the common case is one click.
+  const [connectProbing, setConnectProbing] = createSignal(false);
+  const [tmuxPick, setTmuxPick] = createSignal<TmuxSessionInfo[] | null>(null);
   const fmtSessionAge = (mt: number): string => {
     if (!mt) return "—";
     const sec = Math.max(1, Math.floor(Date.now() / 1000 - mt));
@@ -397,10 +405,10 @@ export function PaneView(p: Props) {
     setNcSessionsErr(null);
     setNewConnModal(true);
   };
-  // Validation: directory required; custom needs text; "choose from list"
-  // needs a session pick. --resume/--continue are plain runs (no pick).
+  // Validation: directory is OPTIONAL (empty = the user's $HOME root, the
+  // backend default — fill it only to run elsewhere). custom needs text;
+  // "choose from list" needs a session pick. --resume/--continue are plain runs.
   const newConnValid = (): boolean => {
-    if (!ncDir().trim()) return false;
     if (ncCmd() === "custom" && !ncCustom().trim()) return false;
     if (ncCmd() === "from-list" && !ncPickedSession()) return false;
     return true;
@@ -419,6 +427,36 @@ export function PaneView(p: Props) {
       void loadNcSessions();
     }
   });
+  // v0.4.4-beta.2: SMART [Connect]. Arm SSH headlessly → probe tmux → branch:
+  // live sessions → picker; otherwise a plain regular shell. Local (non-SSH)
+  // workspaces have no tmux, so they connect straight away.
+  const smartConnect = async () => {
+    if (!isSsh()) { p.onConnect(p.pane.pane_id, { persistent: false }); return; }
+    setConnectProbing(true);
+    try {
+      // Idempotent, PTY-free, tmux-free; no-ops on password-auth (can't prompt
+      // headlessly) — those simply yield an empty list and connect regular.
+      try { await invoke("workspace_ensure_connected", { workspaceId: p.workspaceId }); } catch { /* fall through */ }
+      let list: TmuxSessionInfo[] = [];
+      try {
+        list = await invoke<TmuxSessionInfo[]>("pane_list_tmux_sessions", { workspaceId: p.workspaceId });
+      } catch { list = []; }
+      if (list.length > 0) {
+        setTmuxPick(list);
+      } else {
+        p.onConnect(p.pane.pane_id, { persistent: false });
+      }
+    } finally {
+      setConnectProbing(false);
+    }
+  };
+  // Attach to a chosen live tmux session (persistent + name; inject nothing —
+  // its shell is already running), or open a plain regular shell.
+  const pickTmuxSession = (name: string | null) => {
+    setTmuxPick(null);
+    if (name) p.onConnect(p.pane.pane_id, { persistent: true, tmuxSession: name });
+    else p.onConnect(p.pane.pane_id, { persistent: false });
+  };
   // Translate the modal's choices into a single ConnectOpts and connect.
   const submitNewConn = () => {
     if (!newConnValid()) return;
@@ -434,7 +472,10 @@ export function PaneView(p: Props) {
     // path (so resume lands where the session was created), if absolute.
     let dir = ncDir().trim();
     if (picked && picked.project_path?.startsWith("/")) dir = picked.project_path;
-    opts.cwdOverride = dir;
+    // Empty stays empty: no cwdOverride → the backend lands in the user's $HOME
+    // root (default). Only send an override when the user actually typed a path
+    // (or a picked session supplied its project dir).
+    if (dir) opts.cwdOverride = dir;
     if (c === "plain") {
       // Bare shell — inject nothing; mode stays undefined so the persistent
       // flag alone decides tmux vs regular.
@@ -1069,16 +1110,17 @@ export function PaneView(p: Props) {
                 p.pendingPasswordFor !== p.pane.pane_id
               }
             >
-              {/* v0.4.4-beta.2: two buttons only — [Connect] does a plain
-                  regular SSH shell (no tmux, no command); [Connection wizard]
-                  opens the unified wizard (type / directory / command / resume
-                  list). Everything the old caret menu offered now lives in the
-                  wizard. */}
+              {/* v0.4.4-beta.2: two buttons only — [Connect] probes for live
+                  tmux sessions first (arms SSH headlessly, then lists): if any
+                  exist it pops a picker to re-attach or open a plain shell;
+                  otherwise it connects a regular shell straight away.
+                  [Connection wizard] opens the unified wizard (type / directory
+                  / command / resume list). */}
               <div class="connect-buttons">
-                <button class="primary big" onClick={() => p.onConnect(p.pane.pane_id, { persistent: false })}>
-                  {t("common.connect")}
+                <button class="primary big" onClick={() => void smartConnect()} disabled={connectProbing()}>
+                  {connectProbing() ? t("connect.probing") : t("common.connect")}
                 </button>
-                <button class="big nc-wizard-btn" onClick={openNewConnModal}>
+                <button class="big nc-wizard-btn" onClick={openNewConnModal} disabled={connectProbing()}>
                   {t("connect.openWizard")}
                 </button>
               </div>
@@ -1126,6 +1168,46 @@ export function PaneView(p: Props) {
             </div>
           </div>
         </div>
+      </Show>
+
+      {/* v0.4.4-beta.2: SMART [Connect] tmux picker — appears only when the
+          headless probe found live tmux sessions. Re-attach to one, or open a
+          plain regular shell. Portal so it stacks above panels/feed. */}
+      <Show when={tmuxPick()}>
+        <Portal>
+          <div class="modal-backdrop nc-backdrop" onClick={() => setTmuxPick(null)}>
+            <div class="nc-modal nc-modal-sm" role="dialog" aria-modal="true"
+              onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+              <div class="nc-head">
+                <h3>{t("connect.tmuxPick.title")}</h3>
+                <button class="feed-x" title={t("common.close")} onClick={() => setTmuxPick(null)}>×</button>
+              </div>
+              <div class="nc-body">
+                <p class="nc-hint">{t("connect.tmuxPick.hint")}</p>
+                <div class="nc-resume-list">
+                  <For each={tmuxPick()!}>
+                    {(s) => (
+                      <div class="nc-resume-row" onClick={() => pickTmuxSession(s.name)} title={s.name}>
+                        <div class="nc-resume-head">
+                          <span class="nc-resume-proj">🖥 {s.name}</span>
+                          <span class="nc-resume-badge">{s.windows}w</span>
+                          <Show when={s.attached}>
+                            <span class="nc-resume-badge">{t("connect.newConn.tmuxAttached")}</span>
+                          </Show>
+                          <span class="nc-resume-age">{fmtSessionAge(s.last_attached || s.created)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+              <div class="nc-footer">
+                <button onClick={() => pickTmuxSession(null)}>💻 {t("connect.tmuxPick.regular")}</button>
+                <button onClick={() => setTmuxPick(null)}>{t("common.cancel")}</button>
+              </div>
+            </div>
+          </div>
+        </Portal>
       </Show>
 
       {/* v0.4.4-beta.2 (Task 2 polish): unified new-connection wizard —
@@ -1196,10 +1278,11 @@ export function PaneView(p: Props) {
                     </p>
                   </div>
 
-                  {/* 2. Directory (required) */}
+                  {/* 2. Directory (optional — empty = the user's $HOME root) */}
                   <div class="nc-section">
                     <label class="nc-label">
-                      {t("connect.newConn.directory")} <span class="nc-req">*</span>
+                      {t("connect.newConn.directory")}{" "}
+                      <span class="nc-optional">{t("connect.newConn.dirDefault")}</span>
                     </label>
                     <div class="nc-dir-row">
                       <input

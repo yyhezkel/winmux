@@ -94,6 +94,24 @@ let g_mirrorArrowsRtl = true;
 let g_loggedNoWheelProxy = false;
 const g_terminals: Set<TerminalInstance> = new Set();
 
+// v0.4.4-beta.2: mouse-tracking leak recovery. When a full-screen app
+// (vim `mouse=a`, fzf, less, htop) enables SGR/X10 mouse tracking and then
+// exits UNCLEANLY (Ctrl+C, SSH drop, kill), it never sends the disable
+// sequence, so xterm.js keeps mouse reporting on — every later click in the
+// bare shell sends `\e[<0;x;yM` (SGR 1006) which the shell prints as literal
+// text. Writing these DECRST sequences to xterm (NOT the PTY) clears xterm's
+// mouse state so it stops emitting mouse events. Covers X10 (1000),
+// button-event (1002), any-event (1003), SGR (1006), urxvt (1015), and X10
+// hilite (9). Rule #1: this is a fixed control string, never PTY content.
+const MOUSE_DISABLE_SEQ =
+  "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?9l";
+/** v0.4.4-beta.2: when true (default) each pane clears stale mouse-tracking
+ *  state on connect/attach. Settings → Terminal. */
+let g_autoResetOnConnect = true;
+export function setAutoResetOnConnect(on: boolean): void {
+  g_autoResetOnConnect = on;
+}
+
 /**
  * Push a new font family + size into every live xterm and remember the
  * values so future TerminalInstance constructions inherit them. Family
@@ -709,6 +727,33 @@ export class TerminalInstance {
     // current dimensions immediately, even on a reconnect where
     // xterm.js's cols/rows happen to match the previous session.
     this.fitAndResize(true);
+    // v0.4.4-beta.2: clear any stale mouse-tracking state inherited from a
+    // previous session on this instance (a reconnect where an app left SGR
+    // mouse mode on). Fresh instances start clean; this is the reconnect
+    // safety net. Gated by the Settings toggle.
+    if (g_autoResetOnConnect) this.resetMouseModes();
+  }
+
+  /** v0.4.4-beta.2: tell xterm.js to disable every mouse-tracking mode.
+   *  Writes DECRST sequences to the DISPLAY (not the PTY), so xterm stops
+   *  emitting mouse events even if the app that turned them on is gone. */
+  resetMouseModes(): void {
+    try {
+      this.term.write(MOUSE_DISABLE_SEQ);
+    } catch (e) {
+      console.warn("resetMouseModes failed", e);
+    }
+  }
+
+  /** v0.4.4-beta.2: manual "Reset terminal" — disable mouse tracking +
+   *  reset text attributes (SGR). Used by the Ctrl+Alt+R command. Does NOT
+   *  clear the screen/scrollback (no RIS), so it's safe to run any time. */
+  resetTerminal(): void {
+    try {
+      this.term.write(MOUSE_DISABLE_SEQ + "\x1b[0m");
+    } catch (e) {
+      console.warn("resetTerminal failed", e);
+    }
   }
 
   /** Phase HH: is the terminal line under the cursor predominantly RTL?

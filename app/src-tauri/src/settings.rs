@@ -207,6 +207,12 @@ pub(crate) struct TerminalSettings {
     /// LTR-only terminal behaviour.
     #[serde(default = "default_true")]
     pub auto_direction: bool,
+    /// v0.4.4-beta.2: on connect/attach, clear stale mouse-tracking modes an
+    /// unclean app exit (vim/fzf/less/htop killed) can leave on — which makes
+    /// the bare shell print `\e[<..M` mouse escapes as text. Default true; a
+    /// manual "Reset terminal" (Ctrl+Alt+R) is always available regardless.
+    #[serde(default = "default_true")]
+    pub auto_reset_on_connect: bool,
 }
 
 fn default_rtl_mode() -> String {
@@ -717,6 +723,7 @@ impl Default for TerminalSettings {
             use_winmux_tmux_config: true,
             mirror_arrows_rtl: true,
             auto_direction: true,
+            auto_reset_on_connect: true,
         }
     }
 }

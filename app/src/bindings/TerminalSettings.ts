@@ -35,4 +35,11 @@ mirror_arrows_rtl: boolean,
  * `auto_per_line` rtl_mode. Default true; set false for classic
  * LTR-only terminal behaviour.
  */
-auto_direction: boolean, };
+auto_direction: boolean, 
+/**
+ * v0.4.4-beta.2: on connect/attach, clear stale mouse-tracking modes an
+ * unclean app exit (vim/fzf/less/htop killed) can leave on — which makes
+ * the bare shell print `\e[<..M` mouse escapes as text. Default true; a
+ * manual "Reset terminal" (Ctrl+Alt+R) is always available regardless.
+ */
+auto_reset_on_connect: boolean, };

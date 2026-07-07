@@ -3,7 +3,7 @@
 // this file is the typed mirror used by the frontend.
 
 import { invoke } from "@tauri-apps/api/core";
-import { setTerminalFont, setRtlMode, setAutoDirection, type RtlMode } from "./terminalInstance";
+import { setTerminalFont, setRtlMode, setAutoDirection, setAutoResetOnConnect, type RtlMode } from "./terminalInstance";
 
 export interface AnsiPalette {
   black: string;
@@ -65,6 +65,10 @@ export interface TerminalSettings {
    *  (mixed/pure-Hebrew → RTL, pure-Latin → LTR). Only affects the
    *  `auto_per_line` rtl_mode. Default true. */
   auto_direction?: boolean;
+  /** v0.4.4-beta.2: clear stale mouse-tracking modes on connect (fixes the
+   *  `\e[<..M` mouse-escape leak from an unclean vim/fzf/less exit).
+   *  Default true. */
+  auto_reset_on_connect?: boolean;
 }
 
 export interface HooksSettings {
@@ -346,6 +350,8 @@ export function applyTheme(s: Settings): void {
   setRtlMode(mode);
   // v0.4.4: per-line auto-direction escape hatch (default on).
   setAutoDirection(s.terminal.auto_direction ?? true);
+  // v0.4.4-beta.2: clear stale mouse-tracking modes on connect (default on).
+  setAutoResetOnConnect(s.terminal.auto_reset_on_connect ?? true);
 
   // Phase font-bug-fix v2 (stretch): if a web font URL is configured,
   // inject a single <link rel="stylesheet"> tag so that font becomes

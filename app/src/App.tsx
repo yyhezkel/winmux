@@ -728,6 +728,7 @@ function App() {
       { id: "pane.rename", label: t("cmd.pane.rename"), enabled: () => hasPane, handler: () => { if (pid) window.dispatchEvent(new CustomEvent("winmux:pane-rename", { detail: pid })); } },
       { id: "ssh.connect", label: t("cmd.ssh.connect"), enabled: () => hasPane, handler: () => { if (pid) void connectPane(pid); } },
       { id: "ssh.disconnect", label: t("cmd.ssh.disconnect"), enabled: () => hasPane, handler: () => { if (pid) void disconnectPane(pid); } },
+      { id: "pane.reset", label: t("cmd.reset_terminal"), enabled: () => hasPane, handler: () => { if (pid) terms.get(pid)?.resetTerminal(); } },
       { id: "ssh.provision", label: t("cmd.ssh.provision"), handler: () => setShowProvision(true) },
       { id: "insights.monitor", label: t("cmd.insights.monitor"), enabled: () => hasWs, handler: () => void openPanelConnected("monitor") },
       { id: "settings.open", label: t("cmd.settings.open"), handler: () => setShowSettings(true) },
@@ -1468,6 +1469,15 @@ function App() {
     if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && keyEq(e, "z")) {
       e.preventDefault();
       toggleMaximize();
+      return;
+    }
+    // v0.4.4-beta.2: Ctrl+Alt+R resets the active terminal — clears leaked
+    // mouse-tracking modes (the `\e[<..M` escape-text leak from an unclean
+    // vim/fzf/less exit) + text attributes. Not a common shell binding.
+    if (e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && keyEq(e, "r")) {
+      e.preventDefault();
+      const pid = activePaneId();
+      if (pid) terms.get(pid)?.resetTerminal();
       return;
     }
     // Phase 16: configurable shortcuts. The static Ctrl+Shift+D / E /

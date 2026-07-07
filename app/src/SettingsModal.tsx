@@ -535,6 +535,17 @@ export function SettingsModal(p: Props) {
                     />
                     <span>{t("settings.terminal.mirror_arrows_rtl.label")}</span>
                   </label>
+                  <label class="settings-checkbox" style="margin-top:8px">
+                    <input
+                      type="checkbox"
+                      checked={p.settings.terminal.auto_reset_on_connect ?? true}
+                      onChange={(e) => update("terminal", { ...p.settings.terminal, auto_reset_on_connect: e.currentTarget.checked })}
+                    />
+                    <span>{t("settings.terminal.auto_reset_on_connect.label")}</span>
+                  </label>
+                  <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
+                    {t("settings.terminal.auto_reset_on_connect.hint")}
+                  </p>
                   <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
                     {t("settings.terminal.mirror_arrows_rtl.hint")}
                   </p>

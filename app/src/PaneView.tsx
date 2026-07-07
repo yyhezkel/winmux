@@ -1,4 +1,5 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Connection, LayoutNode } from "./types";
@@ -274,7 +275,12 @@ export function PaneView(p: Props) {
     | "claude-resume"
     | "claude-skip"
     | "custom";
+  // v0.4.4-beta.2: connection type is the FIRST step — "regular" = SSH → bare
+  // shell; "tmux" = SSH → tmux new-session. Maps to the `persistent` flag
+  // (regular=false, tmux=true); the command choice is orthogonal.
+  type NcType = "regular" | "tmux";
   const [newConnModal, setNewConnModal] = createSignal(false);
+  const [ncType, setNcType] = createSignal<NcType>("tmux");
   const [ncDir, setNcDir] = createSignal("");
   const [ncCmd, setNcCmd] = createSignal<NcCmd>("claude");
   const [ncCustom, setNcCustom] = createSignal("");
@@ -436,10 +442,17 @@ export function PaneView(p: Props) {
   };
   // v0.4.4 (Task 2): open the unified new-connection modal with defaults.
   const openNewConnModal = () => {
+    setNcType("tmux");
     setNcDir("");
     setNcCmd("claude");
     setNcCustom("");
     setNewConnModal(true);
+  };
+  // Validation: a directory is required; a "custom" command needs its text.
+  const newConnValid = (): boolean => {
+    if (!ncDir().trim()) return false;
+    if (ncCmd() === "custom" && !ncCustom().trim()) return false;
+    return true;
   };
   // Browse for a remote directory from within the new-connection modal.
   const browseNewConnDir = () => {
@@ -449,17 +462,21 @@ export function PaneView(p: Props) {
   };
   // Translate the modal's choices into a single ConnectOpts and connect.
   const submitNewConn = () => {
-    const dir = ncDir().trim();
+    if (!newConnValid()) return;
     const opts: ConnectOpts = {};
-    if (dir) opts.cwdOverride = dir;
+    // Connection type → persistent flag (tmux=true, regular=false). We do NOT
+    // use mode="tmux"/"plain" here: those force the persistence, which would
+    // fight the toggle (e.g. a bare-shell command inside a tmux session). The
+    // backend's effective_persistent honors the flag when mode isn't tmux/plain.
+    opts.persistent = ncType() === "tmux";
+    opts.cwdOverride = ncDir().trim();
     const c = ncCmd();
     if (c === "plain") {
-      opts.mode = "plain";
+      // Bare shell — inject nothing; mode stays undefined so the persistent
+      // flag alone decides tmux vs regular.
     } else if (c === "custom") {
-      const cmd = ncCustom().trim();
-      if (!cmd) return; // custom requires a command
       opts.mode = "cmd";
-      opts.cmd = cmd;
+      opts.cmd = ncCustom().trim();
     } else {
       opts.mode = "claude";
       if (c === "claude-continue") opts.claudeArgs = "--continue";
@@ -1205,86 +1222,132 @@ export function PaneView(p: Props) {
         </div>
       </Show>
 
-      {/* v0.4.4 (Task 2): unified new-connection modal — pick a directory AND
-          a launch command together, then connect. Connect-time only, nothing
-          persisted. */}
+      {/* v0.4.4-beta.2 (Task 2 polish): unified new-connection wizard —
+          connection type + directory + command in one modal. Rendered through
+          a Portal onto <body> so its own high z-index stacks above the
+          sidebar / panels / feed regardless of the pane's local stacking. */}
       <Show when={newConnModal()}>
-        <div class="modal-backdrop" onClick={() => setNewConnModal(false)}>
+        <Portal>
           <div
-            class="modal new-conn-modal"
-            onClick={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
+            class="nc-backdrop"
+            onClick={() => setNewConnModal(false)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setNewConnModal(false);
+            }}
           >
-            <div class="settings-head">
-              <h3>{t("connect.newConn.title")}</h3>
-              <button class="feed-x" title={t("common.close")} onClick={() => setNewConnModal(false)}>×</button>
-            </div>
-
-            <div class="new-conn-section">
-              <label class="new-conn-label">{t("connect.newConn.directory")}</label>
-              <div class="new-conn-dir-row">
-                <input
-                  class="pane-meta-title"
-                  placeholder={t("connect.newConn.dirDefault")}
-                  value={ncDir()}
-                  onInput={(e) => setNcDir(e.currentTarget.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") submitNewConn(); }}
-                />
-                <Show when={isSsh()}>
-                  <button class="new-conn-browse" onClick={browseNewConnDir}>
-                    {t("connect.newConn.browse")}
-                  </button>
-                </Show>
+            <div
+              class="nc-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label={t("connect.newConn.title")}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") { e.stopPropagation(); setNewConnModal(false); }
+                // Enter submits, except while typing in the custom-command field.
+                if (
+                  e.key === "Enter" &&
+                  (e.target as HTMLElement)?.tagName !== "SELECT"
+                ) {
+                  e.preventDefault();
+                  submitNewConn();
+                }
+              }}
+            >
+              <div class="nc-head">
+                <h3>{t("connect.newConn.title")}</h3>
+                <button class="feed-x" title={t("common.close")} onClick={() => setNewConnModal(false)}>×</button>
               </div>
-            </div>
 
-            <div class="new-conn-section">
-              <label class="new-conn-label">{t("connect.newConn.command")}</label>
-              <div class="new-conn-cmd-list">
-                <For each={[
-                  { v: "claude", label: "claude" },
-                  { v: "claude-continue", label: "claude --continue" },
-                  { v: "claude-resume", label: "claude --resume" },
-                  { v: "claude-skip", label: "claude --dangerously-skip-permissions" },
-                  { v: "plain", label: t("connect.plainShell") },
-                  { v: "custom", label: t("connect.newConn.custom") },
-                ] as { v: NcCmd; label: string }[]}>
-                  {(opt) => (
-                    <label class="new-conn-radio">
-                      <input
-                        type="radio"
-                        name="nc-cmd"
-                        checked={ncCmd() === opt.v}
-                        onChange={() => setNcCmd(opt.v)}
-                      />
-                      <span>{opt.label}</span>
-                    </label>
-                  )}
-                </For>
-                <Show when={ncCmd() === "custom"}>
-                  <input
-                    class="pane-meta-title new-conn-custom"
-                    placeholder="npm run dev"
-                    value={ncCustom()}
-                    onInput={(e) => setNcCustom(e.currentTarget.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") submitNewConn(); }}
-                  />
-                </Show>
+              <div class="nc-body">
+                {/* 1. Connection type */}
+                <div class="nc-section">
+                  <label class="nc-label">{t("connect.newConn.type")}</label>
+                  <div class="nc-segmented" role="tablist">
+                    <button
+                      role="tab"
+                      aria-selected={ncType() === "regular"}
+                      class={`nc-seg ${ncType() === "regular" ? "active" : ""}`}
+                      onClick={() => setNcType("regular")}
+                    >
+                      💻 {t("connect.newConn.typeRegular")}
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={ncType() === "tmux"}
+                      class={`nc-seg ${ncType() === "tmux" ? "active" : ""}`}
+                      onClick={() => setNcType("tmux")}
+                    >
+                      🖥 {t("connect.newConn.typeTmux")}
+                    </button>
+                  </div>
+                  <p class="nc-hint">
+                    {ncType() === "tmux"
+                      ? t("connect.newConn.typeTmux.hint")
+                      : t("connect.newConn.typeRegular.hint")}
+                  </p>
+                </div>
+
+                {/* 2. Directory (required) */}
+                <div class="nc-section">
+                  <label class="nc-label">
+                    {t("connect.newConn.directory")} <span class="nc-req">*</span>
+                  </label>
+                  <div class="nc-dir-row">
+                    <input
+                      class="nc-input"
+                      autofocus
+                      placeholder="/home/user/project"
+                      value={ncDir()}
+                      onInput={(e) => setNcDir(e.currentTarget.value)}
+                    />
+                    <Show when={isSsh()}>
+                      <button class="nc-browse" onClick={browseNewConnDir}>
+                        {t("connect.newConn.browse")}
+                      </button>
+                    </Show>
+                  </div>
+                </div>
+
+                {/* 3. Command (dropdown; custom field only when chosen) */}
+                <div class="nc-section">
+                  <label class="nc-label">{t("connect.newConn.command")}</label>
+                  <select
+                    class="nc-select"
+                    value={ncCmd()}
+                    onChange={(e) => setNcCmd(e.currentTarget.value as NcCmd)}
+                  >
+                    <option value="claude">🤖 claude</option>
+                    <option value="claude-continue">🤖 claude --continue</option>
+                    <option value="claude-resume">🤖 claude --resume</option>
+                    <option value="claude-skip">⚠️ claude --dangerously-skip-permissions</option>
+                    <option value="plain">🐚 {t("connect.plainShell")}</option>
+                    <option value="custom">✏️ {t("connect.newConn.custom")}</option>
+                  </select>
+                  <Show when={ncCmd() === "custom"}>
+                    <input
+                      class="nc-input nc-custom"
+                      placeholder="npm run dev"
+                      value={ncCustom()}
+                      onInput={(e) => setNcCustom(e.currentTarget.value)}
+                    />
+                  </Show>
+                </div>
               </div>
-            </div>
 
-            <div class="modal-buttons">
-              <button onClick={() => setNewConnModal(false)}>{t("common.cancel")}</button>
-              <button
-                class="primary"
-                disabled={ncCmd() === "custom" && !ncCustom().trim()}
-                onClick={submitNewConn}
-              >
-                {t("common.connect")}
-              </button>
+              <div class="nc-footer">
+                <button class="nc-btn" onClick={() => setNewConnModal(false)}>{t("common.cancel")}</button>
+                <button
+                  class="nc-btn primary"
+                  disabled={!newConnValid()}
+                  onClick={submitNewConn}
+                >
+                  {t("common.connect")}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </Portal>
       </Show>
 
       {/* Phase 65 (bug AA): remote folder picker for "Open in directory". */}

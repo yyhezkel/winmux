@@ -4724,6 +4724,11 @@ pub(crate) struct ClaudeSessionInfo {
     /// Last assistant message preview (best-effort).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_assistant: Option<String>,
+    /// v0.4.4-beta.2: true when the transcript is a sub-agent (Task) sidechain
+    /// (`"isSidechain":true` in the JSONL) rather than a main user session.
+    /// Drives the Main/Sub/All filter in the resume picker. Defaults false.
+    #[serde(default)]
+    pub is_subagent: bool,
 }
 
 /// Phase 12.B: list recent Claude Code sessions on the workspace's host.
@@ -4758,11 +4763,12 @@ async fn pane_list_claude_sessions(
            cwd=$(head -50 \"$path\" 2>/dev/null | \
              grep -m1 -oE '\"cwd\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | \
              sed -E 's/.*:[[:space:]]*\"([^\"]*)\".*/\\1/'); \
+           sub=$(grep -qm1 '\"isSidechain\"[[:space:]]*:[[:space:]]*true' \"$path\" 2>/dev/null && echo 1 || echo 0); \
            first_user=$(head -100 \"$path\" 2>/dev/null | \
              grep -m1 -E '\"role\"\\s*:\\s*\"user\"' | head -c 600); \
            last_asst=$(tail -200 \"$path\" 2>/dev/null | \
              grep -E '\"role\"\\s*:\\s*\"assistant\"' | tail -1 | head -c 600); \
-           printf '%s\\t%s\\t%s\\t%s\\t%s\\n' \"$mt\" \"$path\" \"$cwd\" \"$first_user\" \"$last_asst\"; \
+           printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$mt\" \"$path\" \"$cwd\" \"$sub\" \"$first_user\" \"$last_asst\"; \
          done",
         limit
     );
@@ -4806,7 +4812,7 @@ async fn pane_list_claude_sessions(
         // project_path from the on-disk dir name, which Claude encodes by
         // replacing `/` with `-` (`-home-runner-tax`); resuming with that
         // produced `cd '-home-runner-tax'` → `cd: -h: invalid option`.
-        let parts: Vec<&str> = line.splitn(5, '\t').collect();
+        let parts: Vec<&str> = line.splitn(6, '\t').collect();
         if parts.len() < 2 {
             continue;
         }
@@ -4817,8 +4823,9 @@ async fn pane_list_claude_sessions(
             .unwrap_or(0);
         let path = parts[1].to_string();
         let cwd_field = parts.get(2).map(|s| s.trim()).filter(|s| !s.is_empty());
-        let last_user = parts.get(3).map(|s| extract_text_field(s));
-        let last_asst = parts.get(4).map(|s| extract_text_field(s));
+        let is_subagent = parts.get(3).map(|s| s.trim() == "1").unwrap_or(false);
+        let last_user = parts.get(4).map(|s| extract_text_field(s));
+        let last_asst = parts.get(5).map(|s| extract_text_field(s));
         let session_id = std::path::Path::new(&path)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -4842,6 +4849,7 @@ async fn pane_list_claude_sessions(
             mtime_unix: mtime,
             last_user: last_user.filter(|s| !s.is_empty()),
             last_assistant: last_asst.filter(|s| !s.is_empty()),
+            is_subagent,
         });
     }
     Ok(out)
@@ -4896,6 +4904,7 @@ fn list_claude_sessions_local(limit: usize) -> Result<Vec<ClaudeSessionInfo>, St
             mtime_unix: mtime,
             last_user: None,
             last_assistant: None,
+            is_subagent: false,
         });
     }
     Ok(out)

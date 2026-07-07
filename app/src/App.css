@@ -3800,6 +3800,90 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   .nc-modal { min-width: 0; max-width: 100%; }
 }
 
+/* v0.4.4-beta.2: inline resume list + folder browser inside the wizard. */
+.nc-muted { color: var(--w-text-dim); font-size: var(--w-fs-sm); padding: 8px 2px; }
+.nc-muted.err { color: var(--w-error); }
+.nc-resume-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.nc-search { flex: 1; }
+.nc-filter { flex: 0 0 auto; }
+.nc-filter .nc-seg { padding: 6px 10px; font-size: var(--w-fs-sm); }
+.nc-resume-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--w-border);
+  border-radius: var(--w-r-sm);
+  background: var(--w-bg);
+}
+.nc-resume-row {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--w-border);
+  cursor: pointer;
+}
+.nc-resume-row:last-child { border-bottom: none; }
+.nc-resume-row:hover { background: rgba(122, 162, 247, 0.10); }
+.nc-resume-row.picked { background: rgba(122, 162, 247, 0.18); box-shadow: inset 2px 0 0 var(--w-accent); }
+.nc-resume-head { display: flex; align-items: center; gap: 8px; }
+.nc-resume-id { color: var(--w-accent); font-family: var(--w-font-mono); font-size: var(--w-fs-sm); }
+.nc-resume-badge {
+  font-size: var(--w-fs-xs);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--w-border);
+  color: var(--w-text-dim);
+}
+.nc-resume-proj { flex: 1; color: var(--w-text-dim); font-size: var(--w-fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nc-resume-age { color: var(--w-text-faint); font-size: var(--w-fs-xs); }
+.nc-resume-prev {
+  margin-top: 3px;
+  color: var(--w-text-faint);
+  font-size: var(--w-fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nc-browse-path {
+  font-family: var(--w-font-mono);
+  font-size: var(--w-fs-sm);
+  color: var(--w-text-dim);
+  padding: 6px 2px;
+  word-break: break-all;
+}
+.nc-recent { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.nc-recent-row {
+  background: var(--w-surface-hi);
+  border: 1px solid var(--w-border-hi);
+  color: var(--w-text-dim);
+  border-radius: var(--w-r-sm);
+  padding: 3px 8px;
+  font-size: var(--w-fs-xs);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nc-recent-row:hover { color: var(--w-accent); border-color: var(--w-accent); }
+.nc-dir-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--w-border);
+  border-radius: var(--w-r-sm);
+  background: var(--w-bg);
+}
+.nc-dir-item {
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: var(--w-fs-md);
+  border-bottom: 1px solid var(--w-border);
+}
+.nc-dir-item:last-child { border-bottom: none; }
+.nc-dir-item:hover { background: rgba(122, 162, 247, 0.12); }
+.nc-dir-item.up { color: var(--w-text-dim); }
+.nc-dir-empty { padding: 10px; color: var(--w-text-faint); font-size: var(--w-fs-sm); }
+
 /* smart-connect prompt */
 .smart-prompt {
   width: 460px;

@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -15,6 +15,7 @@ interface ClaudeSessionInfo {
   mtime_unix: number;
   last_user?: string | null;
   last_assistant?: string | null;
+  is_subagent: boolean;
 }
 
 export type ConnectOpts = {
@@ -280,10 +281,63 @@ export function PaneView(p: Props) {
   // (regular=false, tmux=true); the command choice is orthogonal.
   type NcType = "regular" | "tmux";
   const [newConnModal, setNewConnModal] = createSignal(false);
+  // v0.4.4-beta.2: the modal is a single shell with swappable views; the
+  // header/footer/dimensions stay constant, only the body changes.
+  type NcView = "form" | "browse";
+  const [ncView, setNcView] = createSignal<NcView>("form");
   const [ncType, setNcType] = createSignal<NcType>("tmux");
   const [ncDir, setNcDir] = createSignal("");
   const [ncCmd, setNcCmd] = createSignal<NcCmd>("claude");
   const [ncCustom, setNcCustom] = createSignal("");
+  // v0.4.4-beta.2: inline Claude-session resume list (shown when the command
+  // is --resume / --continue). Filtered Main / Sub / All (sub = Task sidechain).
+  type NcFilter = "main" | "sub" | "all";
+  const [ncSessions, setNcSessions] = createSignal<ClaudeSessionInfo[]>([]);
+  const [ncSessionsLoading, setNcSessionsLoading] = createSignal(false);
+  const [ncSessionsErr, setNcSessionsErr] = createSignal<string | null>(null);
+  const [ncSearch, setNcSearch] = createSignal("");
+  const [ncFilter, setNcFilter] = createSignal<NcFilter>("main");
+  const [ncPickedSession, setNcPickedSession] = createSignal<ClaudeSessionInfo | null>(null);
+  const ncWantsResume = (): boolean =>
+    ncCmd() === "claude-resume" || ncCmd() === "claude-continue";
+  const fmtSessionAge = (mt: number): string => {
+    if (!mt) return "—";
+    const sec = Math.max(1, Math.floor(Date.now() / 1000 - mt));
+    if (sec < 60) return `${sec}s`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+    return `${Math.floor(sec / 86400)}d`;
+  };
+  const loadNcSessions = async () => {
+    setNcSessionsLoading(true);
+    setNcSessionsErr(null);
+    try {
+      const list = await invoke<ClaudeSessionInfo[]>("pane_list_claude_sessions", {
+        workspaceId: p.workspaceId,
+        limit: 40,
+      });
+      setNcSessions(list);
+    } catch (e) {
+      setNcSessionsErr(String(e));
+    } finally {
+      setNcSessionsLoading(false);
+    }
+  };
+  const ncFilteredSessions = (): ClaudeSessionInfo[] => {
+    const q = ncSearch().trim().toLowerCase();
+    const f = ncFilter();
+    return ncSessions().filter((s) => {
+      if (f === "main" && s.is_subagent) return false;
+      if (f === "sub" && !s.is_subagent) return false;
+      if (!q) return true;
+      return (
+        s.session_id.toLowerCase().includes(q) ||
+        (s.project_path ?? "").toLowerCase().includes(q) ||
+        (s.last_user ?? "").toLowerCase().includes(q) ||
+        (s.last_assistant ?? "").toLowerCase().includes(q)
+      );
+    });
+  };
   // When true, the folder picker returns its choice into the new-connection
   // modal (ncDir) instead of connecting immediately.
   const [dirPickForNewConn, setDirPickForNewConn] = createSignal(false);
@@ -421,15 +475,22 @@ export function PaneView(p: Props) {
   const chooseDir = (dir: string) => {
     pushRecentDir(dir);
     setDirPicker(null);
-    // v0.4.4 (Task 2): when the picker was opened from the new-connection
-    // modal, feed the choice back into it rather than connecting.
+    // v0.4.4-beta.2: the browser is now an inline VIEW of the new-connection
+    // modal — feed the choice into ncDir and switch back to the form view
+    // (the modal itself never closed).
     if (dirPickForNewConn()) {
       setDirPickForNewConn(false);
       setNcDir(dir);
-      setNewConnModal(true);
+      setNcView("form");
       return;
     }
     p.onConnect(p.pane.pane_id, { cwdOverride: dir });
+  };
+  // v0.4.4-beta.2: cancel the inline browser → back to the form (keep ncDir).
+  const cancelBrowse = () => {
+    setDirPicker(null);
+    setDirPickForNewConn(false);
+    setNcView("form");
   };
   // v0.4.4 (Task 2): close the folder picker; if it was serving the
   // new-connection modal, reopen that modal (keeping the previous ncDir).
@@ -440,26 +501,41 @@ export function PaneView(p: Props) {
       setNewConnModal(true);
     }
   };
-  // v0.4.4 (Task 2): open the unified new-connection modal with defaults.
+  // v0.4.4-beta.2: open the unified new-connection modal with defaults.
   const openNewConnModal = () => {
+    setNcView("form");
     setNcType("tmux");
     setNcDir("");
     setNcCmd("claude");
     setNcCustom("");
+    setNcSearch("");
+    setNcFilter("main");
+    setNcPickedSession(null);
+    setNcSessions([]);
+    setNcSessionsErr(null);
     setNewConnModal(true);
   };
-  // Validation: a directory is required; a "custom" command needs its text.
+  // Validation: directory required; custom needs text; --resume needs a pick.
   const newConnValid = (): boolean => {
     if (!ncDir().trim()) return false;
     if (ncCmd() === "custom" && !ncCustom().trim()) return false;
+    if (ncCmd() === "claude-resume" && !ncPickedSession()) return false;
     return true;
   };
-  // Browse for a remote directory from within the new-connection modal.
+  // v0.4.4-beta.2: browse is now an INLINE view within the same modal (not a
+  // separate popup). Load the tree into dirPicker() and switch the body.
   const browseNewConnDir = () => {
-    setNewConnModal(false);
     setDirPickForNewConn(true);
+    setNcView("browse");
     void openDirPicker();
   };
+  // v0.4.4-beta.2: auto-load the Claude session list when a resume command is
+  // chosen while the modal is open (once; refresh via the list's ⟳).
+  createEffect(() => {
+    if (newConnModal() && ncWantsResume() && ncSessions().length === 0 && !ncSessionsLoading()) {
+      void loadNcSessions();
+    }
+  });
   // Translate the modal's choices into a single ConnectOpts and connect.
   const submitNewConn = () => {
     if (!newConnValid()) return;
@@ -469,8 +545,13 @@ export function PaneView(p: Props) {
     // fight the toggle (e.g. a bare-shell command inside a tmux session). The
     // backend's effective_persistent honors the flag when mode isn't tmux/plain.
     opts.persistent = ncType() === "tmux";
-    opts.cwdOverride = ncDir().trim();
     const c = ncCmd();
+    const picked = ncPickedSession();
+    // A picked resume session overrides the directory with its own project
+    // path (so resume lands where the session was created), if absolute.
+    let dir = ncDir().trim();
+    if (picked && picked.project_path?.startsWith("/")) dir = picked.project_path;
+    opts.cwdOverride = dir;
     if (c === "plain") {
       // Bare shell — inject nothing; mode stays undefined so the persistent
       // flag alone decides tmux vs regular.
@@ -479,7 +560,8 @@ export function PaneView(p: Props) {
       opts.cmd = ncCustom().trim();
     } else {
       opts.mode = "claude";
-      if (c === "claude-continue") opts.claudeArgs = "--continue";
+      if (picked) opts.claudeArgs = `--resume ${picked.session_id}`;
+      else if (c === "claude-continue") opts.claudeArgs = "--continue";
       else if (c === "claude-resume") opts.claudeArgs = "--resume";
       else if (c === "claude-skip") opts.claudeArgs = "--dangerously-skip-permissions";
     }
@@ -1260,90 +1342,203 @@ export function PaneView(p: Props) {
               </div>
 
               <div class="nc-body">
-                {/* 1. Connection type */}
-                <div class="nc-section">
-                  <label class="nc-label">{t("connect.newConn.type")}</label>
-                  <div class="nc-segmented" role="tablist">
-                    <button
-                      role="tab"
-                      aria-selected={ncType() === "regular"}
-                      class={`nc-seg ${ncType() === "regular" ? "active" : ""}`}
-                      onClick={() => setNcType("regular")}
-                    >
-                      💻 {t("connect.newConn.typeRegular")}
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={ncType() === "tmux"}
-                      class={`nc-seg ${ncType() === "tmux" ? "active" : ""}`}
-                      onClick={() => setNcType("tmux")}
-                    >
-                      🖥 {t("connect.newConn.typeTmux")}
-                    </button>
-                  </div>
-                  <p class="nc-hint">
-                    {ncType() === "tmux"
-                      ? t("connect.newConn.typeTmux.hint")
-                      : t("connect.newConn.typeRegular.hint")}
-                  </p>
-                </div>
-
-                {/* 2. Directory (required) */}
-                <div class="nc-section">
-                  <label class="nc-label">
-                    {t("connect.newConn.directory")} <span class="nc-req">*</span>
-                  </label>
-                  <div class="nc-dir-row">
-                    <input
-                      class="nc-input"
-                      autofocus
-                      placeholder="/home/user/project"
-                      value={ncDir()}
-                      onInput={(e) => setNcDir(e.currentTarget.value)}
-                    />
-                    <Show when={isSsh()}>
-                      <button class="nc-browse" onClick={browseNewConnDir}>
-                        {t("connect.newConn.browse")}
+                {/* ── FORM view ─────────────────────────────────────── */}
+                <Show when={ncView() === "form"}>
+                  {/* 1. Connection type (Regular | TMUX) */}
+                  <div class="nc-section">
+                    <label class="nc-label">{t("connect.newConn.type")}</label>
+                    <div class="nc-segmented" role="tablist">
+                      <button
+                        role="tab"
+                        aria-selected={ncType() === "regular"}
+                        class={`nc-seg ${ncType() === "regular" ? "active" : ""}`}
+                        onClick={() => setNcType("regular")}
+                      >
+                        💻 {t("connect.newConn.typeRegular")}
                       </button>
+                      <button
+                        role="tab"
+                        aria-selected={ncType() === "tmux"}
+                        class={`nc-seg ${ncType() === "tmux" ? "active" : ""}`}
+                        onClick={() => setNcType("tmux")}
+                      >
+                        🖥 {t("connect.newConn.typeTmux")}
+                      </button>
+                    </div>
+                    <p class="nc-hint">
+                      {ncType() === "tmux"
+                        ? t("connect.newConn.typeTmux.hint")
+                        : t("connect.newConn.typeRegular.hint")}
+                    </p>
+                  </div>
+
+                  {/* 2. Directory (required) */}
+                  <div class="nc-section">
+                    <label class="nc-label">
+                      {t("connect.newConn.directory")} <span class="nc-req">*</span>
+                    </label>
+                    <div class="nc-dir-row">
+                      <input
+                        class="nc-input"
+                        autofocus
+                        placeholder="/home/user/project"
+                        value={ncDir()}
+                        onInput={(e) => setNcDir(e.currentTarget.value)}
+                      />
+                      <Show when={isSsh()}>
+                        <button class="nc-browse" onClick={browseNewConnDir}>
+                          {t("connect.newConn.browse")}
+                        </button>
+                      </Show>
+                    </div>
+                  </div>
+
+                  {/* 3. Command (dropdown; custom field only when chosen) */}
+                  <div class="nc-section">
+                    <label class="nc-label">{t("connect.newConn.command")}</label>
+                    <select
+                      class="nc-select"
+                      value={ncCmd()}
+                      onChange={(e) => { setNcCmd(e.currentTarget.value as NcCmd); setNcPickedSession(null); }}
+                    >
+                      <option value="claude">🤖 claude</option>
+                      <option value="claude-continue">🤖 claude --continue</option>
+                      <option value="claude-resume">🤖 claude --resume</option>
+                      <option value="claude-skip">⚠️ claude --dangerously-skip-permissions</option>
+                      <option value="plain">🐚 {t("connect.newConn.noneShell")}</option>
+                      <option value="custom">✏️ {t("connect.newConn.custom")}</option>
+                    </select>
+                    <Show when={ncCmd() === "custom"}>
+                      <input
+                        class="nc-input nc-custom"
+                        placeholder="npm run dev"
+                        value={ncCustom()}
+                        onInput={(e) => setNcCustom(e.currentTarget.value)}
+                      />
                     </Show>
                   </div>
-                </div>
 
-                {/* 3. Command (dropdown; custom field only when chosen) */}
-                <div class="nc-section">
-                  <label class="nc-label">{t("connect.newConn.command")}</label>
-                  <select
-                    class="nc-select"
-                    value={ncCmd()}
-                    onChange={(e) => setNcCmd(e.currentTarget.value as NcCmd)}
-                  >
-                    <option value="claude">🤖 claude</option>
-                    <option value="claude-continue">🤖 claude --continue</option>
-                    <option value="claude-resume">🤖 claude --resume</option>
-                    <option value="claude-skip">⚠️ claude --dangerously-skip-permissions</option>
-                    <option value="plain">🐚 {t("connect.plainShell")}</option>
-                    <option value="custom">✏️ {t("connect.newConn.custom")}</option>
-                  </select>
-                  <Show when={ncCmd() === "custom"}>
-                    <input
-                      class="nc-input nc-custom"
-                      placeholder="npm run dev"
-                      value={ncCustom()}
-                      onInput={(e) => setNcCustom(e.currentTarget.value)}
-                    />
+                  {/* 4. Session resume list — only for --resume / --continue */}
+                  <Show when={ncWantsResume()}>
+                    <div class="nc-section">
+                      <label class="nc-label">
+                        {t("connect.newConn.resumeTitle")}
+                        {ncCmd() === "claude-resume" ? " " : ""}
+                        <Show when={ncCmd() === "claude-resume"}>
+                          <span class="nc-req">*</span>
+                        </Show>
+                      </label>
+                      <div class="nc-resume-tools">
+                        <input
+                          class="nc-input nc-search"
+                          placeholder={t("connect.newConn.search")}
+                          value={ncSearch()}
+                          onInput={(e) => setNcSearch(e.currentTarget.value)}
+                        />
+                        <div class="nc-segmented nc-filter">
+                          <For each={[
+                            { v: "main", label: t("connect.newConn.filterMain") },
+                            { v: "sub", label: t("connect.newConn.filterSub") },
+                            { v: "all", label: t("connect.newConn.filterAll") },
+                          ] as { v: NcFilter; label: string }[]}>
+                            {(f) => (
+                              <button
+                                class={`nc-seg ${ncFilter() === f.v ? "active" : ""}`}
+                                onClick={() => setNcFilter(f.v)}
+                              >
+                                {f.label}
+                              </button>
+                            )}
+                          </For>
+                        </div>
+                        <button class="nc-browse" title={t("connect.newConn.refresh")} onClick={() => void loadNcSessions()}>⟳</button>
+                      </div>
+                      <div class="nc-resume-list">
+                        <Show when={ncSessionsLoading()}>
+                          <p class="nc-muted">{t("claude_picker.loading")}</p>
+                        </Show>
+                        <Show when={ncSessionsErr()}>
+                          <p class="nc-muted err">⚠ {ncSessionsErr()}</p>
+                        </Show>
+                        <Show when={!ncSessionsLoading() && !ncSessionsErr() && ncFilteredSessions().length === 0}>
+                          <p class="nc-muted">{t("claude_picker.empty")}</p>
+                        </Show>
+                        <For each={ncFilteredSessions()}>
+                          {(s) => (
+                            <div
+                              class={`nc-resume-row ${ncPickedSession()?.session_id === s.session_id ? "picked" : ""}`}
+                              onClick={() => setNcPickedSession(s)}
+                              title={s.jsonl_path}
+                            >
+                              <div class="nc-resume-head">
+                                <code class="nc-resume-id">{s.session_id.slice(0, 8)}</code>
+                                <Show when={s.is_subagent}>
+                                  <span class="nc-resume-badge">{t("connect.newConn.filterSub")}</span>
+                                </Show>
+                                <span class="nc-resume-proj">{s.project_path}</span>
+                                <span class="nc-resume-age">{fmtSessionAge(s.mtime_unix)}</span>
+                              </div>
+                              <Show when={s.last_user}>
+                                <div class="nc-resume-prev">{s.last_user}</div>
+                              </Show>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </div>
                   </Show>
-                </div>
+                </Show>
+
+                {/* ── BROWSE view (inline folder tree) ──────────────── */}
+                <Show when={ncView() === "browse" && dirPicker()}>
+                  <div class="nc-section">
+                    <div class="nc-browse-path" title={dirPicker()!.path}>{dirPicker()!.path}</div>
+                    <Show when={recentDirs().length > 0}>
+                      <div class="nc-recent">
+                        <For each={recentDirs()}>
+                          {(d) => (
+                            <button class="nc-recent-row" title={d} onClick={() => chooseDir(d)}>🕘 {d}</button>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                    <Show when={dirPicker()!.error}>
+                      <p class="nc-muted err">⚠ {dirPicker()!.error}</p>
+                    </Show>
+                    <ul class="nc-dir-list">
+                      <Show when={dirPicker()!.path !== "/"}>
+                        <li class="nc-dir-item up" onClick={() => void navigateDirPicker(dirPickerParent(dirPicker()!.path))}>📁 ..</li>
+                      </Show>
+                      <For each={dirPicker()!.dirs}>
+                        {(name) => (
+                          <li class="nc-dir-item" onClick={() => void navigateDirPicker(dirPickerJoin(dirPicker()!.path, name))}>📁 {name}</li>
+                        )}
+                      </For>
+                      <Show when={!dirPicker()!.loading && dirPicker()!.dirs.length === 0 && !dirPicker()!.error}>
+                        <li class="nc-dir-empty">{t("connect.dirPicker.empty")}</li>
+                      </Show>
+                    </ul>
+                  </div>
+                </Show>
               </div>
 
               <div class="nc-footer">
-                <button class="nc-btn" onClick={() => setNewConnModal(false)}>{t("common.cancel")}</button>
-                <button
-                  class="nc-btn primary"
-                  disabled={!newConnValid()}
-                  onClick={submitNewConn}
+                <Show
+                  when={ncView() === "browse"}
+                  fallback={
+                    <>
+                      <button class="nc-btn" onClick={() => setNewConnModal(false)}>{t("common.cancel")}</button>
+                      <button class="nc-btn primary" disabled={!newConnValid()} onClick={submitNewConn}>
+                        {t("common.connect")}
+                      </button>
+                    </>
+                  }
                 >
-                  {t("common.connect")}
-                </button>
+                  <button class="nc-btn" onClick={cancelBrowse}>{t("connect.newConn.back")}</button>
+                  <button class="nc-btn primary" disabled={!dirPicker()} onClick={() => dirPicker() && chooseDir(dirPicker()!.path)}>
+                    {t("connect.dirPicker.useThis")}
+                  </button>
+                </Show>
               </div>
             </div>
           </div>
@@ -1351,7 +1546,9 @@ export function PaneView(p: Props) {
       </Show>
 
       {/* Phase 65 (bug AA): remote folder picker for "Open in directory". */}
-      <Show when={dirPicker()}>
+      {/* v0.4.4-beta.2: only the standalone "open dir" flow uses this popup;
+          the new-connection wizard renders the tree inline (ncView="browse"). */}
+      <Show when={dirPicker() && !dirPickForNewConn()}>
         <div class="modal-backdrop" onClick={closeDirPicker}>
           <div
             class="modal claude-picker"

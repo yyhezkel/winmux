@@ -42,82 +42,6 @@ export type HostTrustPending = {
   mismatchOld?: string;
 };
 
-interface ClaudePickerProps {
-  workspaceId: string;
-  onClose: () => void;
-  // Phase 65 (bug Y): pass the session's original project path so the
-  // caller can `cd` there before `claude --resume` — otherwise resume
-  // runs from the current cwd (usually $HOME) and Claude can't find the
-  // project. Empty string when the session has no recorded path.
-  onPick: (sessionId: string, cwd: string) => void;
-}
-
-function ClaudeSessionPicker(p: ClaudePickerProps) {
-  const [items, setItems] = createSignal<ClaudeSessionInfo[]>([]);
-  const [loading, setLoading] = createSignal(true);
-  const [err, setErr] = createSignal<string | null>(null);
-  onMount(async () => {
-    try {
-      const list = await invoke<ClaudeSessionInfo[]>("pane_list_claude_sessions", {
-        workspaceId: p.workspaceId,
-        limit: 30,
-      });
-      setItems(list);
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setLoading(false);
-    }
-  });
-  const fmtAge = (mt: number) => {
-    if (!mt) return "—";
-    const sec = Math.max(1, Math.floor(Date.now() / 1000 - mt));
-    if (sec < 60) return `${sec}s`;
-    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
-    if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
-    return `${Math.floor(sec / 86400)}d`;
-  };
-  return (
-    <div class="modal-backdrop" onClick={p.onClose}>
-      <div class="modal claude-picker" onClick={(e) => e.stopPropagation()}>
-        <div class="settings-head">
-          <h3>{t("claude_picker.title")}</h3>
-          <button class="feed-x" title={t("common.close")} onClick={p.onClose}>×</button>
-        </div>
-        <div class="claude-picker-body">
-          <Show when={loading()}><p class="status-line">{t("claude_picker.loading")}</p></Show>
-          <Show when={err()}><p class="status-line err">{err()}</p></Show>
-          <Show when={!loading() && !err() && items().length === 0}>
-            <p class="status-line">{t("claude_picker.empty")}</p>
-          </Show>
-          <Show when={items().length > 0}>
-            <ul class="claude-list">
-              {items().map((it) => (
-                <li
-                  class="claude-row"
-                  onClick={() => p.onPick(it.session_id, it.project_path ?? "")}
-                  title={it.jsonl_path}
-                >
-                  <div class="claude-row-head">
-                    <code class="claude-id">{it.session_id.slice(0, 8)}</code>
-                    <span class="claude-proj">{it.project_path}</span>
-                    <span class="claude-age">{fmtAge(it.mtime_unix)}</span>
-                  </div>
-                  <Show when={it.last_user}>
-                    <div class="claude-prev"><b>{t("claude_picker.user_prefix")}</b> {it.last_user}</div>
-                  </Show>
-                  <Show when={it.last_assistant}>
-                    <div class="claude-prev"><b>{t("claude_picker.assistant_prefix")}</b> {it.last_assistant}</div>
-                  </Show>
-                </li>
-              ))}
-            </ul>
-          </Show>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 interface Props {
   workspaceId: string;
@@ -257,11 +181,10 @@ export function PaneView(p: Props) {
   const isSsh = () =>
     (p.pane.connection?.type ?? p.workspaceConnection?.type) === "ssh";
   const isTmux = () => !!p.tmuxSession;
-  // Phase 12.B Smart Connect dropdown + extra modals.
-  const [showConnectMenu, setShowConnectMenu] = createSignal(false);
+  // Phase 12.B Smart Connect — the "open in directory" text-input fallback
+  // (local panes) still uses this small prompt.
   const [smartModal, setSmartModal] = createSignal<null | "cwd" | "cmd" | "claude_args">(null);
   const [smartInput, setSmartInput] = createSignal("");
-  const [showClaudePicker, setShowClaudePicker] = createSignal(false);
   // v0.4.4 (Task 2): unified "new connection" picker. One modal to choose a
   // directory AND a launch command together, then connect — instead of the
   // à-la-carte menu that only ever set one at a time. Connect-time only,
@@ -275,6 +198,7 @@ export function PaneView(p: Props) {
     | "claude-continue"
     | "claude-resume"
     | "claude-skip"
+    | "from-list"
     | "custom";
   // v0.4.4-beta.2: connection type is the FIRST step — "regular" = SSH → bare
   // shell; "tmux" = SSH → tmux new-session. Maps to the `persistent` flag
@@ -287,19 +211,21 @@ export function PaneView(p: Props) {
   const [ncView, setNcView] = createSignal<NcView>("form");
   const [ncType, setNcType] = createSignal<NcType>("tmux");
   const [ncDir, setNcDir] = createSignal("");
-  const [ncCmd, setNcCmd] = createSignal<NcCmd>("claude");
+  // Default command is empty ("plain" = inject nothing) — the type toggle
+  // decides tmux vs regular; the real commands follow in the dropdown.
+  const [ncCmd, setNcCmd] = createSignal<NcCmd>("plain");
   const [ncCustom, setNcCustom] = createSignal("");
-  // v0.4.4-beta.2: inline Claude-session resume list (shown when the command
-  // is --resume / --continue). Filtered Main / Sub / All (sub = Task sidechain).
-  type NcFilter = "main" | "sub" | "all";
+  // v0.4.4-beta.2: the Claude-session list is shown ONLY for the dedicated
+  // "choose from list" command — NOT for --resume/--continue (those are plain
+  // runs). Filter is User / Agent / All (Agent = Task sidechain).
+  type NcFilter = "user" | "agent" | "all";
   const [ncSessions, setNcSessions] = createSignal<ClaudeSessionInfo[]>([]);
   const [ncSessionsLoading, setNcSessionsLoading] = createSignal(false);
   const [ncSessionsErr, setNcSessionsErr] = createSignal<string | null>(null);
   const [ncSearch, setNcSearch] = createSignal("");
-  const [ncFilter, setNcFilter] = createSignal<NcFilter>("main");
+  const [ncFilter, setNcFilter] = createSignal<NcFilter>("user");
   const [ncPickedSession, setNcPickedSession] = createSignal<ClaudeSessionInfo | null>(null);
-  const ncWantsResume = (): boolean =>
-    ncCmd() === "claude-resume" || ncCmd() === "claude-continue";
+  const ncShowsList = (): boolean => ncCmd() === "from-list";
   const fmtSessionAge = (mt: number): string => {
     if (!mt) return "—";
     const sec = Math.max(1, Math.floor(Date.now() / 1000 - mt));
@@ -327,8 +253,8 @@ export function PaneView(p: Props) {
     const q = ncSearch().trim().toLowerCase();
     const f = ncFilter();
     return ncSessions().filter((s) => {
-      if (f === "main" && s.is_subagent) return false;
-      if (f === "sub" && !s.is_subagent) return false;
+      if (f === "user" && s.is_subagent) return false;
+      if (f === "agent" && !s.is_subagent) return false;
       if (!q) return true;
       return (
         s.session_id.toLowerCase().includes(q) ||
@@ -341,52 +267,8 @@ export function PaneView(p: Props) {
   // When true, the folder picker returns its choice into the new-connection
   // modal (ncDir) instead of connecting immediately.
   const [dirPickForNewConn, setDirPickForNewConn] = createSignal(false);
-  // Phase 23.F: tmux session picker state.
-  const [tmuxSessions, setTmuxSessions] = createSignal<import("./types").TmuxSessionInfo[] | null>(null);
-  const [tmuxPickerLoading, setTmuxPickerLoading] = createSignal(false);
-  const [tmuxPickerErr, setTmuxPickerErr] = createSignal<string | null>(null);
-  // Phase 23.K: local labels for tmux sessions (session_name → label).
-  // Read from %APPDATA%/winmux/tmux-labels.json via tmux_labels_get.
-  // The picker shows the label as the primary line when set, raw
-  // session name as secondary. Best-effort: any fetch error leaves
-  // the map empty and the picker falls back to raw names.
-  const [tmuxLabels, setTmuxLabels] = createSignal<Record<string, string>>({});
-  const openTmuxPicker = async () => {
-    setTmuxSessions([]);
-    setTmuxPickerLoading(true);
-    setTmuxPickerErr(null);
-    try {
-      const list = await invoke<import("./types").TmuxSessionInfo[]>("pane_list_tmux_sessions", {
-        workspaceId: p.workspaceId,
-      });
-      setTmuxSessions(list);
-    } catch (e) {
-      setTmuxPickerErr(String(e));
-      setTmuxSessions([]);
-    } finally {
-      setTmuxPickerLoading(false);
-    }
-    // Phase 23.K: fetch labels in parallel. Failures are silent —
-    // labels are a UI sugar, not load-bearing.
-    try {
-      const labels = await invoke<Record<string, string>>("tmux_labels_get", {
-        workspaceId: p.workspaceId,
-      });
-      setTmuxLabels(labels ?? {});
-    } catch {
-      setTmuxLabels({});
-    }
-  };
-  const closeTmuxPicker = () => {
-    setTmuxSessions(null);
-    setTmuxPickerErr(null);
-    setTmuxLabels({});
-  };
-  // Phase 23.I: removed renameErrors + renameTmuxSession. Pane title
-  // is now the canonical tmux session name — edit the title via the
-  // pane header's ✎ button instead. Backend pane_set_title auto-runs
-  // tmux rename-session over the existing SSH handle.
-  const closeConnectMenu = () => setShowConnectMenu(false);
+  // v0.4.4-beta.2: the tmux session picker + smart-connect caret menu were
+  // removed — everything now lives in the two-button flow (Connect / Wizard).
   const submitSmartModal = () => {
     const m = smartModal();
     const v = smartInput();
@@ -506,20 +388,21 @@ export function PaneView(p: Props) {
     setNcView("form");
     setNcType("tmux");
     setNcDir("");
-    setNcCmd("claude");
+    setNcCmd("plain");
     setNcCustom("");
     setNcSearch("");
-    setNcFilter("main");
+    setNcFilter("user");
     setNcPickedSession(null);
     setNcSessions([]);
     setNcSessionsErr(null);
     setNewConnModal(true);
   };
-  // Validation: directory required; custom needs text; --resume needs a pick.
+  // Validation: directory required; custom needs text; "choose from list"
+  // needs a session pick. --resume/--continue are plain runs (no pick).
   const newConnValid = (): boolean => {
     if (!ncDir().trim()) return false;
     if (ncCmd() === "custom" && !ncCustom().trim()) return false;
-    if (ncCmd() === "claude-resume" && !ncPickedSession()) return false;
+    if (ncCmd() === "from-list" && !ncPickedSession()) return false;
     return true;
   };
   // v0.4.4-beta.2: browse is now an INLINE view within the same modal (not a
@@ -529,10 +412,10 @@ export function PaneView(p: Props) {
     setNcView("browse");
     void openDirPicker();
   };
-  // v0.4.4-beta.2: auto-load the Claude session list when a resume command is
-  // chosen while the modal is open (once; refresh via the list's ⟳).
+  // v0.4.4-beta.2: auto-load the Claude session list when "choose from list"
+  // is picked while the modal is open (once; refresh via the list's ⟳).
   createEffect(() => {
-    if (newConnModal() && ncWantsResume() && ncSessions().length === 0 && !ncSessionsLoading()) {
+    if (newConnModal() && ncShowsList() && ncSessions().length === 0 && !ncSessionsLoading()) {
       void loadNcSessions();
     }
   });
@@ -1186,77 +1069,18 @@ export function PaneView(p: Props) {
                 p.pendingPasswordFor !== p.pane.pane_id
               }
             >
+              {/* v0.4.4-beta.2: two buttons only — [Connect] does a plain
+                  regular SSH shell (no tmux, no command); [Connection wizard]
+                  opens the unified wizard (type / directory / command / resume
+                  list). Everything the old caret menu offered now lives in the
+                  wizard. */}
               <div class="connect-buttons">
-                {/* Phase 12.B Smart Connect — split button. Main click =
-                    plain Connect. Caret opens the menu with tmux / plain /
-                    cwd / cmd / claude options. */}
-                <div class="connect-split">
-                  <button class="primary big" onClick={() => p.onConnect(p.pane.pane_id, {})}>
-                    {t("common.connect")}
-                  </button>
-                  <button
-                    class="primary big connect-caret"
-                    title={t("pane.tooltip.more_connect_options")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowConnectMenu(!showConnectMenu());
-                    }}
-                  >
-                    ▾
-                  </button>
-                  <Show when={showConnectMenu()}>
-                    <div
-                      class="connect-menu"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {/* v0.4.4 (Task 2): unified new-connection picker —
-                          directory + launch command chosen together. The
-                          à-la-carte shortcuts below stay for power users. */}
-                      <button class="connect-menu-primary" onClick={() => { closeConnectMenu(); openNewConnModal(); }}>
-                        {t("connect.newConnection")}
-                      </button>
-                      <hr />
-                      <Show when={isSsh()}>
-                        {/* Phase 23.F: open picker instead of attaching
-                             to the auto-named session. Existing tmux session
-                             = direct attach, no new-connection picker. */}
-                        <button onClick={() => { closeConnectMenu(); openTmuxPicker(); }}>
-                          {t("common.connect_tmux")}
-                        </button>
-                      </Show>
-                      <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "plain" }); }}>
-                        {t("connect.plainShell")}
-                      </button>
-                      <hr />
-                      <button onClick={() => { closeConnectMenu(); openDirPicker(); }}>
-                        {t("connect.openDir")}
-                      </button>
-                      <button onClick={() => { closeConnectMenu(); setSmartInput(""); setSmartModal("cmd"); }}>
-                        {t("connect.runCmd")}
-                      </button>
-                      <hr />
-                      {/* Phase 61: Claude launchers are no longer SSH-only —
-                          the backend injects shell-appropriate syntax for
-                          local PowerShell / Cmd panes too. */}
-                      <div class="connect-menu-section">{t("connect.runClaude")}</div>
-                      <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude" }); }}>
-                        claude
-                      </button>
-                      <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--continue" }); }}>
-                        claude --continue
-                      </button>
-                      <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--resume" }); }}>
-                        claude --resume
-                      </button>
-                      <button onClick={() => { closeConnectMenu(); p.onConnect(p.pane.pane_id, { mode: "claude", claudeArgs: "--dangerously-skip-permissions" }); }}>
-                        claude --dangerously-skip-permissions
-                      </button>
-                      <button onClick={() => { closeConnectMenu(); setShowClaudePicker(true); }}>
-                        {t("connect.resumeList")}
-                      </button>
-                    </div>
-                  </Show>
-                </div>
+                <button class="primary big" onClick={() => p.onConnect(p.pane.pane_id, { persistent: false })}>
+                  {t("common.connect")}
+                </button>
+                <button class="big nc-wizard-btn" onClick={openNewConnModal}>
+                  {t("connect.openWizard")}
+                </button>
               </div>
             </Show>
 
@@ -1401,11 +1225,12 @@ export function PaneView(p: Props) {
                       value={ncCmd()}
                       onChange={(e) => { setNcCmd(e.currentTarget.value as NcCmd); setNcPickedSession(null); }}
                     >
+                      <option value="plain"></option>
                       <option value="claude">🤖 claude</option>
                       <option value="claude-continue">🤖 claude --continue</option>
                       <option value="claude-resume">🤖 claude --resume</option>
                       <option value="claude-skip">⚠️ claude --dangerously-skip-permissions</option>
-                      <option value="plain">🐚 {t("connect.newConn.noneShell")}</option>
+                      <option value="from-list">📋 {t("connect.newConn.fromList")}</option>
                       <option value="custom">✏️ {t("connect.newConn.custom")}</option>
                     </select>
                     <Show when={ncCmd() === "custom"}>
@@ -1418,15 +1243,11 @@ export function PaneView(p: Props) {
                     </Show>
                   </div>
 
-                  {/* 4. Session resume list — only for --resume / --continue */}
-                  <Show when={ncWantsResume()}>
+                  {/* 4. Session list — only for the "choose from list" command */}
+                  <Show when={ncShowsList()}>
                     <div class="nc-section">
                       <label class="nc-label">
-                        {t("connect.newConn.resumeTitle")}
-                        {ncCmd() === "claude-resume" ? " " : ""}
-                        <Show when={ncCmd() === "claude-resume"}>
-                          <span class="nc-req">*</span>
-                        </Show>
+                        {t("connect.newConn.resumeTitle")} <span class="nc-req">*</span>
                       </label>
                       <div class="nc-resume-tools">
                         <input
@@ -1437,8 +1258,8 @@ export function PaneView(p: Props) {
                         />
                         <div class="nc-segmented nc-filter">
                           <For each={[
-                            { v: "main", label: t("connect.newConn.filterMain") },
-                            { v: "sub", label: t("connect.newConn.filterSub") },
+                            { v: "user", label: t("connect.newConn.filterUser") },
+                            { v: "agent", label: t("connect.newConn.filterAgent") },
                             { v: "all", label: t("connect.newConn.filterAll") },
                           ] as { v: NcFilter; label: string }[]}>
                             {(f) => (
@@ -1473,7 +1294,7 @@ export function PaneView(p: Props) {
                               <div class="nc-resume-head">
                                 <code class="nc-resume-id">{s.session_id.slice(0, 8)}</code>
                                 <Show when={s.is_subagent}>
-                                  <span class="nc-resume-badge">{t("connect.newConn.filterSub")}</span>
+                                  <span class="nc-resume-badge">{t("connect.newConn.filterAgent")}</span>
                                 </Show>
                                 <span class="nc-resume-proj">{s.project_path}</span>
                                 <span class="nc-resume-age">{fmtSessionAge(s.mtime_unix)}</span>
@@ -1610,122 +1431,9 @@ export function PaneView(p: Props) {
         </div>
       </Show>
 
-      {/* Phase 12.B: Claude session browser */}
-      <Show when={showClaudePicker()}>
-        <ClaudeSessionPicker
-          workspaceId={p.workspaceId}
-          onClose={() => setShowClaudePicker(false)}
-          onPick={(sessionId, cwd) => {
-            setShowClaudePicker(false);
-            // Phase 65 (bug Y): cd to the session's original project dir
-            // first (backend turns cwdOverride into `cd <dir> && exec
-            // claude …`), so resume runs where the session was created.
-            // Only honour an ABSOLUTE path — the backend falls back to
-            // Claude's encoded dir name ("-home-runner-tax") when the
-            // JSONL has no cwd, and `cd '-home…'` is a broken command.
-            const useCwd = cwd.startsWith("/");
-            p.onConnect(p.pane.pane_id, {
-              mode: "claude",
-              claudeArgs: `--resume ${sessionId}`,
-              ...(useCwd ? { cwdOverride: cwd } : {}),
-            });
-          }}
-        />
-      </Show>
-
-      {/* Phase 23.F: tmux session picker. */}
-      <Show when={tmuxSessions() !== null}>
-        <div class="modal-backdrop" onClick={closeTmuxPicker}>
-          <div class="modal claude-picker" onClick={(e) => e.stopPropagation()}>
-            <div class="settings-head">
-              <h3>{t("tmux_picker.title")}</h3>
-              <button class="feed-x" title={t("common.close")} onClick={closeTmuxPicker}>×</button>
-            </div>
-            <div class="claude-picker-body">
-              <Show when={tmuxPickerLoading()}>
-                <p class="status-line">{t("tmux_picker.loading")}</p>
-              </Show>
-              <Show when={tmuxPickerErr()}>
-                <p class="status-line err">⚠ {tmuxPickerErr()}</p>
-              </Show>
-              <ul class="claude-list">
-                <li
-                  class="claude-row"
-                  onClick={() => {
-                    closeTmuxPicker();
-                    // Phase 23.K: generate a fresh unique tmux name
-                    // client-side so `tmux new-session -A` doesn't
-                    // silently attach to whatever existing session
-                    // happened to be derived from pane.title / pane_id.
-                    const freshName = `new_${Date.now().toString(36)}`;
-                    p.onConnect(p.pane.pane_id, {
-                      mode: "tmux",
-                      tmuxSession: freshName,
-                    });
-                  }}
-                >
-                  <div class="claude-row-head">
-                    <code class="claude-id">🆕</code>
-                    <span class="claude-proj"><b>{t("tmux_picker.new_session")}</b></span>
-                    <span class="claude-age">{t("tmux_picker.pane_id_target")}</span>
-                  </div>
-                  <div class="claude-prev">{t("tmux_picker.new_session_hint_v2")}</div>
-                </li>
-                {(tmuxSessions() ?? []).map((s) => {
-                  const ageOf = (epoch: number) => {
-                    if (!epoch) return "—";
-                    const sec = Math.max(1, Math.floor(Date.now() / 1000 - epoch));
-                    if (sec < 60) return `${sec}s`;
-                    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
-                    if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
-                    return `${Math.floor(sec / 86400)}d`;
-                  };
-                  const winLabel = s.windows === 1
-                    ? t("tmux_picker.window", { n: String(s.windows) })
-                    : t("tmux_picker.windows", { n: String(s.windows) });
-                  // Phase 23.K: prefer the user's local label over the
-                  // raw tmux session name. The raw name still shows as
-                  // small secondary text so power users can map back
-                  // to `tmux ls` output.
-                  const label = tmuxLabels()[s.name];
-                  return (
-                    <li
-                      class="claude-row"
-                      onClick={() => {
-                        closeTmuxPicker();
-                        p.onConnect(p.pane.pane_id, {
-                          mode: "tmux",
-                          tmuxSession: s.name,
-                        });
-                      }}
-                      title={`Created ${ageOf(s.created)} ago${s.last_attached ? `, last attached ${ageOf(s.last_attached)} ago` : ""}`}
-                    >
-                      <div class="claude-row-head">
-                        <code class="claude-id">
-                          {label ? label.slice(0, 24) : s.name.slice(0, 14)}
-                        </code>
-                        <span class="claude-proj">
-                          {winLabel}
-                          {s.attached ? ` · ${t("tmux_picker.attached")}` : ""}
-                        </span>
-                        <span class="claude-age">{ageOf(s.last_attached || s.created)}</span>
-                      </div>
-                      <Show when={label}>
-                        <div class="claude-prev">
-                          {t("tmux_picker.label_secondary", { name: s.name })}
-                        </div>
-                      </Show>
-                    </li>
-                  );
-                })}
-              </ul>
-              <Show when={!tmuxPickerLoading() && (tmuxSessions()?.length ?? 0) === 0 && !tmuxPickerErr()}>
-                <p class="status-line">{t("tmux_picker.empty")}</p>
-              </Show>
-            </div>
-          </div>
-        </div>
-      </Show>
+      {/* v0.4.4-beta.2: standalone Claude session picker + tmux session picker
+          removed — session resume lives in the wizard ("choose from list"),
+          and connections go through the two-button Connect / Wizard flow. */}
     </div>
   );
 }

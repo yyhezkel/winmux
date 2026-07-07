@@ -3525,6 +3525,17 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   gap: 10px;
   align-items: center;
 }
+/* v0.4.4-beta.2: secondary "Connection wizard" button next to [Connect]. */
+.nc-wizard-btn {
+  background: var(--w-surface-hi);
+  color: var(--w-text);
+  border: 1px solid var(--w-border-hi);
+  border-radius: var(--w-r-sm);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 100ms ease, color 100ms ease;
+}
+.nc-wizard-btn:hover { border-color: var(--w-accent); color: var(--w-accent); }
 .connect-tmux {
   background: var(--w-surface-hi);
   color: var(--w-success);

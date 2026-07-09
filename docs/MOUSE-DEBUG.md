@@ -75,6 +75,13 @@ source (winmux/tmux OR a user app):
   Note: for a *tmux* session this clears pre-existing stale state; tmux's own
   `set -g mouse on` then re-enables mouse for the live session (wheel scrollback
   preserved) — so this does NOT regress the O-3 behaviour.
+- **Reset on pane process exit (extra safety):** in the `pty:exit` handler in
+  `App.tsx` we call `resetMouseModes()` unconditionally after the
+  `[disconnected]` notice — a full-screen app that enabled SGR/X10 tracking
+  and died with the PTY (SSH drop, kill -9, tmux crash) never sent its own
+  disable, so xterm otherwise keeps reporting on the leftover display. Not
+  gated by the setting — this is a Rule-#1-safe fixed control string, and the
+  user can't opt into a leak.
 - **Manual reset:** Command Palette **"Reset terminal"** / **Ctrl+Alt+R** →
   `resetTerminal()` = the disable set + `\e[0m`. Recovers a pane that already
   leaked mid-session (e.g. right after exiting tmux), without touching

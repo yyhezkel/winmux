@@ -1777,6 +1777,14 @@ function App() {
         ti?.notice(
           `[disconnected${e.payload.reason ? ` (${e.payload.reason})` : ""}]`
         );
+        // v0.4.4-beta.2: extra safety on pane process exit — a full-screen
+        // app that enabled SGR/X10 mouse tracking and then died with the
+        // PTY (SSH drop, kill -9, tmux crash) never got to send its
+        // disable sequence. Clearing xterm's mouse state now means the
+        // stale display we leave behind can't emit \e[<..M events if the
+        // user clicks around while re-reading the "[disconnected]" notice.
+        // Fixed control string — never PTY content (Rule #1).
+        ti?.resetMouseModes();
         ti?.detach();
         bump();
         void refreshPersistence();

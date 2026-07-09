@@ -384,6 +384,7 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
             version: 1,
             active_workspace_id: None,
             workspaces: Vec::new(),
+            groups: Vec::new(),
         });
     }
     let text = std::fs::read_to_string(&path).map_err(|e| format!("read {:?}: {e}", path))?;

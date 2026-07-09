@@ -238,6 +238,24 @@ function App() {
   const [paneStatus, setPaneStatus] = createSignal<Record<string, PaneStatus>>({});
   // Live pane status text (e.g. "bootstrapping winmux…") set by backend events.
   const [paneStatusText, setPaneStatusText] = createSignal<Record<string, string>>({});
+  // cmux-A A1: pane_ids that received an OSC 9/99/777 notification and
+  // haven't been focused since. Drives the amber pulse ring on the pane
+  // + the sidebar aggregate badge. Cleared when the pane is focused.
+  const [paneNotified, setPaneNotified] = createSignal<Set<string>>(new Set());
+  const addPaneNotified = (pid: string) =>
+    setPaneNotified((prev) => {
+      if (prev.has(pid)) return prev;
+      const n = new Set(prev);
+      n.add(pid);
+      return n;
+    });
+  const clearPaneNotified = (pid: string) =>
+    setPaneNotified((prev) => {
+      if (!prev.has(pid)) return prev;
+      const n = new Set(prev);
+      n.delete(pid);
+      return n;
+    });
   // Phase 6.5: agent feed (most recent first; capped to 50 server-side).
   const [feedItems, setFeedItems] = createSignal<FeedItem[]>([]);
   // Phase 7.B: notes
@@ -1887,6 +1905,12 @@ function App() {
             timestamp_ms: Date.now(),
             kind: "notification",
           });
+          // cmux-A A1: mark the pane so its border pulses until focus.
+          // Skip when the notified pane is already focused — the user
+          // is watching, no attention needed.
+          if (e.payload.pane_id && activePaneId() !== e.payload.pane_id) {
+            addPaneNotified(e.payload.pane_id);
+          }
         },
       ),
     );
@@ -2174,6 +2198,7 @@ function App() {
           activeId={file().active_workspace_id}
           connectedIds={liveWorkspaceIds()}
           waitingWorkspaceIds={waitingWorkspaceIds()}
+          pendingNotifCount={paneNotified().size}
           onActivate={handleSetActive}
           onCreate={() => setShowCreate(true)}
           onProvision={() => setShowProvision(true)}
@@ -2419,6 +2444,8 @@ function App() {
                     activePaneId={activePaneId()}
                     connectedPaneIds={connectedPanes()}
                     waitingPaneIds={waitingPaneIds()}
+                    notifiedPaneIds={paneNotified()}
+                    panePulseEnabled={settings()?.notifications?.pane_pulse_on_activity ?? true}
                     workspaceConnection={activeWs()?.connection ?? undefined}
                     workspaceName={activeWs()?.name}
                     workspaceColor={activeWs()?.color ?? undefined}
@@ -2456,6 +2483,8 @@ function App() {
                     ensureTerm={ensureTerm}
                     onFocus={(pid) => {
                       setActivePaneId(pid);
+                      // cmux-A A1: focusing a pane clears its pulse.
+                      clearPaneNotified(pid);
                       terms.get(pid)?.focus();
                     }}
                     onConnect={(pid, opts) => connectPane(pid, opts)}

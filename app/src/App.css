@@ -5494,3 +5494,69 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 }
 .claude-usage-refresh { display: flex; align-items: center; gap: 6px; }
 .claude-usage-refresh input { width: 64px; }
+
+/* ─── cmux-A A1: pane activity pulse ───────────────────────────────
+   OSC 9/99/777 terminal notifications flag a pane and trigger this
+   amber "attention" ring until the user focuses the pane. Distinct
+   from `.pane.waiting` (blocking permission request — that pulses
+   with a wider inner+outer glow); this ring is a lighter breathing
+   ring that says "something happened here, not urgent". Respects
+   prefers-reduced-motion: reduce by falling back to a static solid
+   ring so the visual affordance survives without the animation. */
+@keyframes winmux-pane-pulse {
+  0% {
+    box-shadow:
+      0 0 0 0 var(--w-warning),
+      0 0 0 0 rgba(224, 175, 104, 0.55);
+  }
+  60% {
+    box-shadow:
+      0 0 0 6px transparent,
+      0 0 10px 4px rgba(224, 175, 104, 0.35);
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 transparent,
+      0 0 0 0 transparent;
+  }
+}
+.pane.pane-pulse {
+  animation: winmux-pane-pulse 2s ease-in-out infinite;
+  border-radius: var(--w-r-md);
+  z-index: 1;
+  position: relative;
+}
+/* Waiting (blocking permission) takes visual priority — that ring is
+   an "act now" state. Suppress the softer activity pulse so we never
+   double-animate the same border. */
+.pane.waiting.pane-pulse {
+  animation: winmux-attn-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pane.pane-pulse {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--w-warning);
+  }
+}
+
+/* Sidebar aggregate badge — count of panes with pending activity
+   notifications across the whole workspaces list. Rendered in the
+   sidebar header brand row. Hidden when the count is 0. Logical
+   inset used elsewhere in the header carries through, so no
+   [dir="rtl"] override needed here. */
+.sidebar-notif-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-inline-start: 6px;
+  border-radius: 9px;
+  background: var(--w-warning, #e0af68);
+  color: #0b0d16;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  box-shadow: 0 0 6px 1px rgba(224, 175, 104, 0.45);
+}

@@ -90,6 +90,11 @@ interface Props {
   // (a pending blocking feed item bound to this pane_id). Drives the
   // cmux-style pulsing notification ring around the pane.
   isWaiting?: boolean;
+  // cmux-A A1: an OSC 9/99/777 terminal notification arrived for this
+  // pane and it hasn't been focused since. Drives the amber activity
+  // pulse (distinct from the waiting/blocking ring). Setting-gated in
+  // the parent so we can render it as a plain boolean here.
+  isNotified?: boolean;
   isConnected: boolean;
   pendingPasswordFor: string | null;
   pendingPassphrase: PassphrasePending | null;
@@ -708,7 +713,7 @@ export function PaneView(p: Props) {
   return (
     <div
       ref={(el) => (paneRef = el)}
-      class={`pane ${p.isActive ? "active" : ""} ${p.isWaiting ? "waiting" : ""} ${dropping() ? "drop-target" : ""}`}
+      class={`pane ${p.isActive ? "active" : ""} ${p.isWaiting ? "waiting" : ""} ${p.isNotified ? "pane-pulse" : ""} ${dropping() ? "drop-target" : ""}`}
       data-has-color={liveEffective().color ? "true" : "false"}
       style={liveEffective().color ? `--pane-color: ${liveEffective().color}` : undefined}
       onMouseDown={() => p.onFocus(p.pane.pane_id)}

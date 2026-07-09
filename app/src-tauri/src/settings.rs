@@ -282,6 +282,12 @@ pub(crate) struct Notifications {
     /// A dangerous tool was blocked — security insight, default ON.
     #[serde(default = "default_true")]
     pub toast_block: bool,
+    /// cmux-A A1: pulse a pane's border when an OSC 9/99/777 terminal
+    /// notification arrives for it. Cleared when the user focuses the
+    /// pane. Default ON — degrades to a static solid ring under
+    /// prefers-reduced-motion: reduce.
+    #[serde(default = "default_true")]
+    pub pane_pulse_on_activity: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
@@ -787,6 +793,7 @@ impl Default for Notifications {
             toast_notification: true,
             toast_gate: true,
             toast_block: true,
+            pane_pulse_on_activity: true,
         }
     }
 }

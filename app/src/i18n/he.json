@@ -830,5 +830,8 @@
   "claudeUsage.settings.autoRefresh": "רענון כל (דק׳, 0=כבוי)",
   "claudeUsage.settings.hint": "האחוז מגיע מ-claude -p /usage על חיבור פעיל (חינם, ~8ש׳). 0 מכבה רענון אוטומטי.",
   "workspace.separateClaudeAccount": "סביבת עבודה זו משתמשת בחשבון Claude נפרד",
-  "workspace.separateClaudeAccount.hint": "כברירת מחדל כל סביבות העבודה חולקות חשבון Claude אחד, אז השימוש נשלף פעם אחת. הפעל רק אם השרת הזה מחובר לחשבון Claude אחר — אז השימוש שלו נשלף ומוצג בנפרד."
+  "workspace.separateClaudeAccount.hint": "כברירת מחדל כל סביבות העבודה חולקות חשבון Claude אחד, אז השימוש נשלף פעם אחת. הפעל רק אם השרת הזה מחובר לחשבון Claude אחר — אז השימוש שלו נשלף ומוצג בנפרד.",
+  "notifications.pending_count": "{count} חלוניות ממתינות",
+  "notifications.pane_pulse_label": "הבלט חלונית בעת פעילות",
+  "notifications.pane_pulse_help": "כשמסוף שולח התראת OSC 9/99/777, מסגרת החלונית פועמת עד שממקדים אותה."
 }

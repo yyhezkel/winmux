@@ -830,5 +830,8 @@
   "claudeUsage.settings.autoRefresh": "Refresh every (min, 0=off)",
   "claudeUsage.settings.hint": "The % comes from claude -p /usage on a live connection (free, ~8s). 0 disables auto-refresh.",
   "workspace.separateClaudeAccount": "This workspace uses a different Claude account",
-  "workspace.separateClaudeAccount.hint": "By default all workspaces share one Claude account, so usage is fetched once. Enable this only if this server logs into a different Claude account — then its usage % is fetched and shown separately."
+  "workspace.separateClaudeAccount.hint": "By default all workspaces share one Claude account, so usage is fetched once. Enable this only if this server logs into a different Claude account — then its usage % is fetched and shown separately.",
+  "notifications.pending_count": "{count} pane(s) waiting",
+  "notifications.pane_pulse_label": "Show pane pulse on activity",
+  "notifications.pane_pulse_help": "When a terminal emits an OSC 9/99/777 notification, the pane's border pulses until you focus it."
 }

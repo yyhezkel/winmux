@@ -99,6 +99,8 @@ export interface NotificationSettings {
   toast_notification?: boolean;
   toast_gate?: boolean;
   toast_block?: boolean;
+  /** cmux-A A1: pulse a pane's border on OSC 9/99/777. Default true. */
+  pane_pulse_on_activity?: boolean;
 }
 
 export interface UpdatesSettings {

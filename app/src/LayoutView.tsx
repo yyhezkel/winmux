@@ -36,6 +36,14 @@ interface Props {
   // Phase 26: pane_ids with a pending blocking feed item — these
   // panes get the cmux-style notification ring.
   waitingPaneIds: Set<string>;
+  // cmux-A A1: pane_ids that received an OSC 9/99/777 terminal
+  // notification and haven't been focused since. Drives the amber
+  // "activity" pulse (distinct from waiting/blocking pulse).
+  notifiedPaneIds: Set<string>;
+  // cmux-A A1: master switch for the pulse — mirrors the
+  // notifications.pane_pulse_on_activity setting. Passed as a plain
+  // boolean so PaneView doesn't need to import settings shape.
+  panePulseEnabled: boolean;
   pendingPasswordFor: string | null;
   pendingPassphrase: PassphrasePending | null;
   pendingHostTrust: HostTrustPending | null;
@@ -130,6 +138,10 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           isMaximized={props.all.maximizedPaneId === props.pane.pane_id}
           backgroundPaneCount={Math.max(0, props.all.workspacePaneCount - 1)}
           isWaiting={props.all.waitingPaneIds.has(props.pane.pane_id)}
+          isNotified={
+            props.all.panePulseEnabled &&
+            props.all.notifiedPaneIds.has(props.pane.pane_id)
+          }
           isConnected={props.all.connectedPaneIds.has(props.pane.pane_id)}
           pendingPasswordFor={props.all.pendingPasswordFor}
           pendingPassphrase={props.all.pendingPassphrase}

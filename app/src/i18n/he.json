@@ -815,5 +815,16 @@
   "fm.paste.use_download": "כדי להביא קובץ מרוחק למחשב, השתמש בהורדה.",
   "fm.paste.to_local": "הדבק במקומי",
   "fm.paste.to_remote": "הדבק במרוחק",
-  "fm.paste.clear": "נקה clipboard"
+  "fm.paste.clear": "נקה clipboard",
+  "notifications.pending_count": "{count} חלוניות ממתינות",
+  "notifications.pane_pulse_label": "הבלט חלונית בעת פעילות",
+  "notifications.pane_pulse_help": "כשמסוף שולח התראת OSC 9/99/777, מסגרת החלונית פועמת עד שממקדים אותה.",
+  "sidebar.ungrouped": "ללא קבוצה",
+  "sidebar.new_group": "+ קבוצה",
+  "sidebar.group_name_prompt": "שם הקבוצה",
+  "sidebar.rename_group": "שנה שם קבוצה",
+  "sidebar.delete_group": "מחק קבוצה",
+  "sidebar.change_color": "שנה צבע",
+  "sidebar.move_to_group": "העבר לקבוצה",
+  "sidebar.move_out_of_group": "הוצא מהקבוצה"
 }

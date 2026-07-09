@@ -28,4 +28,11 @@ toast_gate: boolean,
 /**
  * A dangerous tool was blocked — security insight, default ON.
  */
-toast_block: boolean, };
+toast_block: boolean, 
+/**
+ * cmux-A A1: pulse a pane's border when an OSC 9/99/777 terminal
+ * notification arrives for it. Cleared when the user focuses the
+ * pane. Default ON — degrades to a static solid ring under
+ * prefers-reduced-motion: reduce.
+ */
+pane_pulse_on_activity: boolean, };

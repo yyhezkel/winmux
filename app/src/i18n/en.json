@@ -815,5 +815,16 @@
   "fm.paste.use_download": "To bring a remote file to your PC, use Download.",
   "fm.paste.to_local": "Paste to local",
   "fm.paste.to_remote": "Paste to remote",
-  "fm.paste.clear": "Clear clipboard"
+  "fm.paste.clear": "Clear clipboard",
+  "notifications.pending_count": "{count} pane(s) waiting",
+  "notifications.pane_pulse_label": "Show pane pulse on activity",
+  "notifications.pane_pulse_help": "When a terminal emits an OSC 9/99/777 notification, the pane's border pulses until you focus it.",
+  "sidebar.ungrouped": "Ungrouped",
+  "sidebar.new_group": "+ Group",
+  "sidebar.group_name_prompt": "Group name",
+  "sidebar.rename_group": "Rename group",
+  "sidebar.delete_group": "Delete group",
+  "sidebar.change_color": "Change color",
+  "sidebar.move_to_group": "Move to group",
+  "sidebar.move_out_of_group": "Move out of group"
 }

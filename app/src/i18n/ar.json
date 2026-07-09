@@ -815,5 +815,16 @@
   "fm.paste.use_download": "لجلب ملف بعيد إلى جهازك، استخدم التنزيل.",
   "fm.paste.to_local": "لصق محليًا",
   "fm.paste.to_remote": "لصق عن بُعد",
-  "fm.paste.clear": "مسح الحافظة"
+  "fm.paste.clear": "مسح الحافظة",
+  "notifications.pending_count": "{count} لوحات في الانتظار",
+  "notifications.pane_pulse_label": "أظهر نبض اللوحة عند النشاط",
+  "notifications.pane_pulse_help": "عند إصدار الطرفية إشعار OSC 9/99/777، ينبض إطار اللوحة حتى تركّز عليها.",
+  "sidebar.ungrouped": "بدون مجموعة",
+  "sidebar.new_group": "+ مجموعة",
+  "sidebar.group_name_prompt": "اسم المجموعة",
+  "sidebar.rename_group": "إعادة تسمية المجموعة",
+  "sidebar.delete_group": "حذف المجموعة",
+  "sidebar.change_color": "تغيير اللون",
+  "sidebar.move_to_group": "نقل إلى مجموعة",
+  "sidebar.move_out_of_group": "إخراج من المجموعة"
 }

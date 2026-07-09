@@ -728,6 +728,16 @@ export function SettingsModal(p: Props) {
                     />
                     <span>{t("settings.notifications.sound_enabled")}</span>
                   </label>
+                  {/* cmux-A A1: pane pulse on OSC 9/99/777 activity. */}
+                  <label class="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={p.settings.notifications.pane_pulse_on_activity ?? true}
+                      onChange={(e) => update("notifications", { ...p.settings.notifications, pane_pulse_on_activity: e.currentTarget.checked })}
+                    />
+                    <span>{t("notifications.pane_pulse_label")}</span>
+                  </label>
+                  <p class="settings-hint">{t("notifications.pane_pulse_help")}</p>
                   {/* Phase 66 (KK): per-event toast toggles. */}
                   <h4 style="margin-top:14px">{t("settings.notifications.perEvent.title")}</h4>
                   <For each={[

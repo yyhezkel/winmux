@@ -53,6 +53,10 @@ interface Props {
   // Phase 62.B (item I) / 65.P: two-mode sidebar — full / icons.
   mode: SidebarMode;
   onSetMode: (mode: SidebarMode) => void;
+  // cmux-A A1: aggregate count of panes with pending OSC 9/99/777
+  // activity notifications. Rendered as a small amber badge in the
+  // sidebar header (both full + icons mode). Hidden when 0.
+  pendingNotifCount: number;
 }
 
 export function Sidebar(p: Props) {
@@ -112,6 +116,14 @@ export function Sidebar(p: Props) {
           <circle cx="848" cy="176" r="20" fill="#5cd87f" />
         </svg>
         <span class="sidebar-brand">{t("sidebar.title")}</span>
+        <Show when={p.pendingNotifCount > 0}>
+          <span
+            class="sidebar-notif-badge"
+            title={t("notifications.pending_count", { count: p.pendingNotifCount })}
+          >
+            {p.pendingNotifCount > 99 ? "99+" : p.pendingNotifCount}
+          </span>
+        </Show>
         </div>
         {/* Phase 62.B (item I) / 65.P: header toggle flips full ↔ icons
             — the only two modes. Same as Ctrl+B. Phase 62.C: on its own

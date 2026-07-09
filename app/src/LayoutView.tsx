@@ -27,6 +27,7 @@ import {
   type SplitDirection,
 } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
+import { IconGlobe, IconFolderOpen, IconClose } from "./icons";
 
 interface Props {
   workspaceId: string;
@@ -162,7 +163,7 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           onClick={() => props.all.onFocus(props.pane.pane_id)}
         >
           <div class="pane-header">
-            <span class="pane-conn">🌐 {t("browser.legacyPane.title")}</span>
+            <span class="pane-conn"><IconGlobe size={14} /> {t("browser.legacyPane.title")}</span>
             <button
               class="pane-btn pane-close"
               title={t("common.close")}
@@ -171,7 +172,7 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
                 props.all.onClose(props.pane.pane_id);
               }}
             >
-              ×
+              <IconClose size={14} />
             </button>
           </div>
           <div class="pane-body legacy-pane-placeholder">
@@ -191,7 +192,7 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
           onClick={() => props.all.onFocus(props.pane.pane_id)}
         >
           <div class="pane-header">
-            <span class="pane-conn">🗂 {t("files.legacyPane.title")}</span>
+            <span class="pane-conn"><IconFolderOpen size={14} /> {t("files.legacyPane.title")}</span>
             <button
               class="pane-btn pane-close"
               title={t("common.close")}
@@ -200,7 +201,7 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
                 props.all.onClose(props.pane.pane_id);
               }}
             >
-              ×
+              <IconClose size={14} />
             </button>
           </div>
           <div class="pane-body legacy-pane-placeholder">
@@ -244,7 +245,7 @@ function LeafPane(props: { all: Props; pane: Extract<LayoutNode, { kind: "pane" 
                 props.all.onClose(props.pane.pane_id);
               }}
             >
-              ×
+              <IconClose size={14} />
             </button>
           </div>
           <div class="pane-body">

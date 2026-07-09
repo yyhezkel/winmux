@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import qrcode from "qrcode-generator";
 import { t } from "./i18n";
+import { IconClose, IconCircle, IconSmartphone } from "./icons";
 
 // Phase 70.C — Mobile pairing tab inside the Monitor. Drives the nginx-proxy
 // install + the daemon's pairing endpoints via the mobile_pairing_* commands.
@@ -273,7 +274,7 @@ export function MobilePairing(p: { workspaceId?: string }) {
   return (
     <div class="mob-tab">
       <Show when={err()}>
-        <div class="wizard-test-result err" style="margin:0 0 10px"><div class="wizard-test-line">✗ {err()}</div></div>
+        <div class="wizard-test-result err" style="margin:0 0 10px"><div class="wizard-test-line"><IconClose size={14} /> {err()}</div></div>
       </Show>
 
       {/* ── Setup (only until a domain is linked) / Connected view ── */}
@@ -284,7 +285,7 @@ export function MobilePairing(p: { workspaceId?: string }) {
         <div class="mob-connected">
           <div class="mob-conn-row">
             <span class={status()!.nginx_active ? "mob-ok" : "mob-warn"}>
-              {status()!.nginx_active ? "● nginx active" : "○ nginx inactive"}
+              {status()!.nginx_active ? <><IconCircle size={14} /> nginx active</> : <><IconCircle size={14} /> nginx inactive</>}
             </span>
             <span class="mob-conn-domain" dir="ltr">{status()!.domain}</span>
           </div>
@@ -350,7 +351,7 @@ export function MobilePairing(p: { workspaceId?: string }) {
         <div class="mob-status">
           <Show when={status()} fallback={<span class="settings-hint">{t("mobile.not_configured")}</span>}>
             <span class={status()!.nginx_active ? "mob-ok" : "mob-warn"}>
-              {status()!.nginx_active ? "● nginx active" : "○ nginx inactive"}
+              {status()!.nginx_active ? <><IconCircle size={14} /> nginx active</> : <><IconCircle size={14} /> nginx inactive</>}
             </span>
             <Show when={status()!.domain}><span class="settings-hint"> · {status()!.domain}</span></Show>
           </Show>
@@ -384,7 +385,7 @@ export function MobilePairing(p: { workspaceId?: string }) {
             mobile app manually; it is intentionally absent from the QR above. */}
         <Show when={pairUrl()}>
           <div class="mob-url-card">
-            <div class="mob-url-title">📱 {t("mobile.url_enter")}</div>
+            <div class="mob-url-title"><IconSmartphone size={14} /> {t("mobile.url_enter")}</div>
             <div class="mob-url-row">
               <input class="mob-url-input" type="text" readOnly dir="ltr" value={pairUrl()!} />
               <button class="primary" onClick={() => void copyUrl()}>
@@ -406,7 +407,7 @@ export function MobilePairing(p: { workspaceId?: string }) {
           {(d) => (
             <div class="mob-dev">
               <span class="mob-dev-name">
-                {d.status === "active" ? "●" : d.status === "pending" ? "◌" : "✕"} {d.device_name || d.device_id}
+                {d.status === "active" ? <IconCircle size={14} /> : d.status === "pending" ? <IconCircle size={14} /> : <IconClose size={14} />} {d.device_name || d.device_id}
               </span>
               <span class="mob-dev-meta settings-hint">
                 {d.status} · {fmtWhen(d.last_seen)}{d.last_ip ? ` · ${d.last_ip}` : ""}

@@ -387,6 +387,34 @@ impl Default for ClaudeOptions {
     }
 }
 
+/// Phase 78: Claude subscription-usage display options. The usage data
+/// itself comes from `claude -p "/usage"` over SSH (see claude_usage.rs);
+/// these settings only control how the global % indicator is shown and how
+/// often a live connection auto-refreshes it.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct ClaudeUsageSettings {
+    /// Show the compact usage % indicator at the top of the sidebar.
+    pub show_top_indicator: bool,
+    /// `"percent"` (colored NN% text) or `"bar"`. A String (not an enum) to
+    /// match the sidebar_mode / rtl_mode pattern → plain TS union.
+    pub display_mode: String,
+    /// Auto-refresh cadence for the active *live* (non-headless) workspace,
+    /// in minutes. `0` = off (manual refresh only). The calls are free, so a
+    /// modest interval keeps the indicator fresh without user action.
+    pub auto_refresh_minutes: u32,
+}
+
+impl Default for ClaudeUsageSettings {
+    fn default() -> Self {
+        Self {
+            show_top_indicator: true,
+            display_mode: "percent".into(),
+            auto_refresh_minutes: 10,
+        }
+    }
+}
+
 /// Phase 18: per-user state for the hooks-outdated banner. Tracked
 /// separately from `Hooks` (which is per-agent enablement) because
 /// the dismiss list belongs to the UI layer, not to the hook spec.
@@ -450,6 +478,9 @@ pub(crate) struct Settings {
     /// Phase 17. Claude session summary options.
     #[serde(default)]
     pub claude: ClaudeOptions,
+    /// Phase 78. Claude subscription-usage indicator display + auto-refresh.
+    #[serde(default)]
+    pub claude_usage: ClaudeUsageSettings,
     /// Phase 18. Hooks-outdated banner show/skip state.
     #[serde(default)]
     pub hooks_updates: HooksUpdates,
@@ -793,6 +824,7 @@ impl Default for Settings {
             i18n: I18n::default(),
             shortcuts: Shortcuts::default(),
             claude: ClaudeOptions::default(),
+            claude_usage: ClaudeUsageSettings::default(),
             hooks_updates: HooksUpdates::default(),
             ssh_key_offer_disabled: false,
             auto_connect_on_workspace_select: true,

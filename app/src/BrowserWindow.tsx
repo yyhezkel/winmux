@@ -13,6 +13,7 @@ import {
   ResizeHandles,
   type Geometry,
 } from "./floatingWindow";
+import { IconGlobe, IconClose, IconRefresh, IconUnplug, IconWarning } from "./icons";
 
 // Phase 53 → 60 → 62.C: workspace-level Browser floating window.
 //
@@ -337,7 +338,7 @@ export function BrowserWindow(p: Props) {
             (right in LTR, left in RTL). */}
         <div class="browser-window-header" onMouseDown={onDragStart}>
           <span class="browser-window-title">
-            🌐{" "}
+            <IconGlobe size={14} />{" "}
             {t("browser.window.title", { workspace: p.workspace!.name })}
           </span>
           <button
@@ -346,7 +347,7 @@ export function BrowserWindow(p: Props) {
             title={t("common.close")}
             aria-label={t("common.close")}
           >
-            ×
+            <IconClose size={14} />
           </button>
         </div>
         {/* Phase 62.C: port bar replaces the free URL bar. Refresh ·
@@ -358,7 +359,7 @@ export function BrowserWindow(p: Props) {
             title={t("browser.ports.refresh")}
             onClick={refresh}
           >
-            ⟳
+            <IconRefresh size={14} />
           </button>
           <span class="bw-port-server">{t("browser.ports.serverPrefix")}</span>
           <Show
@@ -417,23 +418,23 @@ export function BrowserWindow(p: Props) {
                 when={p.detectedPorts.length === 0}
                 fallback={
                   <div class="bw-empty-state">
-                    <div class="bw-empty-icon">🔌</div>
+                    <div class="bw-empty-icon"><IconUnplug /></div>
                     <p class="bw-empty-body">{t("browser.empty.pickHint")}</p>
                     <Show when={navError()}>
-                      <p class="bw-empty-err">⚠ {navError()}</p>
+                      <p class="bw-empty-err"><IconWarning size={14} /> {navError()}</p>
                     </Show>
                   </div>
                 }
               >
                 <div class="bw-empty-state">
-                  <div class="bw-empty-icon">🌐</div>
+                  <div class="bw-empty-icon"><IconGlobe /></div>
                   <h3 class="bw-empty-title">{t("browser.empty.title")}</h3>
                   <p class="bw-empty-body">{t("browser.empty.body")}</p>
                   <button class="bw-empty-refresh" onClick={refresh}>
-                    ⟳ {t("browser.ports.refresh.label")}
+                    <IconRefresh size={14} /> {t("browser.ports.refresh.label")}
                   </button>
                   <Show when={navError()}>
-                    <p class="bw-empty-err">⚠ {navError()}</p>
+                    <p class="bw-empty-err"><IconWarning size={14} /> {navError()}</p>
                   </Show>
                 </div>
               </Show>

@@ -2,6 +2,14 @@ import { For, Show, createSignal } from "solid-js";
 import { collectPanes, findPane, type Workspace, type ForwardRow } from "./types";
 import { t } from "./i18n";
 import { TechText } from "./TechText";
+import {
+  IconNotes,
+  IconSettings,
+  IconGlobe,
+  IconGitBranch,
+  IconPlus,
+  IconCloud,
+} from "./icons";
 import type { SidebarMode } from "./settings";
 
 function workspaceBadge(w: Workspace): { label: string; cls: string; title: string } {
@@ -161,7 +169,7 @@ export function Sidebar(p: Props) {
               {/* Phase 49-B: 🌿 chip when this workspace is anchored
                   to a git worktree. Path goes in the tooltip. */}
               <Show when={w.git_worktree}>
-                <span class="ws-worktree-chip" title={w.git_worktree!}>🌿</span>
+                <span class="ws-worktree-chip" title={w.git_worktree!}><IconGitBranch size={13} /></span>
               </Show>
               <WorkspaceBadge w={w} />
               {/* Phase 36.A: inline port-forward badge. Click opens the
@@ -184,7 +192,7 @@ export function Sidebar(p: Props) {
                         p.onOpenPorts(w.id);
                       }}
                     >
-                      🌐 {fwds.length}
+                      <IconGlobe size={12} /> {fwds.length}
                     </span>
                   </Show>
                 );
@@ -247,15 +255,15 @@ export function Sidebar(p: Props) {
           tooltips) instead of disappearing. */}
       <div class="sidebar-actions-row">
         <button class="ws-action-half" onClick={p.onOpenNotes} title={t("sidebar.notes.tooltip")}>
-          <span class="ws-action-emoji">📝</span>
+          <span class="ws-action-emoji"><IconNotes /></span>
           <span class="ws-action-label">{t("sidebar.notes.tooltip")}</span>
         </button>
         <button class="ws-action-half" onClick={p.onOpenSettings} title={t("sidebar.settings.tooltip")}>
-          <span class="ws-action-emoji">⚙</span>
+          <span class="ws-action-emoji"><IconSettings /></span>
           <span class="ws-action-label">{t("sidebar.settings.tooltip")}</span>
         </button>
         <button class="ws-action-half" onClick={p.onOpenPortsGlobal} title={t("sidebar.ports.tooltip")}>
-          <span class="ws-action-emoji">🌐</span>
+          <span class="ws-action-emoji"><IconGlobe /></span>
           <span class="ws-action-label">{t("sidebar.ports.label")}</span>
         </button>
       </div>
@@ -263,14 +271,14 @@ export function Sidebar(p: Props) {
           the workspace header next to "+ diff" — they're workspace-
           scoped tools and Yossi found them misplaced here. */}
       <button class="ws-add" onClick={p.onCreate} title={t("sidebar.new_workspace")}>
-        <span class="ws-action-emoji">＋</span>
+        <span class="ws-action-emoji"><IconPlus /></span>
         <span class="ws-action-label">{t("sidebar.new_workspace")}</span>
       </button>
       {/* Phase 65.R: single entry — "Provision server" opens the wizard
           whose mode picker covers both "new server" and "connect to an
           existing server". The standalone 🔗 button was removed. */}
       <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
-        <span class="ws-action-emoji">☁</span>
+        <span class="ws-action-emoji"><IconCloud /></span>
         <span class="ws-action-label">{t("sidebar.provision_server")}</span>
       </button>
     </div>

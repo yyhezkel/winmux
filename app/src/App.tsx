@@ -11,6 +11,15 @@ import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
 import { ProvisioningWizard } from "./ProvisioningWizard";
 import { InsightsWindow } from "./InsightsWindow";
+import { ClaudeUsageIndicator } from "./ClaudeUsageIndicator";
+import {
+  IconBell,
+  IconFolder,
+  IconGlobe,
+  IconActivity,
+  IconGitCompare,
+} from "./icons";
+import { createNarrow } from "./useNarrow";
 import { AddonsWindow } from "./AddonsWindow";
 import { SettingsModal } from "./SettingsModal";
 import { SshKeyOfferModal } from "./SshKeyOfferModal";
@@ -315,6 +324,9 @@ function App() {
   // icons). Any legacy "hidden" value migrates to "icons" on read so
   // older settings.json files don't strand the sidebar off-screen.
   const [sidebarWidth, setSidebarWidth] = createSignal(loadSidebarWidth());
+  // Collapse the workspace-header tool buttons to icon-only when the header is
+  // too narrow to fit their labels (labels then live in each button's title).
+  const wsHeaderNarrow = createNarrow(640);
   const sidebarMode = (): SidebarMode => {
     // Read as a plain string: a legacy settings.json may still hold the
     // dropped "hidden" value, which is outside the SidebarMode union.
@@ -2126,6 +2138,18 @@ function App() {
           {t("panel.connecting")}
         </div>
       </Show>
+      {/* Phase 78: global Claude subscription-usage indicator (top-right). */}
+      <Show when={settings()?.claude_usage?.show_top_indicator ?? true}>
+        <ClaudeUsageIndicator
+          workspaceId={file().active_workspace_id ?? undefined}
+          live={
+            !!file().active_workspace_id &&
+            liveWorkspaceIds().has(file().active_workspace_id!)
+          }
+          displayMode={settings()?.claude_usage?.display_mode ?? "percent"}
+          refreshMinutes={settings()?.claude_usage?.auto_refresh_minutes ?? 10}
+        />
+      </Show>
       <ErrorBoundary
         fallback={(err) => (
           <div class="sidebar-error">
@@ -2213,7 +2237,11 @@ function App() {
               </div>
             )}
           >
-          <div class="ws-header">
+          <div
+            class="ws-header"
+            classList={{ compact: wsHeaderNarrow.narrow() }}
+            ref={wsHeaderNarrow.ref}
+          >
             <span
               class="ws-dot"
               style={{ background: activeWs()!.color || "#6b7682" }}
@@ -2249,7 +2277,8 @@ function App() {
                   if (pid) splitPane(pid, "horizontal", "diff");
                 }}
               >
-                {t("ws_header.add_diff")}
+                <IconGitCompare />
+                <span class="ws-header-btn-label">{t("ws_header.add_diff")}</span>
               </button>
               {/* Phase 60 (smoke-test 2a): Browser + Files buttons
                   live HERE, next to + diff — they're workspace-scoped
@@ -2262,14 +2291,16 @@ function App() {
                 title={t("sidebar.browser.tooltip")}
                 onClick={() => void armWorkspaceConnection().then(() => setShowBrowserWindow(true))}
               >
-                🌐 {t("sidebar.browser.label")}
+                <IconGlobe />
+                <span class="ws-header-btn-label">{t("sidebar.browser.label")}</span>
               </button>
               <button
                 class="ws-header-btn"
                 title={t("sidebar.files.tooltip")}
                 onClick={() => void openPanelConnected("files")}
               >
-                🗂 {t("sidebar.files.label")}
+                <IconFolder />
+                <span class="ws-header-btn-label">{t("sidebar.files.label")}</span>
               </button>
               {/* Phase 68 (UX): Server Insights monitor, right after Files. */}
               <button
@@ -2277,7 +2308,8 @@ function App() {
                 title={t("sidebar.insights.tooltip")}
                 onClick={() => void openPanelConnected("monitor")}
               >
-                📊 {t("sidebar.insights.label")}
+                <IconActivity />
+                <span class="ws-header-btn-label">{t("sidebar.insights.label")}</span>
               </button>
               {/* Feedback reorg: Notifications button lives at the header edge,
                   after Monitor. Moved here from the sidebar so all workspace
@@ -2287,7 +2319,8 @@ function App() {
                 title={t("notif.title")}
                 onClick={() => openPanel("notifications")}
               >
-                🔔 {t("notif.title")}
+                <IconBell />
+                <span class="ws-header-btn-label">{t("notif.title")}</span>
                 <Show when={unreadNotifs() > 0}>
                   <span class="notif-bell-badge">{unreadNotifs() > 99 ? "99+" : unreadNotifs()}</span>
                 </Show>
@@ -2472,9 +2505,12 @@ function App() {
           InsightsWindow above; Diff + Browser follow on their own tracks. */}
       <PanelSurface
         surface={surfaceOf("notifications")}
-        icon="🔔"
+        icon={<IconBell />}
         title={t("notif.title")}
         bodyClass="notif-body"
+        drawerStorageKey="winmux.drawer-width.notifications"
+        drawerDefaultWidth={440}
+        drawerMinWidth={320}
         floatStorageKey="winmux.panel-notifications-geometry"
         floatDefault={{ x: 220, y: 90, w: 440, h: 640 } satisfies Geometry}
         floatMinW={320}
@@ -2498,9 +2534,11 @@ function App() {
       />
       <PanelSurface
         surface={surfaceOf("files")}
-        icon="🗂"
+        icon={<IconFolder />}
         title={t("files.window.title", { workspace: activeWs()?.name ?? "" })}
-        drawerWidth="min(1100px, 96vw)"
+        drawerStorageKey="winmux.drawer-width.files"
+        drawerDefaultWidth={900}
+        drawerMinWidth={520}
         bodyClass="files-body"
         floatStorageKey={`winmux.panel-files-geometry.${file().active_workspace_id ?? "none"}`}
         floatDefault={{ x: 160, y: 100, w: 1100, h: 700 } satisfies Geometry}
@@ -2630,6 +2668,20 @@ function App() {
         open={!!addonsWin()}
         workspaceId={addonsWin()?.id}
         workspaceName={addonsWin()?.name}
+        separateClaudeAccount={
+          file().workspaces.find((w) => w.id === addonsWin()?.id)
+            ?.claude_separate_account ?? false
+        }
+        onToggleSeparateClaudeAccount={(v) => {
+          const id = addonsWin()?.id;
+          if (!id) return;
+          void invoke("workspace_set_claude_separate_account", {
+            workspaceId: id,
+            enabled: v,
+          }).catch((e) =>
+            console.error("workspace_set_claude_separate_account failed", e),
+          );
+        }}
         onClose={() => setAddonsWin(null)}
       />
 

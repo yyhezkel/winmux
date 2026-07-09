@@ -2,6 +2,7 @@ import { createMemo, createEffect, For, Show, onCleanup } from "solid-js";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { ForwardRow, Workspace } from "./types";
 import { t } from "./i18n";
+import { IconClose, IconCheck, IconGlobe } from "./icons";
 
 // Phase 46: detect-only + click-to-forward. The watcher reports
 // LISTEN ports → row appears with [Forward]. User clicks → backend
@@ -125,7 +126,7 @@ export function PortsWindow(p: Props) {
               </Show>
             </h3>
             <button class="feed-x" title={t("common.close")} onClick={p.onClose}>
-              ×
+              <IconClose />
             </button>
           </div>
 
@@ -151,9 +152,11 @@ export function PortsWindow(p: Props) {
               }
             >
               <span class="ports-toggle-state">
-                {enabled()
-                  ? `✓ ${t("ports.window.toggle.active")}`
-                  : t("ports.window.toggle.inactive")}
+                {enabled() ? (
+                  <><IconCheck size={14} /> {t("ports.window.toggle.active")}</>
+                ) : (
+                  t("ports.window.toggle.inactive")
+                )}
               </span>
               <span class="ports-toggle-label">{t("ports.window.toggle.label")}</span>
             </button>
@@ -179,7 +182,7 @@ export function PortsWindow(p: Props) {
                           title={t("ports.window.row.forwardAction")}
                           onClick={() => void startAndOpen(r.remote_port)}
                         >
-                          <span class="ports-row-icon">🌐</span>
+                          <span class="ports-row-icon"><IconGlobe size={14} /></span>
                           <span class="ports-row-label">
                             :{r.remote_port}
                             <span class="ports-row-sub">{(r as { addr: string }).addr}</span>
@@ -202,7 +205,7 @@ export function PortsWindow(p: Props) {
                         class="ports-row ports-row-forwarded"
                         title={browserUrl((r as { local_port: number }).local_port)}
                       >
-                        <span class="ports-row-icon">🌐</span>
+                        <span class="ports-row-icon"><IconGlobe size={14} /></span>
                         <span
                           class="ports-row-label"
                           onClick={() => openInBrowser((r as { local_port: number }).local_port)}

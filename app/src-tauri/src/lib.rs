@@ -6,6 +6,7 @@ mod bidi_filter;
 mod workspace_browser;
 mod claude_log;
 mod claude_summary;
+mod claude_usage;
 mod connect_wizard;
 mod dev;
 mod diff_pane;
@@ -1914,6 +1915,7 @@ async fn provision_existing_install_key(
         auto_port_forward: false,
         last_active_at: 0,
         git_worktree: None,
+        claude_separate_account: false,
     };
     {
         let mut file = state.workspaces.lock().map_err(|e| e.to_string())?;
@@ -3029,6 +3031,7 @@ fn workspace_create(
         auto_port_forward: false,
         last_active_at: 0,
         git_worktree: None,
+        claude_separate_account: false,
     };
     {
         let mut file = state.workspaces.lock().unwrap();
@@ -3300,6 +3303,32 @@ async fn workspace_set_auto_port_forward(
         // should start the watcher immediately. Best-effort: no-op if
         // no pane-backed SSH session has set up a tunnel yet.
         try_ensure_port_watcher(&state, &workspace_id).await;
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(updated)
+}
+
+/// Phase 78: flip the per-workspace "uses a different Claude account" flag.
+/// When set, the Claude-usage indicator fetches this workspace's own
+/// subscription usage instead of reusing the global (single-account) value.
+#[tauri::command]
+async fn workspace_set_claude_separate_account(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    enabled: bool,
+) -> Result<Workspace, String> {
+    let updated: Workspace;
+    {
+        let mut file = state.workspaces.lock().map_err(|e| e.to_string())?;
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        ws.claude_separate_account = enabled;
+        updated = ws.clone();
     }
     persist(&state)?;
     let _ = app.emit("workspaces:changed", ());
@@ -5782,6 +5811,7 @@ pub fn run() {
             workspace_rename,
             workspace_set_identity,
             workspace_set_auto_port_forward,
+            workspace_set_claude_separate_account,
             port_forward_stop,
             forward_port_start,
             workspace_ensure_port_watcher,
@@ -5814,6 +5844,7 @@ pub fn run() {
             pane_persistence_get,
             pane_persistence_list,
             pane_list_claude_sessions,
+            claude_usage::claude_usage_fetch,
             pane_list_tmux_sessions,
             tmux_rename_session,
             tmux_labels_get,
@@ -6037,6 +6068,7 @@ mod migration_tests {
             auto_port_forward: apf,
             last_active_at: 0,
             git_worktree: None,
+            claude_separate_account: false,
         }
     }
 
@@ -6101,6 +6133,7 @@ mod migration_tests {
             auto_port_forward: false,
             last_active_at: 0,
             git_worktree: None,
+            claude_separate_account: false,
         }
     }
 
@@ -6187,6 +6220,7 @@ mod migration_tests {
                 auto_port_forward: false,
                 last_active_at: 0,
                 git_worktree: None,
+                claude_separate_account: false,
             }],
             ..Default::default()
         };

@@ -322,6 +322,13 @@ pub struct Workspace {
     // it never collides with the user's working tree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_worktree: Option<PathBuf>,
+    // Phase 78: when true, this workspace uses a DIFFERENT Claude account
+    // than the others, so its subscription-usage % must be fetched from
+    // this workspace specifically rather than reusing the global (single-
+    // account) value. Default false → all workspaces share one account and
+    // one fetch. `#[serde(default)]` so older workspaces.json load cleanly.
+    #[serde(default)]
+    pub claude_separate_account: bool,
 }
 
 // ─── Phase 59: serde back-compat tests ──────────────────────────────
@@ -696,6 +703,7 @@ mod tests {
             auto_port_forward: true,
             last_active_at: 1_700_000_000,
             git_worktree: None,
+            claude_separate_account: false,
         };
         let v = serde_json::to_value(&w).unwrap();
         // Spot-check the wire format.

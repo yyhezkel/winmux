@@ -18,6 +18,7 @@ import type { LayoutNode } from "./types";
 import { t } from "./i18n";
 import { keyEq } from "./shortcuts";
 import { TechText } from "./TechText";
+import { IconGitCompare, IconChevronDown, IconClose } from "./icons";
 
 interface Props {
   workspaceId: string;
@@ -228,7 +229,7 @@ export function DiffPane(p: Props) {
       onMouseDown={() => p.onFocus(p.pane.pane_id)}
     >
       <div class="pane-header">
-        <span class="pane-conn">⎇ diff</span>
+        <span class="pane-conn"><IconGitCompare size={14} /> diff</span>
         <div class="diff-pane-source">
           <button
             class="ws-header-btn"
@@ -239,7 +240,7 @@ export function DiffPane(p: Props) {
             <Show when={source().kind === "ref"}>
               {" "}<TechText text={(source() as { kind: "ref"; git_ref: string }).git_ref} />
             </Show>
-            {" ▾"}
+            {" "}<IconChevronDown size={13} />
           </button>
           <Show when={menuOpen()}>
             <div class="diff-pane-menu">
@@ -267,7 +268,7 @@ export function DiffPane(p: Props) {
           title={t("common.close")}
           onClick={(e) => { e.stopPropagation(); p.onClose(p.pane.pane_id); }}
         >
-          ×
+          <IconClose size={14} />
         </button>
       </div>
 

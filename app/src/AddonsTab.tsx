@@ -1,6 +1,7 @@
 import { createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { IconClose, IconCheck, IconArrowUp } from "./icons";
 import type { AddonStatus } from "./bindings/AddonStatus";
 
 // Phase 68.E: Settings → Add-ons. Per-workspace (add-ons live on the
@@ -65,7 +66,7 @@ export function AddonsTab(p: { workspaceId?: string }) {
         <p class="settings-hint">{t("settings.addons.hint")}</p>
         <Show when={err()}>
           <div class="wizard-test-result err">
-            <div class="wizard-test-line">✗ {err()}</div>
+            <div class="wizard-test-line"><IconClose size={14} /> {err()}</div>
           </div>
         </Show>
         <div class="addons-list">
@@ -75,9 +76,12 @@ export function AddonsTab(p: { workspaceId?: string }) {
                 <div class="addons-meta">
                   <strong>{r.id}</strong>
                   <span class="settings-hint">
-                    {r.installed
-                      ? `${r.installed_version ?? "✓"}${r.update_available ? ` → ${r.available_version} ⬆` : ""}`
-                      : t("settings.addons.not_installed")}
+                    <Show when={r.installed} fallback={t("settings.addons.not_installed")}>
+                      {r.installed_version ?? <IconCheck size={14} />}
+                      <Show when={r.update_available}>
+                        {" → "}{r.available_version} <IconArrowUp size={14} />
+                      </Show>
+                    </Show>
                   </span>
                 </div>
                 <div class="addons-actions">

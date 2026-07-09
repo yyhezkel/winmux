@@ -1,6 +1,7 @@
 import { createSignal, createMemo, For, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { IconClose, IconCheck } from "./icons";
 import type { ServerDiscovery } from "./bindings/ServerDiscovery";
 import type { ConnectExistingInput } from "./bindings/ConnectExistingInput";
 import type { ConnectExistingResult } from "./bindings/ConnectExistingResult";
@@ -207,7 +208,7 @@ export function ConnectExistingFlow(p: Props) {
 
         <Show when={authError()}>
           <div class="wizard-test-result err">
-            <div class="wizard-test-line">✗ {authError()}</div>
+            <div class="wizard-test-line"><IconClose size={14} /> {authError()}</div>
           </div>
         </Show>
 
@@ -233,7 +234,7 @@ export function ConnectExistingFlow(p: Props) {
             <>
               <div class="wizard-test-result ok">
                 <div class="wizard-test-line">
-                  ✓{" "}
+                  <IconCheck size={14} />{" "}
                   {d.is_root
                     ? t("connectExisting.status.root")
                     : d.can_sudo
@@ -352,7 +353,7 @@ export function ConnectExistingFlow(p: Props) {
 
               <Show when={execError()}>
                 <div class="wizard-test-result err">
-                  <div class="wizard-test-line">✗ {execError()}</div>
+                  <div class="wizard-test-line"><IconClose size={14} /> {execError()}</div>
                 </div>
               </Show>
 
@@ -379,7 +380,7 @@ export function ConnectExistingFlow(p: Props) {
       <Show when={step() === "result" && result()}>
         <div class="wizard-test-result ok">
           <div class="wizard-test-line">
-            ✓{" "}
+            <IconCheck size={14} />{" "}
             {t("connectExisting.result.ready", {
               name: result()!.workspace_name,
             })}

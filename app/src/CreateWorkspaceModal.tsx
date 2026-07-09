@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { IconGitBranch, IconCheck, IconClose } from "./icons";
 import type { Connection, EnvVar, Workspace } from "./types";
 
 // Phase 13.A wizard data shapes — mirror the Rust definitions in
@@ -629,7 +630,7 @@ export function CreateWorkspaceModal(p: Props) {
                 when={!p.editing?.git_worktree}
                 fallback={
                   <p class="settings-hint">
-                    🌿 {t("ws.worktree.alreadyOn")}{" "}
+                    <IconGitBranch size={13} /> {t("ws.worktree.alreadyOn")}{" "}
                     <code>{p.editing?.git_worktree}</code>
                   </p>
                 }
@@ -990,7 +991,7 @@ export function CreateWorkspaceModal(p: Props) {
                     class={`wizard-test-result ${testResult()!.ok ? "ok" : "err"}`}
                   >
                     <div class="wizard-test-line">
-                      {testResult()!.ok ? "✓" : "✗"}{" "}
+                      {testResult()!.ok ? <IconCheck size={14} /> : <IconClose size={14} />}{" "}
                       {testResult()!.message ??
                         (testResult()!.ok ? t("wizard.test_connected") : t("wizard.test_failed"))}
                     </div>

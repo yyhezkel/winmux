@@ -444,6 +444,7 @@ async fn dispatch(
                 auto_port_forward: false,
                 last_active_at: 0,
                 git_worktree: None,
+                claude_separate_account: false,
             };
             let cloned = ws.clone();
             {

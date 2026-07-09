@@ -451,6 +451,9 @@ body {
 }
 .ws-header-btn {
   margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: var(--w-surface-hi);
   color: var(--w-accent);
   border: 1px solid var(--w-border-hi);
@@ -463,6 +466,24 @@ body {
 .ws-header-btn:hover {
   background: rgba(122, 162, 247, 0.16);
   border-color: var(--w-accent);
+}
+/* Phase 79: collapse the workspace-header tools to icon-only when narrow.
+   The label survives as each button's title (tooltip). */
+.ws-header.compact .ws-header-btn-label { display: none; }
+.ws-header.compact .ws-header-btn { padding: 4px 7px; gap: 0; }
+/* Panel tab rows collapse the same way. */
+.ins-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ins-tabs.compact .ins-tab-label { display: none; }
+/* Header control buttons now hold an SVG — center it. */
+.side-drawer-btn,
+.ins-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Phase 8.A: browser pane (iframe MVP) */
@@ -1394,6 +1415,21 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   border-inline-start: 1px solid var(--w-border-hi);
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
   animation: notif-slide 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* Phase 79: drag the drawer's inner (inline-start) edge to resize its width. */
+.side-drawer-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  inset-inline-start: 0;
+  width: 8px;
+  margin-inline-start: -4px;
+  z-index: 5;
+  cursor: col-resize;
+  background: transparent;
+}
+.side-drawer-resizer:hover {
+  background: rgba(122, 162, 247, 0.5);
 }
 [dir="rtl"] .side-drawer {
   box-shadow: 8px 0 32px rgba(0, 0, 0, 0.4);
@@ -5409,3 +5445,52 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 @keyframes connecting-spin {
   to { transform: rotate(360deg); }
 }
+
+/* Phase 78: global Claude subscription-usage indicator — centered in the top
+   row so it never covers the sidebar logo. Grows symmetrically as more metrics
+   become visible. */
+.claude-usage-pill {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 92vw;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--w-surface-hi);
+  border: 1px solid var(--w-border-hi);
+  color: var(--w-text);
+  font-size: var(--w-fs-sm);
+  cursor: default;
+  user-select: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+.cu-glyph { font-size: 12px; line-height: 1; }
+.cu-metric { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.cu-label { opacity: 0.7; font-size: calc(var(--w-fs-sm) - 1px); }
+.cu-pct { font-weight: 600; font-variant-numeric: tabular-nums; }
+.cu-bar {
+  width: 46px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--w-border, #2a2e44);
+  overflow: hidden;
+}
+.cu-bar-fill { display: block; height: 100%; transition: width 0.3s; }
+
+/* Phase 78: Monitor → Claude Usage tab + settings row. */
+.ins-claude { display: flex; flex-direction: column; gap: 10px; }
+.ins-claude-detail { margin-top: 4px; }
+.claude-usage-settings-row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.claude-usage-refresh { display: flex; align-items: center; gap: 6px; }
+.claude-usage-refresh input { width: 64px; }

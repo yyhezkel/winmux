@@ -20,7 +20,7 @@ interface Props {
   defaultGeom: Geometry;
   minW: number;
   minH: number;
-  icon?: string;
+  icon?: JSX.Element;
   title: string;
   headerActions?: JSX.Element;
   bodyClass?: string;

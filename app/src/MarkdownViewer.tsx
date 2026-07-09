@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { t } from "./i18n";
 import { markdownDoc, closeMarkdown } from "./mdViewerStore";
+import { IconFile, IconClose } from "./icons";
 import {
   clampToViewport,
   makeWindowControls,
@@ -93,14 +94,14 @@ export function MarkdownViewer() {
         }}
       >
         <div class="fm-window-header" onMouseDown={onDragStart}>
-          <span class="fm-window-title">📄 {markdownDoc()!.title}</span>
+          <span class="fm-window-title"><IconFile size={15} /> {markdownDoc()!.title}</span>
           <button
             class="fm-window-x md-window-x"
             onClick={closeMarkdown}
             title={t("common.close")}
             aria-label={t("common.close")}
           >
-            ×
+            <IconClose size={15} />
           </button>
         </div>
         <div class="fm-window-body md-view-body">

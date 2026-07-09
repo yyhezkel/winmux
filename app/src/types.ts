@@ -17,6 +17,8 @@ export type { LayoutNode } from "./bindings/LayoutNode";
 export type { Workspace } from "./bindings/Workspace";
 export type { FeedItem } from "./bindings/FeedItem";
 export type { FeedItemState } from "./bindings/FeedItemState";
+export type { ClaudeUsage } from "./bindings/ClaudeUsage";
+export type { ModelUsage } from "./bindings/ModelUsage";
 
 import type { Connection } from "./bindings/Connection";
 import type { LayoutNode } from "./bindings/LayoutNode";

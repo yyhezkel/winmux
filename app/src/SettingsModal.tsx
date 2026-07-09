@@ -16,8 +16,10 @@ import {
   loadSettings,
   DEFAULT_SHORTCUTS,
   DEFAULT_CLAUDE_SETTINGS,
+  DEFAULT_CLAUDE_USAGE_SETTINGS,
 } from "./settings";
 import { applyI18nSettings, LANGUAGES, t } from "./i18n";
+import { IconChevronDown, IconChevronRight, IconRefreshCcw } from "./icons";
 import { VersionManager } from "./VersionManager";
 import { formatEvent } from "./shortcuts";
 import { AddonsTab } from "./AddonsTab";
@@ -196,7 +198,7 @@ export function SettingsModal(p: Props) {
     if (saving()) return "saving…";
     if (!lastSaved()) return "";
     const sec = Math.floor((Date.now() - lastSaved()) / 1000);
-    if (sec < 5) return "saved ✓";
+    if (sec < 5) return t("settings.saved");
     return "";
   });
 
@@ -328,7 +330,7 @@ export function SettingsModal(p: Props) {
                 <section>
                   <h4>
                     <button class="settings-disclose" onClick={() => setAdvanced(!advanced())}>
-                      {advanced() ? "▾" : "▸"} ANSI palette (xterm 16)
+                      {advanced() ? <IconChevronDown size={13} /> : <IconChevronRight size={13} />} ANSI palette (xterm 16)
                     </button>
                   </h4>
                   <Show when={advanced()}>
@@ -651,6 +653,52 @@ export function SettingsModal(p: Props) {
                   <p class="settings-hint">
                     {t("settings.claude.prompt_hint")}
                   </p>
+
+                  {/* Phase 78: usage-indicator display + auto-refresh (one row). */}
+                  <h4 style="margin-top:18px">{t("claudeUsage.settings.title")}</h4>
+                  <div class="claude-usage-settings-row">
+                    <label class="settings-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={(p.settings.claude_usage ?? DEFAULT_CLAUDE_USAGE_SETTINGS).show_top_indicator}
+                        onChange={(e) =>
+                          update("claude_usage", {
+                            ...(p.settings.claude_usage ?? DEFAULT_CLAUDE_USAGE_SETTINGS),
+                            show_top_indicator: e.currentTarget.checked,
+                          } as Settings["claude_usage"])
+                        }
+                      />
+                      <span>{t("claudeUsage.settings.show")}</span>
+                    </label>
+                    <select
+                      value={(p.settings.claude_usage ?? DEFAULT_CLAUDE_USAGE_SETTINGS).display_mode}
+                      onChange={(e) =>
+                        update("claude_usage", {
+                          ...(p.settings.claude_usage ?? DEFAULT_CLAUDE_USAGE_SETTINGS),
+                          display_mode: e.currentTarget.value,
+                        } as Settings["claude_usage"])
+                      }
+                    >
+                      <option value="percent">{t("claudeUsage.settings.modePercent")}</option>
+                      <option value="bar">{t("claudeUsage.settings.modeBar")}</option>
+                    </select>
+                    <label class="claude-usage-refresh">
+                      <span>{t("claudeUsage.settings.autoRefresh")}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="120"
+                        value={(p.settings.claude_usage ?? DEFAULT_CLAUDE_USAGE_SETTINGS).auto_refresh_minutes}
+                        onChange={(e) =>
+                          update("claude_usage", {
+                            ...(p.settings.claude_usage ?? DEFAULT_CLAUDE_USAGE_SETTINGS),
+                            auto_refresh_minutes: Math.max(0, Math.min(120, parseInt(e.currentTarget.value) || 0)),
+                          } as Settings["claude_usage"])
+                        }
+                      />
+                    </label>
+                  </div>
+                  <p class="settings-hint">{t("claudeUsage.settings.hint")}</p>
                 </section>
               </Show>
 
@@ -1099,7 +1147,7 @@ function ShortcutRow(p: {
         title={t("common.reset")}
         onClick={() => p.onChange(p.defaultValue)}
       >
-        ↺
+        <IconRefreshCcw />
       </button>
     </div>
   );

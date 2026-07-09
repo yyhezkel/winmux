@@ -2,6 +2,7 @@ import { createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { t } from "./i18n";
+import { IconRefresh, IconBadgePlus, IconClose, IconCircle, IconCheck, IconWarning } from "./icons";
 
 // Phase 71 — Settings → Updates version manager: list every published
 // release, install any of them (incl. downgrade, with a warning), and pick a
@@ -117,7 +118,7 @@ export function VersionManager(p: {
           </select>
         </label>
         <button class="vm-refresh" disabled={loading()} onClick={() => void load(true)}>
-          {loading() ? "…" : "⟳"}
+          {loading() ? "…" : <IconRefresh size={14} />}
         </button>
       </div>
       <p class="settings-hint">
@@ -126,14 +127,14 @@ export function VersionManager(p: {
           {" · "}
           {t("vm.latest")} <code>{latest()!.version}</code>
           <Show when={current() && latest() && cmpSemver(latest()!.version, current()) > 0}>
-            {" "}🆕
+            {" "}<IconBadgePlus size={14} />
           </Show>
         </Show>
       </p>
 
       <Show when={err()}>
         <div class="vm-err">
-          ✗ {err()}
+          <IconClose size={14} /> {err()}
           <button onClick={() => void load(true)}>{t("vm.retry")}</button>
         </div>
       </Show>
@@ -145,7 +146,7 @@ export function VersionManager(p: {
             <div class={`vm-row ${isCurrent(r) ? "current" : ""}`}>
               <div class="vm-row-head" onClick={() => setExpanded(expanded() === r.version ? null : r.version)}>
                 <span class="vm-ver">
-                  {isCurrent(r) ? "●" : r === latest() ? "✓" : "○"} v{r.version}
+                  {isCurrent(r) ? <IconCircle size={14} /> : r === latest() ? <IconCheck size={14} /> : <IconCircle size={14} />} v{r.version}
                   <Show when={r.prerelease}><span class="vm-pre">beta</span></Show>
                 </span>
                 <span class="vm-date">{fmtDate(r.published_at)}</span>
@@ -188,7 +189,7 @@ export function VersionManager(p: {
           <For each={p.skipped}>
             {(v) => (
               <span class="vm-skip-chip">
-                {v} <button onClick={() => p.onUnskip(v)} title={t("vm.unskip")}>×</button>
+                {v} <button onClick={() => p.onUnskip(v)} title={t("vm.unskip")}><IconClose size={14} /></button>
               </span>
             )}
           </For>
@@ -204,7 +205,7 @@ export function VersionManager(p: {
               {" "}v{confirmTarget()!.version}
             </h4>
             <Show when={isDowngrade(confirmTarget()!)}>
-              <p class="vm-warn">⚠ {t("vm.confirm.downgrade_warn")}</p>
+              <p class="vm-warn"><IconWarning size={14} /> {t("vm.confirm.downgrade_warn")}</p>
               <label class="settings-checkbox">
                 <input type="checkbox" checked={backup()} onChange={(e) => setBackup(e.currentTarget.checked)} />
                 <span>{t("vm.confirm.backup")}</span>

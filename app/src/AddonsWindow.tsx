@@ -1,6 +1,7 @@
 import { createSignal, Show } from "solid-js";
 import { t } from "./i18n";
 import { AddonsTab } from "./AddonsTab";
+import { IconPuzzle, IconClose } from "./icons";
 import {
   clampToViewport,
   makeWindowControls,
@@ -16,6 +17,9 @@ interface Props {
   open: boolean;
   workspaceId?: string;
   workspaceName?: string;
+  // Phase 78: per-workspace "different Claude account" flag + setter.
+  separateClaudeAccount?: boolean;
+  onToggleSeparateClaudeAccount?: (v: boolean) => void;
   onClose: () => void;
 }
 
@@ -48,14 +52,26 @@ export function AddonsWindow(p: Props) {
       >
         <div class="fm-window-header" onMouseDown={onDragStart}>
           <span class="fm-window-title">
-            🧩 {t("settings.addons.title")}
+            <IconPuzzle size={14} /> {t("settings.addons.title")}
             {p.workspaceName ? ` — ${p.workspaceName}` : ""}
           </span>
           <button class="fm-window-x addons-win-x" onClick={p.onClose} title={t("common.close")}>
-            ×
+            <IconClose />
           </button>
         </div>
         <div class="fm-window-body" style="display:block; overflow:auto; padding:12px 14px;">
+          <label
+            class="settings-checkbox"
+            style="margin:0 0 12px"
+            title={t("workspace.separateClaudeAccount.hint")}
+          >
+            <input
+              type="checkbox"
+              checked={p.separateClaudeAccount ?? false}
+              onChange={(e) => p.onToggleSeparateClaudeAccount?.(e.currentTarget.checked)}
+            />
+            <span>{t("workspace.separateClaudeAccount")}</span>
+          </label>
           <AddonsTab workspaceId={p.workspaceId} />
         </div>
         <ResizeHandles onStart={onResizeStart} />

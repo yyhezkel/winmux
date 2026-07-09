@@ -6,6 +6,7 @@ import {
 import type { Workspace } from "./types";
 import { FileManagerPane } from "./FileManagerPane";
 import { t } from "./i18n";
+import { IconFolder, IconClose } from "./icons";
 import {
   clampToViewport,
   makeWindowControls,
@@ -121,7 +122,7 @@ export function FileManagerWindow(p: Props) {
             Windows/macOS convention Yossi expects. */}
         <div class="fm-window-header" onMouseDown={onDragStart}>
           <span class="fm-window-title">
-            🗂{" "}
+            <IconFolder size={15} />{" "}
             {t("files.window.title", { workspace: p.workspace!.name })}
           </span>
           <button
@@ -130,7 +131,7 @@ export function FileManagerWindow(p: Props) {
             title={t("common.close")}
             aria-label={t("common.close")}
           >
-            ×
+            <IconClose size={15} />
           </button>
         </div>
         <div class="fm-window-body">

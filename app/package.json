@@ -23,6 +23,7 @@
     "bidi-js": "^1.0.3",
     "dompurify": "^3.4.11",
     "html2canvas": "^1.4.1",
+    "lucide-solid": "^1.23.0",
     "markdown-it": "^14.2.0",
     "marked": "^18.0.4",
     "qrcode-generator": "^1.4.4",

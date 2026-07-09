@@ -7,6 +7,23 @@ import { FileEditor } from "./FileEditor";
 import { TechText } from "./TechText";
 import { saveRemoteFileAs } from "./download";
 import { openMarkdown, isMarkdownFile } from "./mdViewerStore";
+import {
+  IconArrowUp,
+  IconRefresh,
+  IconPlus,
+  IconScissors,
+  IconClipboard,
+  IconClose,
+  IconChevronUp,
+  IconChevronDown,
+  IconUpload,
+  IconDownload,
+  IconCopy,
+  IconWarning,
+  IconFolder,
+  IconLink,
+  IconFile,
+} from "./icons";
 
 // Phase 15.B: dual-column file manager (local + remote SFTP).
 //
@@ -999,7 +1016,7 @@ export function FileManagerPane(p: Props) {
     };
     return (
       <div class="fm-col-head">
-        <button class="fm-up" title={t("fm.btn.up")} onClick={() => goUp(props.side)}>↑</button>
+        <button class="fm-up" title={t("fm.btn.up")} onClick={() => goUp(props.side)}><IconArrowUp size={14} /></button>
         <input
           class="fm-path"
           value={props.path()}
@@ -1015,13 +1032,13 @@ export function FileManagerPane(p: Props) {
           }}
           spellcheck={false}
         />
-        <button class="fm-tool" title={t("fm.btn.refresh")} onClick={props.refresh}>⟳</button>
+        <button class="fm-tool" title={t("fm.btn.refresh")} onClick={props.refresh}><IconRefresh size={14} /></button>
         <button
           class="fm-tool fm-add-btn"
           title={t("fm.btn.add_menu")}
           onClick={openAdd}
         >
-          ＋
+          <IconPlus size={14} />
         </button>
       </div>
     );
@@ -1037,7 +1054,7 @@ export function FileManagerPane(p: Props) {
       <Show when={clip()}>
         <div class="fm-clip-bar">
           <span class="fm-clip-label">
-            {clip()!.op === "cut" ? "✂" : "📋"} {clip()!.name}
+            {clip()!.op === "cut" ? <IconScissors size={13} /> : <IconClipboard size={13} />} {clip()!.name}
             <span class="fm-clip-src">({clip()!.side})</span>
           </span>
           <span class="fm-clip-actions">
@@ -1050,7 +1067,7 @@ export function FileManagerPane(p: Props) {
               </button>
             </Show>
             <button class="fm-clip-btn fm-clip-x" title={t("fm.paste.clear")} onClick={() => setClip(null)}>
-              ✕
+              <IconClose size={13} />
             </button>
           </span>
         </div>
@@ -1098,7 +1115,7 @@ export function FileManagerPane(p: Props) {
           title={sortDir() === "asc" ? t("fm.sort.asc") : t("fm.sort.desc")}
           onClick={() => setSortDir(sortDir() === "asc" ? "desc" : "asc")}
         >
-          {sortDir() === "asc" ? "▲" : "▼"}
+          {sortDir() === "asc" ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
         </button>
         {/* Phase 29 (C): name-substring filter, applies to both
              columns, composes with sort. */}
@@ -1116,7 +1133,7 @@ export function FileManagerPane(p: Props) {
               title={t("common.close")}
               onClick={() => setFilterText("")}
             >
-              ×
+              <IconClose size={13} />
             </button>
           </Show>
         </div>
@@ -1177,7 +1194,7 @@ export function FileManagerPane(p: Props) {
             }
             onClick={() => void uploadSel()}
           >
-            ↥
+            <IconUpload size={14} />
           </button>
           <button
             class="fm-action"
@@ -1190,7 +1207,7 @@ export function FileManagerPane(p: Props) {
             }
             onClick={() => void downloadSel()}
           >
-            ↧
+            <IconDownload size={14} />
           </button>
         </Show>
         <button
@@ -1213,7 +1230,7 @@ export function FileManagerPane(p: Props) {
             if (s) void copyPathOf(s.side, s.entry.name);
           }}
         >
-          ⧉
+          <IconCopy size={14} />
         </button>
         {/* Phase 57: compress / extract. Zip always enabled when
             something is selected; Unzip only enabled when the
@@ -1253,7 +1270,7 @@ export function FileManagerPane(p: Props) {
         </button>
         <span class="fm-status">{busy() ? "…" : status()}</span>
         <Show when={err()}>
-          <span class="fm-err" title={err()!}>⚠ {err()}</span>
+          <span class="fm-err" title={err()!}><IconWarning size={13} /> {err()}</span>
         </Show>
       </div>
       <div class={`fm-grid ${p.hasSsh && showLocal() ? "fm-grid-dual" : "fm-grid-single"}`}>
@@ -1280,7 +1297,7 @@ export function FileManagerPane(p: Props) {
                     onDblClick={() => void openLocal(e)}
                     onContextMenu={(ev) => openCtxMenu("local", e, ev)}
                   >
-                    <span class="fm-icon">{e.is_dir ? "📁" : e.is_link ? "🔗" : "📄"}</span>
+                    <span class="fm-icon">{e.is_dir ? <IconFolder size={14} /> : e.is_link ? <IconLink size={14} /> : <IconFile size={14} />}</span>
                     <span class="fm-name"><TechText text={e.name} /></span>
                     <span class="fm-size">{e.is_dir ? "" : fmtSize(e.size)}</span>
                     <span class="fm-time">{fmtTime(e.modified)}</span>
@@ -1329,7 +1346,7 @@ export function FileManagerPane(p: Props) {
                       onDblClick={() => void openRemote(e)}
                       onContextMenu={(ev) => openCtxMenu("remote", e, ev)}
                     >
-                      <span class="fm-icon">{e.is_dir ? "📁" : e.is_link ? "🔗" : "📄"}</span>
+                      <span class="fm-icon">{e.is_dir ? <IconFolder size={14} /> : e.is_link ? <IconLink size={14} /> : <IconFile size={14} />}</span>
                       <span class="fm-name"><TechText text={e.name} /></span>
                       <span class="fm-size">{e.is_dir ? "" : fmtSize(e.size)}</span>
                       <span class="fm-time">{fmtTime(e.modified)}</span>
@@ -1445,24 +1462,24 @@ export function FileManagerPane(p: Props) {
               onClick={(ev) => ev.stopPropagation()}
             >
               <button class="fm-ctx-item" onClick={fire(() => void mkdirIn(side))}>
-                📁  {t("fm.btn.new_folder")}
+                <IconFolder size={14} /> {t("fm.btn.new_folder")}
               </button>
               <button class="fm-ctx-item" onClick={fire(() => void createFileIn(side))}>
-                📄  {t("fm.btn.new_file")}
+                <IconFile size={14} /> {t("fm.btn.new_file")}
               </button>
               <button
                 class="fm-ctx-item"
                 disabled={side === "remote" && !p.hasSsh}
                 onClick={fire(() => pickAndUpload(side))}
               >
-                ↥  {side === "remote"
+                <IconUpload size={14} /> {side === "remote"
                   ? t("fm.btn.upload_from_disk_remote")
                   : t("fm.btn.upload_from_disk_local")}
               </button>
               <Show when={clip()}>
                 <div class="fm-ctx-sep" />
                 <button class="fm-ctx-item" onClick={fire(() => void pasteInto(side))}>
-                  📋  {t("fm.action.paste")}
+                  <IconClipboard size={14} /> {t("fm.action.paste")}
                 </button>
               </Show>
             </div>
@@ -1492,23 +1509,23 @@ export function FileManagerPane(p: Props) {
               onClick={(ev) => ev.stopPropagation()}
             >
               <button class="fm-ctx-item" onClick={fire(() => void mkdirIn(side))}>
-                📁  {t("fm.btn.new_folder")}
+                <IconFolder size={14} /> {t("fm.btn.new_folder")}
               </button>
               <button class="fm-ctx-item" onClick={fire(() => void createFileIn(side))}>
-                📄  {t("fm.btn.new_file")}
+                <IconFile size={14} /> {t("fm.btn.new_file")}
               </button>
               <button
                 class="fm-ctx-item"
                 disabled={side === "remote" && !p.hasSsh}
                 onClick={fire(() => pickAndUpload(side))}
               >
-                ↥  {side === "remote"
+                <IconUpload size={14} /> {side === "remote"
                   ? t("fm.btn.upload_from_disk_remote")
                   : t("fm.btn.upload_from_disk_local")}
               </button>
               <Show when={clip()}>
                 <button class="fm-ctx-item" onClick={fire(() => void pasteInto(side))}>
-                  📋  {t("fm.action.paste")}
+                  <IconClipboard size={14} /> {t("fm.action.paste")}
                 </button>
               </Show>
               <div class="fm-ctx-sep" />

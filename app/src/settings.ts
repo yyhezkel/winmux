@@ -171,6 +171,20 @@ export const DEFAULT_CLAUDE_SETTINGS: ClaudeSettings = {
   summary_language: "auto",
 };
 
+// Phase 78: Claude subscription-usage indicator (mirrors the Rust
+// ClaudeUsageSettings struct in app/src-tauri/src/settings.rs).
+export interface ClaudeUsageSettings {
+  show_top_indicator: boolean;
+  display_mode: "percent" | "bar" | string;
+  auto_refresh_minutes: number;
+}
+
+export const DEFAULT_CLAUDE_USAGE_SETTINGS: ClaudeUsageSettings = {
+  show_top_indicator: true,
+  display_mode: "percent",
+  auto_refresh_minutes: 10,
+};
+
 export interface I18nSettings {
   language: "en" | "he" | "ar" | "ru" | string;
   direction: "auto" | "ltr" | "rtl" | string;
@@ -201,6 +215,8 @@ export interface Settings {
   i18n: I18nSettings;
   shortcuts?: ShortcutsSettings;
   claude?: ClaudeSettings;
+  // Phase 78: Claude usage % indicator display + auto-refresh.
+  claude_usage?: ClaudeUsageSettings;
   hooks_updates?: HooksUpdatesSettings;
   // Phase 41: auto-connect a background SSH session on workspace select.
   // Backend defaults to true; always serialized.

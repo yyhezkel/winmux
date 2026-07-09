@@ -1,5 +1,6 @@
 import { Show, type JSX } from "solid-js";
 import { t } from "./i18n";
+import { IconPanelClose, IconMaximize, IconExternalLink, IconClose } from "./icons";
 
 // Unified side-panel lifecycle: the shared header for the NON-drawer
 // surfaces (float + fullscreen). SideDrawer owns its own header; this
@@ -12,7 +13,7 @@ import { t } from "./i18n";
 // ignore mousedowns on the buttons.
 
 interface Props {
-  icon?: string;
+  icon?: JSX.Element;
   title: string;
   /** Extra header controls (filters, refresh, tabs) rendered before the
    *  surface-transition buttons. */
@@ -43,7 +44,7 @@ export function PanelChrome(p: Props) {
             aria-label={t("panel.collapse")}
             onClick={() => p.onCollapse!()}
           >
-            ⇤
+            <IconPanelClose />
           </button>
         </Show>
         <Show when={p.onFullscreen}>
@@ -53,7 +54,7 @@ export function PanelChrome(p: Props) {
             aria-label={t("drawer.expand")}
             onClick={() => p.onFullscreen!()}
           >
-            ⛶
+            <IconMaximize />
           </button>
         </Show>
         <Show when={p.onFloat}>
@@ -63,7 +64,7 @@ export function PanelChrome(p: Props) {
             aria-label={t("drawer.popout")}
             onClick={() => p.onFloat!()}
           >
-            ⤢
+            <IconExternalLink />
           </button>
         </Show>
         <button
@@ -72,7 +73,7 @@ export function PanelChrome(p: Props) {
           aria-label={t("common.close")}
           onClick={p.onClose}
         >
-          ✕
+          <IconClose />
         </button>
       </div>
     </div>

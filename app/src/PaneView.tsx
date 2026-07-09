@@ -7,6 +7,24 @@ import { describeConnection, effectiveIdentity } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
 import { t } from "./i18n";
 import { TechText } from "./TechText";
+import {
+  IconPencil,
+  IconPower,
+  IconChevronDown,
+  IconArrowLeftRight,
+  IconMaximize,
+  IconMinimize,
+  IconColumns,
+  IconRows,
+  IconExternalLink,
+  IconClose,
+  IconWarning,
+  IconTerminal,
+  IconRefresh,
+  IconClock,
+  IconFolder,
+  IconInfo,
+} from "./icons";
 
 interface ClaudeSessionInfo {
   session_id: string;
@@ -754,7 +772,7 @@ export function PaneView(p: Props) {
               setShowAnnot(!showAnnot());
             }}
           >
-            ⓘ
+            <IconInfo size={14} />
           </button>
         </Show>
         <Show when={p.statusText}>
@@ -768,7 +786,7 @@ export function PaneView(p: Props) {
             openMeta();
           }}
         >
-          ✎
+          <IconPencil size={14} />
         </button>
         <Show when={isTmux()}>
           <span
@@ -785,7 +803,7 @@ export function PaneView(p: Props) {
               title={isTmux() ? t("pane.tooltip.detach") : t("pane.tooltip.disconnect")}
               onClick={() => p.onDisconnect(p.pane.pane_id)}
             >
-              ⏻
+              <IconPower size={14} />
             </button>
             <button
               class="pane-btn pane-disc-caret"
@@ -795,7 +813,7 @@ export function PaneView(p: Props) {
                 setShowDiscMenu(!showDiscMenu());
               }}
             >
-              ▾
+              <IconChevronDown size={13} />
             </button>
             <Show when={showDiscMenu()}>
               <div
@@ -834,7 +852,7 @@ export function PaneView(p: Props) {
             }).catch((err) => console.error("pane_set_smart_bidi failed", err));
           }}
         >
-          ⇆
+          <IconArrowLeftRight size={14} />
         </button>
         {/* Phase 65.T: focus/zoom badge + toggle. The badge shows how
             many panes keep running in the background while this one is
@@ -847,7 +865,7 @@ export function PaneView(p: Props) {
               count: String(p.backgroundPaneCount ?? 0),
             })}
           >
-            ⛶ {p.backgroundPaneCount}
+            <IconMaximize size={13} /> {p.backgroundPaneCount}
           </span>
         </Show>
         <button
@@ -862,10 +880,10 @@ export function PaneView(p: Props) {
             );
           }}
         >
-          {p.isMaximized ? "⤡" : "⛶"}
+          {p.isMaximized ? <IconMinimize size={14} /> : <IconMaximize size={14} />}
         </button>
-        <button class="pane-btn" title="Split right (Ctrl+Shift+D)" onClick={() => p.onSplit(p.pane.pane_id, "horizontal")}>↔</button>
-        <button class="pane-btn" title="Split down (Ctrl+Shift+E)" onClick={() => p.onSplit(p.pane.pane_id, "vertical")}>↕</button>
+        <button class="pane-btn" title="Split right (Ctrl+Shift+D)" onClick={() => p.onSplit(p.pane.pane_id, "horizontal")}><IconColumns size={14} /></button>
+        <button class="pane-btn" title="Split down (Ctrl+Shift+E)" onClick={() => p.onSplit(p.pane.pane_id, "vertical")}><IconRows size={14} /></button>
         {/* Unshipped-fivefer (#4): pop this terminal into its own window.
             Only meaningful for a live session — hidden until connected. */}
         <Show when={p.isConnected}>
@@ -877,10 +895,10 @@ export function PaneView(p: Props) {
               void p.onPopOut(p.pane.pane_id);
             }}
           >
-            ⧉
+            <IconExternalLink size={14} />
           </button>
         </Show>
-        <button class="pane-btn pane-close" title={t("pane.tooltip.close")} onClick={() => p.onClose(p.pane.pane_id)}>×</button>
+        <button class="pane-btn pane-close" title={t("pane.tooltip.close")} onClick={() => p.onClose(p.pane.pane_id)}><IconClose size={14} /></button>
       </div>
       <Show when={editingMeta()}>
         <div class="pane-meta-editor" onMouseDown={(e) => e.stopPropagation()}>
@@ -1008,7 +1026,7 @@ export function PaneView(p: Props) {
                     <h3>First connect to {hostTrustHere()!.target}</h3>
                   }
                 >
-                  <h3>⚠ HOST KEY CHANGED for {hostTrustHere()!.target}</h3>
+                  <h3><IconWarning size={14} /> HOST KEY CHANGED for {hostTrustHere()!.target}</h3>
                 </Show>
                 <Show when={hostTrustHere()!.mismatchOld}>
                   <p class="warn">
@@ -1180,7 +1198,7 @@ export function PaneView(p: Props) {
               onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
               <div class="nc-head">
                 <h3>{t("connect.tmuxPick.title")}</h3>
-                <button class="feed-x" title={t("common.close")} onClick={() => setTmuxPick(null)}>×</button>
+                <button class="feed-x" title={t("common.close")} onClick={() => setTmuxPick(null)}><IconClose size={14} /></button>
               </div>
               <div class="nc-body">
                 <p class="nc-hint">{t("connect.tmuxPick.hint")}</p>
@@ -1189,7 +1207,7 @@ export function PaneView(p: Props) {
                     {(s) => (
                       <div class="nc-resume-row" onClick={() => pickTmuxSession(s.name)} title={s.name}>
                         <div class="nc-resume-head">
-                          <span class="nc-resume-proj">🖥 {s.name}</span>
+                          <span class="nc-resume-proj"><IconTerminal size={14} /> {s.name}</span>
                           <span class="nc-resume-badge">{s.windows}w</span>
                           <Show when={s.attached}>
                             <span class="nc-resume-badge">{t("connect.newConn.tmuxAttached")}</span>
@@ -1202,7 +1220,7 @@ export function PaneView(p: Props) {
                 </div>
               </div>
               <div class="nc-footer">
-                <button onClick={() => pickTmuxSession(null)}>💻 {t("connect.tmuxPick.regular")}</button>
+                <button onClick={() => pickTmuxSession(null)}><IconTerminal size={14} /> {t("connect.tmuxPick.regular")}</button>
                 <button onClick={() => setTmuxPick(null)}>{t("common.cancel")}</button>
               </div>
             </div>
@@ -1244,7 +1262,7 @@ export function PaneView(p: Props) {
             >
               <div class="nc-head">
                 <h3>{t("connect.newConn.title")}</h3>
-                <button class="feed-x" title={t("common.close")} onClick={() => setNewConnModal(false)}>×</button>
+                <button class="feed-x" title={t("common.close")} onClick={() => setNewConnModal(false)}><IconClose size={14} /></button>
               </div>
 
               <div class="nc-body">
@@ -1260,7 +1278,7 @@ export function PaneView(p: Props) {
                         class={`nc-seg ${ncType() === "regular" ? "active" : ""}`}
                         onClick={() => setNcType("regular")}
                       >
-                        💻 {t("connect.newConn.typeRegular")}
+                        <IconTerminal size={14} /> {t("connect.newConn.typeRegular")}
                       </button>
                       <button
                         role="tab"
@@ -1268,7 +1286,7 @@ export function PaneView(p: Props) {
                         class={`nc-seg ${ncType() === "tmux" ? "active" : ""}`}
                         onClick={() => setNcType("tmux")}
                       >
-                        🖥 {t("connect.newConn.typeTmux")}
+                        <IconTerminal size={14} /> {t("connect.newConn.typeTmux")}
                       </button>
                     </div>
                     <p class="nc-hint">
@@ -1309,12 +1327,12 @@ export function PaneView(p: Props) {
                       onChange={(e) => { setNcCmd(e.currentTarget.value as NcCmd); setNcPickedSession(null); }}
                     >
                       <option value="plain"></option>
-                      <option value="claude">🤖 claude</option>
-                      <option value="claude-continue">🤖 claude --continue</option>
-                      <option value="claude-resume">🤖 claude --resume</option>
-                      <option value="claude-skip">⚠️ claude --dangerously-skip-permissions</option>
-                      <option value="from-list">📋 {t("connect.newConn.fromList")}</option>
-                      <option value="custom">✏️ {t("connect.newConn.custom")}</option>
+                      <option value="claude">claude</option>
+                      <option value="claude-continue">claude --continue</option>
+                      <option value="claude-resume">claude --resume</option>
+                      <option value="claude-skip">claude --dangerously-skip-permissions</option>
+                      <option value="from-list">{t("connect.newConn.fromList")}</option>
+                      <option value="custom">{t("connect.newConn.custom")}</option>
                     </select>
                     <Show when={ncCmd() === "custom"}>
                       <input
@@ -1355,14 +1373,14 @@ export function PaneView(p: Props) {
                             )}
                           </For>
                         </div>
-                        <button class="nc-browse" title={t("connect.newConn.refresh")} onClick={() => void loadNcSessions()}>⟳</button>
+                        <button class="nc-browse" title={t("connect.newConn.refresh")} onClick={() => void loadNcSessions()}><IconRefresh size={14} /></button>
                       </div>
                       <div class="nc-resume-list">
                         <Show when={ncSessionsLoading()}>
                           <p class="nc-muted">{t("claude_picker.loading")}</p>
                         </Show>
                         <Show when={ncSessionsErr()}>
-                          <p class="nc-muted err">⚠ {ncSessionsErr()}</p>
+                          <p class="nc-muted err"><IconWarning size={13} /> {ncSessionsErr()}</p>
                         </Show>
                         <Show when={!ncSessionsLoading() && !ncSessionsErr() && ncFilteredSessions().length === 0}>
                           <p class="nc-muted">{t("claude_picker.empty")}</p>
@@ -1401,21 +1419,21 @@ export function PaneView(p: Props) {
                       <div class="nc-recent">
                         <For each={recentDirs()}>
                           {(d) => (
-                            <button class="nc-recent-row" title={d} onClick={() => chooseDir(d)}>🕘 {d}</button>
+                            <button class="nc-recent-row" title={d} onClick={() => chooseDir(d)}><IconClock size={14} /> {d}</button>
                           )}
                         </For>
                       </div>
                     </Show>
                     <Show when={dirPicker()!.error}>
-                      <p class="nc-muted err">⚠ {dirPicker()!.error}</p>
+                      <p class="nc-muted err"><IconWarning size={13} /> {dirPicker()!.error}</p>
                     </Show>
                     <ul class="nc-dir-list">
                       <Show when={dirPicker()!.path !== "/"}>
-                        <li class="nc-dir-item up" onClick={() => void navigateDirPicker(dirPickerParent(dirPicker()!.path))}>📁 ..</li>
+                        <li class="nc-dir-item up" onClick={() => void navigateDirPicker(dirPickerParent(dirPicker()!.path))}><IconFolder size={14} /> ..</li>
                       </Show>
                       <For each={dirPicker()!.dirs}>
                         {(name) => (
-                          <li class="nc-dir-item" onClick={() => void navigateDirPicker(dirPickerJoin(dirPicker()!.path, name))}>📁 {name}</li>
+                          <li class="nc-dir-item" onClick={() => void navigateDirPicker(dirPickerJoin(dirPicker()!.path, name))}><IconFolder size={14} /> {name}</li>
                         )}
                       </For>
                       <Show when={!dirPicker()!.loading && dirPicker()!.dirs.length === 0 && !dirPicker()!.error}>
@@ -1461,7 +1479,7 @@ export function PaneView(p: Props) {
           >
             <div class="settings-head">
               <h3>{t("connect.dirPicker.title")}</h3>
-              <button class="feed-x" title={t("common.close")} onClick={closeDirPicker}>×</button>
+              <button class="feed-x" title={t("common.close")} onClick={closeDirPicker}><IconClose size={14} /></button>
             </div>
             <div class="dir-picker-path" title={dirPicker()!.path}>{dirPicker()!.path}</div>
             <Show when={recentDirs().length > 0}>
@@ -1470,7 +1488,7 @@ export function PaneView(p: Props) {
                 <For each={recentDirs()}>
                   {(d) => (
                     <button class="dir-picker-recent-row" title={d} onClick={() => chooseDir(d)}>
-                      🕘 {d}
+                      <IconClock size={14} /> {d}
                     </button>
                   )}
                 </For>
@@ -1481,12 +1499,12 @@ export function PaneView(p: Props) {
                 <p class="status-line">{t("connect.dirPicker.loading")}</p>
               </Show>
               <Show when={dirPicker()!.error}>
-                <p class="status-line err">⚠ {dirPicker()!.error}</p>
+                <p class="status-line err"><IconWarning size={13} /> {dirPicker()!.error}</p>
               </Show>
               <ul class="dir-picker-list">
                 <Show when={dirPicker()!.path !== "/"}>
                   <li class="dir-picker-row up" onClick={() => void navigateDirPicker(dirPickerParent(dirPicker()!.path))}>
-                    📁 ..
+                    <IconFolder size={14} /> ..
                   </li>
                 </Show>
                 <For each={dirPicker()!.dirs}>
@@ -1495,7 +1513,7 @@ export function PaneView(p: Props) {
                       class="dir-picker-row"
                       onClick={() => void navigateDirPicker(dirPickerJoin(dirPicker()!.path, name))}
                     >
-                      📁 {name}
+                      <IconFolder size={14} /> {name}
                     </li>
                   )}
                 </For>

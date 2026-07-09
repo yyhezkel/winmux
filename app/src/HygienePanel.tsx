@@ -1,6 +1,7 @@
 import { createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { IconClose, IconWarning, IconCircle } from "./icons";
 
 // Phase 76 — Monitor "Cleanup" tab. Surfaces the two server-side leaks Yossi
 // hit (duplicate winmux port-watchers, orphaned claude sessions) from the
@@ -83,7 +84,7 @@ export function HygienePanel(p: { workspaceId?: string }) {
     <div class="hyg-tab">
       <Show when={err()}>
         <div class="wizard-test-result err" style="margin:0 0 10px">
-          <div class="wizard-test-line">✗ {err()}</div>
+          <div class="wizard-test-line"><IconClose size={14} /> {err()}</div>
         </div>
       </Show>
       <Show when={note()}>
@@ -118,7 +119,7 @@ export function HygienePanel(p: { workspaceId?: string }) {
             {(w) => (
               <div class={`hyg-row${w.duplicate ? " dup" : ""}`}>
                 <span class="hyg-main">
-                  {w.duplicate ? "⚠ " : "● "}
+                  {w.duplicate ? <IconWarning size={14} /> : <IconCircle size={14} />}{" "}
                   {w.workspace || "?"}
                 </span>
                 <span class="hyg-meta settings-hint">
@@ -141,7 +142,7 @@ export function HygienePanel(p: { workspaceId?: string }) {
           <For each={data()!.orphan_sessions ?? []}>
             {(o) => (
               <div class="hyg-row dup">
-                <span class="hyg-main">⚠ {o.session_id || o.resume || `pid ${o.pid}`}</span>
+                <span class="hyg-main"><IconWarning size={14} /> {o.session_id || o.resume || `pid ${o.pid}`}</span>
                 <span class="hyg-meta settings-hint">
                   pid {o.pid} · {t("hygiene.uptime")} {fmtDur(o.etime_sec)} · cpu {o.cpu_pct}%
                 </span>

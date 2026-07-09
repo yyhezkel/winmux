@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { t } from "./i18n";
 import { ConnectExistingFlow } from "./ConnectExistingFlow";
 import { AddonsTab } from "./AddonsTab";
+import { IconClose, IconBadgePlus, IconLink, IconCheck, IconCircle } from "./icons";
 
 // Phase 14.A type mirrors — see src-tauri/src/provisioning.rs.
 interface InspectResult {
@@ -275,11 +276,11 @@ export function ProvisioningWizard(p: Props) {
   };
 
   const stateBadge = (s?: StepProgress) => {
-    if (!s) return { cls: "pending", icon: "○" };
-    if (s.state === "done") return { cls: "ok", icon: "✓" };
-    if (s.state === "failed") return { cls: "err", icon: "✗" };
-    if (s.state === "running") return { cls: "running", icon: "…" };
-    return { cls: "pending", icon: "○" };
+    if (!s) return { cls: "pending", icon: IconCircle };
+    if (s.state === "done") return { cls: "ok", icon: IconCheck };
+    if (s.state === "failed") return { cls: "err", icon: IconClose };
+    if (s.state === "running") return { cls: "running", icon: null };
+    return { cls: "pending", icon: IconCircle };
   };
 
   return (
@@ -298,7 +299,7 @@ export function ProvisioningWizard(p: Props) {
               {wizStep() === "execute" && t("provisioning.step.execute")}
               {wizStep() === "done" && t("provisioning.step.done")}
             </span>
-            <button class="feed-x" title={t("common.close")} onClick={p.onClose}>×</button>
+            <button class="feed-x" title={t("common.close")} onClick={p.onClose}><IconClose /></button>
           </div>
 
           <div class="provisioning-body">
@@ -332,7 +333,7 @@ export function ProvisioningWizard(p: Props) {
                     onChange={() => setMode("new")}
                   />
                   <span>
-                    <strong>🆕 {t("provisioning.mode.new")}</strong>
+                    <strong><IconBadgePlus size={14} /> {t("provisioning.mode.new")}</strong>
                     <span class="provisioning-mode-hint">{t("provisioning.mode.new.hint")}</span>
                   </span>
                 </label>
@@ -351,7 +352,7 @@ export function ProvisioningWizard(p: Props) {
                     onChange={() => setMode("existing")}
                   />
                   <span>
-                    <strong>🔗 {t("provisioning.mode.existing")}</strong>
+                    <strong><IconLink size={14} /> {t("provisioning.mode.existing")}</strong>
                     <span class="provisioning-mode-hint">{t("provisioning.mode.existing.hint")}</span>
                   </span>
                 </label>
@@ -428,7 +429,7 @@ export function ProvisioningWizard(p: Props) {
                   >
                     <Show when={inspect()!.ok}>
                       <div class="wizard-test-line">
-                        ✓ {inspect()!.os_pretty_name ?? t("provisioning.inspect.os_detected")}
+                        <IconCheck size={14} /> {inspect()!.os_pretty_name ?? t("provisioning.inspect.os_detected")}
                       </div>
                       <div class="wizard-test-meta">
                         {t("provisioning.inspect.meta", {
@@ -443,7 +444,7 @@ export function ProvisioningWizard(p: Props) {
                       </Show>
                     </Show>
                     <Show when={!inspect()!.ok}>
-                      <div class="wizard-test-line">✗ {inspect()!.message}</div>
+                      <div class="wizard-test-line"><IconClose size={14} /> {inspect()!.message}</div>
                     </Show>
                   </div>
                 </Show>
@@ -625,7 +626,12 @@ export function ProvisioningWizard(p: Props) {
                     return (
                       <div class={`provisioning-step-card state-${b().cls}`}>
                         <div class="provisioning-step-head">
-                          <span class={`provisioning-step-icon ${b().cls}`}>{b().icon}</span>
+                          <span class={`provisioning-step-icon ${b().cls}`}>
+                            {(() => {
+                              const I = b().icon;
+                              return I ? <I size={14} /> : "…";
+                            })()}
+                          </span>
                           <span class="provisioning-step-label">{labelFor}</span>
                         </div>
                         {/* Phase 32.A: StepFailed gets a dedicated

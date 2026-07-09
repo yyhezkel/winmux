@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
 import { keyEq } from "./shortcuts";
 import { TechText } from "./TechText";
+import { IconSearch, IconClose, IconArrowUp, IconArrowDown, IconWarning } from "./icons";
 
 // Phase 17.B: minimal built-in editor. A modal with a monospace
 // <textarea>, Save / Cancel / Reload buttons, and an unsaved-changes
@@ -377,10 +378,10 @@ export function FileEditor(p: Props) {
               title={t("editor.btn.find")}
               onClick={() => openFindBar(false)}
             >
-              🔍
+              <IconSearch size={14} />
             </button>
             <button class="feed-x" title={t("common.close")} onClick={tryClose}>
-              ×
+              <IconClose size={14} />
             </button>
           </div>
 
@@ -414,14 +415,14 @@ export function FileEditor(p: Props) {
                 title={t("editor.find.prev")}
                 onClick={() => findNext(-1)}
               >
-                ↑
+                <IconArrowUp size={14} />
               </button>
               <button
                 class="fm-tool"
                 title={t("editor.find.next")}
                 onClick={() => findNext(1)}
               >
-                ↓
+                <IconArrowDown size={14} />
               </button>
               <label class="fm-checkbox" title={t("editor.find.case_sensitive")}>
                 <input
@@ -453,7 +454,7 @@ export function FileEditor(p: Props) {
                 {replaceOpen() ? "−" : "+"}
               </button>
               <button class="feed-x" title={t("common.close")} onClick={closeFindBar}>
-                ×
+                <IconClose size={14} />
               </button>
             </div>
             <Show when={replaceOpen()}>
@@ -491,7 +492,7 @@ export function FileEditor(p: Props) {
           </Show>
 
           <Show when={err()}>
-            <div class="editor-status err">⚠ {err()}</div>
+            <div class="editor-status err"><IconWarning size={14} /> {err()}</div>
           </Show>
 
           <Show when={!loading() && meta()?.is_binary}>

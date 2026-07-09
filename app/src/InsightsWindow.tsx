@@ -1,11 +1,23 @@
-import { createSignal, For, Show, createEffect, onCleanup } from "solid-js";
+import { createSignal, For, Show, createEffect, onCleanup, type JSX } from "solid-js";
+import { createNarrow } from "./useNarrow";
+import {
+  IconActivity,
+  IconSmartphone,
+  IconFile,
+  IconSparkles,
+  IconBot,
+  IconRefresh,
+  IconClose,
+} from "./icons";
 import { invoke } from "@tauri-apps/api/core";
-import { t } from "./i18n";
+import { t, currentLanguage } from "./i18n";
+import { formatResetLocal } from "./claudeUsageFmt";
 import { MobilePairing } from "./MobilePairing";
 import { HygienePanel } from "./HygienePanel";
 import { PanelSurface } from "./PanelSurface";
 import type { Surface } from "./panels";
 import type { Geometry } from "./floatingWindow";
+import type { ClaudeUsage } from "./types";
 
 // Phase 68.D: Server Insights monitor. Pull-based — fetches the live
 // snapshot from the remote `winmux-insights` daemon (via the insights_fetch
@@ -64,7 +76,10 @@ function fmtBytes(n: number): string {
 }
 const fmtBps = (n: number) => `${fmtBytes(n)}/s`;
 
+type InsightsView = "metrics" | "mobile" | "logs" | "health" | "claude";
+
 export function InsightsWindow(p: Props) {
+  const tabsNarrow = createNarrow(380);
   const [snap, setSnap] = createSignal<Snapshot | null>(null);
   const [docker, setDocker] = createSignal<DockerContainer[]>([]);
   const [dockerOk, setDockerOk] = createSignal(false);
@@ -81,8 +96,35 @@ export function InsightsWindow(p: Props) {
   const [err, setErr] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [auto, setAuto] = createSignal(false);
-  // Phase 70.C: Metrics ↔ Mobile pairing tabs.
-  const [view, setView] = createSignal<"metrics" | "mobile" | "logs" | "health">("metrics");
+  // Phase 70.C: Metrics ↔ Mobile pairing tabs. Phase 78: + Claude usage.
+  const [view, setView] = createSignal<InsightsView>("metrics");
+  // Phase 78: Claude subscription usage (session/weekly % + contributing).
+  const [usage, setUsage] = createSignal<ClaudeUsage | null>(null);
+  const [usageLoading, setUsageLoading] = createSignal(false);
+  const [usageErr, setUsageErr] = createSignal<string | null>(null);
+  const refreshClaude = async (force: boolean) => {
+    if (!p.workspaceId) return;
+    setUsageLoading(true);
+    setUsageErr(null);
+    try {
+      const u = await invoke<ClaudeUsage>("claude_usage_fetch", {
+        workspaceId: p.workspaceId,
+        force,
+      });
+      setUsage(u);
+    } catch (e) {
+      setUsageErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setUsageLoading(false);
+    }
+  };
+  // Load usage when the Claude tab is opened (uses the 5-min backend cache;
+  // only cold-fetches — ~8s — if nothing is cached yet).
+  createEffect(() => {
+    if (view() === "claude" && p.workspaceId && !usage() && !usageLoading()) {
+      void refreshClaude(false);
+    }
+  });
   // Phase 72.2: daemon log viewer.
   const [logLines, setLogLines] = createSignal<string[]>([]);
   const [logPath, setLogPath] = createSignal("");
@@ -216,20 +258,24 @@ export function InsightsWindow(p: Props) {
   const titleText = () =>
     `${t("insights.title")}${p.workspaceName ? ` — ${p.workspaceName}` : ""}`;
 
+  const tab = (id: InsightsView, icon: JSX.Element, label: string) => (
+    <button
+      class={view() === id ? "active" : ""}
+      title={label}
+      onClick={() => setView(id)}
+    >
+      {icon}
+      <span class="ins-tab-label">{label}</span>
+    </button>
+  );
+
   const tabsEl = () => (
-    <div class="ins-tabs">
-      <button class={view() === "metrics" ? "active" : ""} onClick={() => setView("metrics")}>
-        {t("insights.tab.metrics")}
-      </button>
-      <button class={view() === "mobile" ? "active" : ""} onClick={() => setView("mobile")}>
-        📱 {t("insights.tab.mobile")}
-      </button>
-      <button class={view() === "logs" ? "active" : ""} onClick={() => setView("logs")}>
-        📄 {t("insights.tab.logs")}
-      </button>
-      <button class={view() === "health" ? "active" : ""} onClick={() => setView("health")}>
-        🧹 {t("insights.tab.health")}
-      </button>
+    <div class="ins-tabs" classList={{ compact: tabsNarrow.narrow() }} ref={tabsNarrow.ref}>
+      {tab("metrics", <IconActivity />, t("insights.tab.metrics"))}
+      {tab("mobile", <IconSmartphone />, t("insights.tab.mobile"))}
+      {tab("logs", <IconFile />, t("insights.tab.logs"))}
+      {tab("health", <IconSparkles />, t("insights.tab.health"))}
+      {tab("claude", <IconBot />, t("claudeUsage.tab"))}
     </div>
   );
 
@@ -240,7 +286,7 @@ export function InsightsWindow(p: Props) {
         <span>{t("insights.auto")}</span>
       </label>
       <button class="ins-refresh" onClick={() => void refresh()} title={t("insights.refresh")}>
-        {loading() ? "…" : "⟳"}
+        {loading() ? "…" : <IconRefresh />}
       </button>
     </Show>
   );
@@ -252,6 +298,64 @@ export function InsightsWindow(p: Props) {
           </Show>
           <Show when={view() === "health"}>
             <HygienePanel workspaceId={p.workspaceId} />
+          </Show>
+          <Show when={view() === "claude"}>
+            <div class="ins-claude">
+              <div class="ins-logs-bar">
+                <button onClick={() => void refreshClaude(true)} disabled={usageLoading()}>
+                  {usageLoading() ? "…" : <IconRefresh />} {t("insights.refresh")}
+                </button>
+              </div>
+              <Show when={usageErr()}>
+                <div class="ins-docker-err"><div class="ins-docker-err-msg"><IconClose /> {usageErr()}</div></div>
+              </Show>
+              <Show
+                when={usage()}
+                fallback={
+                  <Show when={!usageLoading()} fallback={<div class="settings-hint">{t("claude_picker.loading")}</div>}>
+                    <button class="primary" onClick={() => void refreshClaude(false)}>{t("claudeUsage.fetch")}</button>
+                  </Show>
+                }
+              >
+                {(u) => (
+                  <>
+                    <div class="ins-metrics">
+                      <div class="ins-metric">
+                        <div class="ins-metric-head"><span>{t("claudeUsage.session")}</span><b>{u().session_pct}%</b></div>
+                        {bar(u().session_pct, true)}
+                        <div class="ins-metric-sub" title={u().session_reset}>{t("claudeUsage.resetsAt")} {formatResetLocal(u().session_reset, Number(u().fetched_unix), currentLanguage())}</div>
+                      </div>
+                      <div class="ins-metric">
+                        <div class="ins-metric-head"><span>{t("claudeUsage.week")}</span><b>{u().week_pct}%</b></div>
+                        {bar(u().week_pct, true)}
+                        <div class="ins-metric-sub" title={u().week_reset}>{t("claudeUsage.resetsAt")} {formatResetLocal(u().week_reset, Number(u().fetched_unix), currentLanguage())}</div>
+                      </div>
+                      <For each={u().models}>
+                        {(m) => (
+                          <div class="ins-metric">
+                            <div class="ins-metric-head"><span>{m.name}</span><b>{m.pct}%</b></div>
+                            {bar(m.pct, true)}
+                            <div class="ins-metric-sub" title={m.reset}>{t("claudeUsage.resetsAt")} {formatResetLocal(m.reset, Number(u().fetched_unix), currentLanguage())}</div>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                    <Show when={u().contributing_24h.length > 0}>
+                      <div class="ins-claude-detail">
+                        <div class="ins-metric-head"><span>{t("claudeUsage.contributing24h")}</span></div>
+                        <pre class="ins-logs-view">{u().contributing_24h.join("\n")}</pre>
+                      </div>
+                    </Show>
+                    <Show when={u().contributing_7d.length > 0}>
+                      <div class="ins-claude-detail">
+                        <div class="ins-metric-head"><span>{t("claudeUsage.contributing7d")}</span></div>
+                        <pre class="ins-logs-view">{u().contributing_7d.join("\n")}</pre>
+                      </div>
+                    </Show>
+                  </>
+                )}
+              </Show>
+            </div>
           </Show>
           <Show when={view() === "logs"}>
             <div class="ins-logs">
@@ -423,9 +527,11 @@ export function InsightsWindow(p: Props) {
   return (
     <PanelSurface
       surface={p.surface}
-      icon="📊"
+      icon={<IconActivity />}
       title={titleText()}
-      drawerWidth="min(600px, 96vw)"
+      drawerStorageKey="winmux.drawer-width.monitor"
+      drawerDefaultWidth={600}
+      drawerMinWidth={420}
       bodyClass="insights-body"
       floatStorageKey={`winmux.panel-monitor-geometry.${p.workspaceId ?? "none"}`}
       floatDefault={DEFAULT_GEOMETRY}

@@ -19,10 +19,13 @@ import type { Geometry } from "./floatingWindow";
 
 interface Props {
   surface: Surface;
-  icon?: string;
+  icon?: JSX.Element;
   title: string;
-  /** Drawer width (CSS length). Defaults to SideDrawer's own default. */
-  drawerWidth?: string;
+  /** Persisted-width key for the drawer surface; enables its resize handle. */
+  drawerStorageKey?: string;
+  /** Initial drawer width in px. */
+  drawerDefaultWidth?: number;
+  drawerMinWidth?: number;
   /** Extra class on the scrollable body of every surface. */
   bodyClass?: string;
   /** localStorage key for the float geometry (usually per panel + workspace). */
@@ -45,7 +48,9 @@ export function PanelSurface(p: Props) {
         <SideDrawer
           icon={p.icon}
           title={p.title}
-          width={p.drawerWidth}
+          storageKey={p.drawerStorageKey}
+          defaultWidth={p.drawerDefaultWidth}
+          minWidth={p.drawerMinWidth}
           bodyClass={p.bodyClass}
           onClose={p.onClose}
           onExpand={p.onFullscreen}

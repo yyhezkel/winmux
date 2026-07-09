@@ -4,6 +4,17 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import html2canvas from "html2canvas";
 import { t } from "./i18n";
 import type { LayoutNode, SplitDirection } from "./types";
+import {
+  IconArrowLeft,
+  IconRefreshCcw,
+  IconHome,
+  IconArrowRight,
+  IconLink,
+  IconWarning,
+  IconColumns,
+  IconRows,
+  IconClose,
+} from "./icons";
 
 interface Props {
   workspaceId: string;
@@ -386,7 +397,7 @@ export function BrowserPane(p: Props) {
             p.onGoBack(p.pane.pane_id);
           }}
         >
-          ←
+          <IconArrowLeft size={14} />
         </button>
         <button
           class="pane-btn"
@@ -396,7 +407,7 @@ export function BrowserPane(p: Props) {
             reload();
           }}
         >
-          ↺
+          <IconRefreshCcw size={14} />
         </button>
         <button
           class="pane-btn"
@@ -407,7 +418,7 @@ export function BrowserPane(p: Props) {
             p.onGoHome(p.pane.pane_id);
           }}
         >
-          🏠
+          <IconHome size={14} />
         </button>
         <input
           class="browser-url"
@@ -431,19 +442,19 @@ export function BrowserPane(p: Props) {
             submitUrl();
           }}
         >
-          →
+          <IconArrowRight size={14} />
         </button>
         <Show when={isTunneled()}>
           <span
             class="browser-tunnel-badge"
             title={`tunneled via SSH → ${resolvedUrl()}`}
           >
-            🔗 tunneled
+            <IconLink size={13} /> tunneled
           </span>
         </Show>
         <Show when={resolveErr()}>
           <span class="browser-tunnel-err" title={resolveErr()!}>
-            ⚠
+            <IconWarning size={13} />
           </span>
         </Show>
         <label
@@ -473,7 +484,7 @@ export function BrowserPane(p: Props) {
             p.onSplit(p.pane.pane_id, "horizontal");
           }}
         >
-          ↔
+          <IconColumns size={14} />
         </button>
         <button
           class="pane-btn"
@@ -483,7 +494,7 @@ export function BrowserPane(p: Props) {
             p.onSplit(p.pane.pane_id, "vertical");
           }}
         >
-          ↕
+          <IconRows size={14} />
         </button>
         <button
           class="pane-btn pane-close"
@@ -493,7 +504,7 @@ export function BrowserPane(p: Props) {
             p.onClose(p.pane.pane_id);
           }}
         >
-          ×
+          <IconClose size={14} />
         </button>
       </div>
       <div ref={(el) => (bodyRef = el)} class="pane-body browser-body">

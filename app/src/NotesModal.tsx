@@ -1,5 +1,6 @@
 import { createSignal, For, Show, createMemo } from "solid-js";
 import { t } from "./i18n";
+import { IconChevronDown, IconChevronRight, IconRefreshCcw, IconCheck, IconTrash } from "./icons";
 import type { Note, Workspace } from "./types";
 
 interface Props {
@@ -168,7 +169,7 @@ export function NotesModal(p: Props) {
                     class="notes-show-done"
                     onClick={() => setShowDoneSection(!showDoneSection())}
                   >
-                    {showDoneSection() ? "▼" : "▶"} {doneNotes().length} done note
+                    {showDoneSection() ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />} {doneNotes().length} done note
                     {doneNotes().length === 1 ? "" : "s"}
                   </button>
                   <Show when={showDoneSection()}>
@@ -243,7 +244,7 @@ function NoteCard(props: {
                 title={t("notes.btn.reopen")}
                 onClick={() => props.onReopen(props.note.id)}
               >
-                ↺
+                <IconRefreshCcw size={14} />
               </button>
             }
           >
@@ -252,7 +253,7 @@ function NoteCard(props: {
               title={t("notes.btn.mark_done")}
               onClick={() => props.onDone(props.note.id)}
             >
-              ✓
+              <IconCheck size={14} />
             </button>
           </Show>
           <button
@@ -262,7 +263,7 @@ function NoteCard(props: {
               if (window.confirm("Delete this note?")) props.onDelete(props.note.id);
             }}
           >
-            🗑
+            <IconTrash size={14} />
           </button>
         </span>
       </div>

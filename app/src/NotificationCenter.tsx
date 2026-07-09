@@ -1,5 +1,15 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { t } from "./i18n";
+import {
+  IconBot,
+  IconBell,
+  IconBan,
+  IconHammer,
+  IconCircle,
+  IconCheck,
+  IconTrash,
+  type IconComponent,
+} from "./icons";
 
 // Unshipped-fivefer (#1): the Notification Center. A slide-in panel that
 // unifies the two notification streams (OSC 9/99/777 from terminals +
@@ -31,10 +41,10 @@ export function NotifHeaderActions(p: { onMarkAllRead: () => void; onClear: () =
   return (
     <>
       <button class="side-drawer-btn" title={t("notif.markAllRead")} onClick={p.onMarkAllRead}>
-        ✓
+        <IconCheck />
       </button>
       <button class="side-drawer-btn" title={t("notif.clear")} onClick={p.onClear}>
-        🗑
+        <IconTrash />
       </button>
     </>
   );
@@ -45,14 +55,14 @@ export function NotifHeaderActions(p: { onMarkAllRead: () => void; onClear: () =
 const FILTERS = ["all", "agent", "notification", "error"] as const;
 type Filter = (typeof FILTERS)[number];
 
-const KIND_ICON: Record<string, string> = {
-  agent: "🤖",
-  notification: "🔔",
-  error: "⛔",
-  build: "🔨",
-  mention: "@",
+const KIND_ICON: Record<string, IconComponent> = {
+  agent: IconBot,
+  notification: IconBell,
+  error: IconBan,
+  build: IconHammer,
+  mention: IconBell,
 };
-const iconFor = (k: string) => KIND_ICON[k] ?? "•";
+const iconFor = (k: string): IconComponent => KIND_ICON[k] ?? IconCircle;
 
 function relTime(ms: number): string {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -109,7 +119,7 @@ export function NotificationCenter(p: Props) {
           when={filtered().length > 0}
           fallback={
             <div class="notif-empty">
-              <div class="notif-empty-icon" aria-hidden="true">🔔</div>
+              <div class="notif-empty-icon" aria-hidden="true"><IconBell size={28} /></div>
               <div class="notif-empty-title">{t("notif.empty.title")}</div>
               <div class="notif-empty-desc">{t("notif.empty.desc")}</div>
             </div>
@@ -121,7 +131,7 @@ export function NotificationCenter(p: Props) {
                 class={`notif-item ${p.readIds.has(n.id) ? "read" : "unread"} ${n.workspace_id ? "jumpable" : ""}`}
                 onClick={() => click(n)}
               >
-                <span class="notif-item-icon" aria-hidden="true">{iconFor(n.kind)}</span>
+                <span class="notif-item-icon" aria-hidden="true">{iconFor(n.kind)({ size: 15 })}</span>
                 <div class="notif-item-body">
                   <div class="notif-item-title">{n.title || n.body}</div>
                   <Show when={n.title && n.body}>

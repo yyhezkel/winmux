@@ -322,6 +322,35 @@ pub struct Workspace {
     // it never collides with the user's working tree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_worktree: Option<PathBuf>,
+    // cmux-A A2: optional workspace group id. Missing/None = ungrouped
+    // (renders in the top "Ungrouped" sidebar section). `skip_serializing_if`
+    // keeps the field elided so a pre-A2 workspaces.json round-trips
+    // byte-identical after touching a workspace that isn't in a group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+}
+
+// ─── cmux-A A2: WorkspaceGroup ──────────────────────────────────────
+//
+// Sidebar collapsible section. Grouping is presentational only — the
+// group carries a name, an accent color (small dot in the header), and
+// the collapsed/open state. Assignment is a one-to-many relation via
+// `Workspace.group_id` (a workspace belongs to at most one group).
+
+#[derive(Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../../src/bindings/")]
+pub struct WorkspaceGroup {
+    pub id: String,
+    pub name: String,
+    /// One of the eight cmux-A palette colors (frontend-picked hex).
+    /// Not validated on the backend — the picker constrains it.
+    #[serde(default)]
+    pub color: String,
+    /// Persisted collapsed/open state. `#[serde(default)]` so an older
+    /// workspaces.json (before A2) that grows a group entry via a
+    /// hand-edit still loads.
+    #[serde(default)]
+    pub is_collapsed: bool,
 }
 
 // ─── Phase 59: serde back-compat tests ──────────────────────────────
@@ -696,6 +725,7 @@ mod tests {
             auto_port_forward: true,
             last_active_at: 1_700_000_000,
             git_worktree: None,
+            group_id: None,
         };
         let v = serde_json::to_value(&w).unwrap();
         // Spot-check the wire format.

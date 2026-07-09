@@ -444,6 +444,8 @@ async fn dispatch(
                 auto_port_forward: false,
                 last_active_at: 0,
                 git_worktree: None,
+                // cmux-A A2: RPC-created workspaces default to ungrouped.
+                group_id: None,
             };
             let cloned = ws.clone();
             {

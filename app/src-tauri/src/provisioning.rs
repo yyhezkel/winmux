@@ -1051,6 +1051,8 @@ fn finalize_workspace(
         auto_port_forward: false,
         last_active_at: 0,
         git_worktree: None,
+        // cmux-A A2: newly-provisioned workspaces default to ungrouped.
+        group_id: None,
     };
     let id_out = ws.id.clone();
     {

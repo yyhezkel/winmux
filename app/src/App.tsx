@@ -1905,11 +1905,17 @@ function App() {
             timestamp_ms: Date.now(),
             kind: "notification",
           });
-          // cmux-A A1: mark the pane so its border pulses until focus.
-          // Skip when the notified pane is already focused — the user
-          // is watching, no attention needed.
-          if (e.payload.pane_id && activePaneId() !== e.payload.pane_id) {
-            addPaneNotified(e.payload.pane_id);
+          // cmux-A A1: mark the pane so its border pulses. A non-focused
+          // pane keeps pulsing until the user focuses it (cleared in
+          // onFocus). The focused pane still gets a brief one-shot
+          // confirmation flash, then auto-clears after 2s — so activity
+          // is visible even when you're watching the pane it came from.
+          const pid = e.payload.pane_id;
+          if (pid) {
+            addPaneNotified(pid);
+            if (activePaneId() === pid) {
+              setTimeout(() => clearPaneNotified(pid), 2000);
+            }
           }
         },
       ),

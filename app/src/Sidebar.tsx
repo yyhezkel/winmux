@@ -63,6 +63,10 @@ interface Props {
   // the workspace row so the user can spot waiting work across
   // workspaces.
   waitingWorkspaceIds: Set<string>;
+  // beta.3 Fix 4: workspaces that received a passive hook in the last 4s.
+  // Renders a soft amber breathing pulse on the row — attention-grabbing
+  // but not blocking (`waitingWorkspaceIds` is the blocking red dot).
+  hookPulseWorkspaceIds?: Set<string>;
   onActivate: (id: string) => void;
   onCreate: () => void;
   /** Phase 14.A — open the server provisioning wizard (Phase 65.R: its
@@ -452,6 +456,8 @@ export function Sidebar(p: Props) {
       <div
         class={`ws-item ${p.activeId === w.id ? "active" : ""} ${
           p.waitingWorkspaceIds.has(w.id) ? "has-waiting" : ""
+        } ${
+          p.hookPulseWorkspaceIds?.has(w.id) ? "hook-pulse" : ""
         }`}
         data-has-color={w.color ? "true" : "false"}
         style={w.color ? `--ws-color: ${w.color}` : undefined}

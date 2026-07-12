@@ -3,6 +3,7 @@ import type { ClaudeOptions } from "./ClaudeOptions";
 import type { ClaudeUsageSettings } from "./ClaudeUsageSettings";
 import type { FloatingWindows } from "./FloatingWindows";
 import type { Font } from "./Font";
+import type { HookSettings } from "./HookSettings";
 import type { Hooks } from "./Hooks";
 import type { HooksUpdates } from "./HooksUpdates";
 import type { I18n } from "./I18n";
@@ -100,4 +101,18 @@ logs: LogsSettings,
  * crash). When false, the profile folder is wiped on the next launch.
  * `default = true`.
  */
-persist_browser_sessions: boolean, };
+persist_browser_sessions: boolean, 
+/**
+ * beta.3: which hook types the backend processes, and which of those
+ * play a sound on the toast. Kept in its own struct so the settings.rs
+ * `Hooks` block (policy engine / matcher_mode / auto_install) stays
+ * scoped to CLI-side hook installation, while this new struct is
+ * purely about desktop-side event routing + sound feedback.
+ *
+ * **Naming note:** the task brief called this field `hooks`, but that
+ * name is taken by the existing policy-engine struct. Named
+ * `hook_notifications` here to preserve backwards-compat without
+ * migrating the old field. `#[serde(default)]` fills defaults when a
+ * pre-beta.3 settings.json loads.
+ */
+hook_notifications: HookSettings, };

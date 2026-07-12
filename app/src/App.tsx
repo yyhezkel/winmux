@@ -2261,6 +2261,33 @@ function App() {
               } catch (e) { console.error("workspace_set_group failed", e); }
             })();
           }}
+          // beta.3 (ws-dragdrop): direct drag reorder. Both commands
+          // return the updated WorkspacesFile so we can drop the extra
+          // `workspaces_load` round-trip that the group-CRUD handlers
+          // above do.
+          onWorkspaceReorder={(workspaceId, groupId, newIndex) => {
+            void (async () => {
+              try {
+                const f = await invoke<WorkspacesFile>("workspace_reorder", {
+                  workspaceId,
+                  groupId,
+                  newIndex,
+                });
+                updateFile(f);
+              } catch (e) { console.error("workspace_reorder failed", e); }
+            })();
+          }}
+          onGroupReorder={(groupId, newIndex) => {
+            void (async () => {
+              try {
+                const f = await invoke<WorkspacesFile>("workspace_group_reorder", {
+                  groupId,
+                  newIndex,
+                });
+                updateFile(f);
+              } catch (e) { console.error("workspace_group_reorder failed", e); }
+            })();
+          }}
           onActivate={handleSetActive}
           onCreate={() => setShowCreate(true)}
           onProvision={() => setShowProvision(true)}

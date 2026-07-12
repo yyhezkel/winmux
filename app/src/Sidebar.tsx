@@ -1,4 +1,4 @@
-import { For, Show, createSignal, createMemo } from "solid-js";
+import { For, Show, createSignal, createMemo, onCleanup, onMount } from "solid-js";
 import { collectPanes, findPane, type Workspace, type WorkspaceGroup, type ForwardRow } from "./types";
 import { t } from "./i18n";
 import { TechText } from "./TechText";
@@ -103,6 +103,16 @@ interface Props {
   onGroupToggleCollapse: (id: string, isCollapsed: boolean) => void;
   onGroupDelete: (id: string) => void;
   onWorkspaceSetGroup: (workspaceId: string, groupId: string | null) => void;
+  // beta.3 (ws-dragdrop): direct drag-reorder. `newIndex` is a 0-based
+  // slot within the destination scope (workspaces) or the group list.
+  // The App handler wraps these to call `workspace_reorder` /
+  // `workspace_group_reorder` and reload the workspaces file.
+  onWorkspaceReorder: (
+    workspaceId: string,
+    groupId: string | null,
+    newIndex: number,
+  ) => void;
+  onGroupReorder: (groupId: string, newIndex: number) => void;
 }
 
 export function Sidebar(p: Props) {
@@ -112,67 +122,107 @@ export function Sidebar(p: Props) {
   // coerces `overflow-x` to non-visible too, so an absolutely-positioned
   // menu gets clipped at the (narrow, in icons mode) sidebar edge. We
   // render it `position:fixed` at the cursor instead, anchored here.
-  const [menuPos, setMenuPos] = createSignal<{ x: number; y: number }>({
-    x: 0,
-    y: 0,
-  });
-  // cmux-A A2: local UI state for group interactions. `groupMenuFor` +
-  // `groupMenuPos` mirror the workspace-menu pattern above so the group
-  // context menu also escapes the .sidebar-list overflow clip.
+  const [menuPos, setMenuPos] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
   const [groupMenuFor, setGroupMenuFor] = createSignal<string | null>(null);
-  const [groupMenuPos, setGroupMenuPos] = createSignal<{ x: number; y: number }>({
-    x: 0,
-    y: 0,
-  });
-  // "Move to group…" submenu on a workspace right-click. Null = closed;
-  // set to the workspace_id whose menu is expanded.
+  const [groupMenuPos, setGroupMenuPos] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
   const [moveMenuFor, setMoveMenuFor] = createSignal<string | null>(null);
-  // Inline "+ Group" flow: null = idle; string = the text the user is
-  // typing before hitting Enter (or Esc to cancel).
   const [newGroupName, setNewGroupName] = createSignal<string | null>(null);
-  // Rename inline flow, keyed by group_id (only one at a time).
-  const [renamingGroup, setRenamingGroup] = createSignal<{
-    id: string;
-    name: string;
-  } | null>(null);
-  // Color picker popover keyed by group_id.
+  const [renamingGroup, setRenamingGroup] = createSignal<{ id: string; name: string } | null>(null);
   const [colorPickerFor, setColorPickerFor] = createSignal<string | null>(null);
 
-  // Bucket the workspaces by group. Ungrouped (group_id == null OR the
-  // referenced group_id was deleted) renders in a leading "Ungrouped"
-  // section — always shown, always uncollapsible, so the empty case
-  // still has a home.
+  // beta.3 (ws-dragdrop): within each bucket workspaces sort by
+  // `sort_order` ascending (nulls → end, ties broken by insertion
+  // order). A pre-beta.3 workspaces.json has no sort_order at all —
+  // that path reduces to the previous insertion-order rendering.
   const groupedWorkspaces = createMemo(() => {
     const validGroupIds = new Set(p.groups.map((g) => g.id));
-    const ungrouped: Workspace[] = [];
-    const byGroup = new Map<string, Workspace[]>();
-    for (const w of p.workspaces) {
+    const ungrouped: { w: Workspace; ins: number }[] = [];
+    const byGroup = new Map<string, { w: Workspace; ins: number }[]>();
+    p.workspaces.forEach((w, ins) => {
       const gid = w.group_id;
       if (gid && validGroupIds.has(gid)) {
         const list = byGroup.get(gid) ?? [];
-        list.push(w);
+        list.push({ w, ins });
         byGroup.set(gid, list);
       } else {
-        ungrouped.push(w);
+        ungrouped.push({ w, ins });
       }
-    }
-    return { ungrouped, byGroup };
+    });
+    const cmp = (a: { w: Workspace; ins: number }, b: { w: Workspace; ins: number }) => {
+      const ao = a.w.sort_order ?? Number.MAX_SAFE_INTEGER;
+      const bo = b.w.sort_order ?? Number.MAX_SAFE_INTEGER;
+      if (ao !== bo) return ao - bo;
+      return a.ins - b.ins;
+    };
+    ungrouped.sort(cmp);
+    for (const list of byGroup.values()) list.sort(cmp);
+    return {
+      ungrouped: ungrouped.map((x) => x.w),
+      byGroup: new Map(
+        Array.from(byGroup.entries()).map(([k, v]) => [k, v.map((x) => x.w)]),
+      ),
+    };
   });
 
-  const openMenuAt = (
-    e: MouseEvent,
-    setter: (v: { x: number; y: number }) => void,
-  ) => {
-    // Clamp so the fixed menu stays on-screen (≈160×190px).
+  // beta.3 (ws-dragdrop): render groups in sort_order (nulls → end).
+  const sortedGroups = createMemo(() => {
+    const arr = p.groups.map((g, ins) => ({ g, ins }));
+    arr.sort((a, b) => {
+      const ao = a.g.sort_order ?? Number.MAX_SAFE_INTEGER;
+      const bo = b.g.sort_order ?? Number.MAX_SAFE_INTEGER;
+      if (ao !== bo) return ao - bo;
+      return a.ins - b.ins;
+    });
+    return arr.map((x) => x.g);
+  });
+
+  // beta.3 (ws-dragdrop): drag state.
+  type Drop =
+    | { kind: "ws-line"; targetId: string; where: "above" | "below" }
+    | { kind: "group-line"; targetId: string; where: "above" | "below" }
+    | { kind: "into-group"; targetId: string | null }
+    | null;
+  const [dragKind, setDragKind] = createSignal<"ws" | "group" | null>(null);
+  const [dragId, setDragId] = createSignal<string | null>(null);
+  const [drop, setDrop] = createSignal<Drop>(null);
+  const cancelDrag = () => {
+    setDragKind(null);
+    setDragId(null);
+    setDrop(null);
+  };
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && dragKind() !== null) cancelDrag();
+    };
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => window.removeEventListener("keydown", onKey));
+  });
+  const whereByMidpoint = (ev: DragEvent, el: HTMLElement): "above" | "below" => {
+    const r = el.getBoundingClientRect();
+    return ev.clientY < r.top + r.height / 2 ? "above" : "below";
+  };
+  const scopeIndexOf = (scope: string | null, wsId: string): number => {
+    const list = scope === null
+      ? groupedWorkspaces().ungrouped
+      : groupedWorkspaces().byGroup.get(scope) ?? [];
+    return list.findIndex((w) => w.id === wsId);
+  };
+  const scopeSize = (scope: string | null): number => {
+    const list = scope === null
+      ? groupedWorkspaces().ungrouped
+      : groupedWorkspaces().byGroup.get(scope) ?? [];
+    return list.length;
+  };
+  const groupIndexOf = (gid: string): number => sortedGroups().findIndex((g) => g.id === gid);
+
+  const openMenuAt = (e: MouseEvent, setter: (v: { x: number; y: number }) => void) => {
     setter({
       x: Math.min(e.clientX, window.innerWidth - 200),
       y: Math.min(e.clientY, window.innerHeight - 260),
     });
   };
 
-  const startNewGroup = () => {
-    setNewGroupName("");
-  };
+  const startNewGroup = () => { setNewGroupName(""); };
   const commitNewGroup = () => {
     const name = (newGroupName() ?? "").trim();
     if (name.length > 0) {
@@ -183,8 +233,6 @@ export function Sidebar(p: Props) {
 
   return (
     <div class={`sidebar ${p.mode}`}>
-      {/* Phase 62.C: header stacks vertically — logo (+ wordmark in full
-          mode) on top, the collapse arrow on its own line below. */}
       <div class="sidebar-header">
         <div class="sidebar-brand-row">
         <svg
@@ -235,9 +283,6 @@ export function Sidebar(p: Props) {
           </span>
         </Show>
         </div>
-        {/* Phase 62.B (item I) / 65.P: header toggle flips full ↔ icons
-            — the only two modes. Same as Ctrl+B. Phase 62.C: on its own
-            line below the logo. */}
         <button
           class="sidebar-collapse-btn"
           onClick={() => p.onSetMode(p.mode === "full" ? "icons" : "full")}
@@ -248,12 +293,28 @@ export function Sidebar(p: Props) {
         </button>
       </div>
       <div class="sidebar-list">
-        {/* Ungrouped section — always rendered, never collapsible. If
-            the user has no groups at all, the whole sidebar is this one
-            section and the "Ungrouped" header disappears (only shown
-            once at least one group exists, to avoid noise). */}
         <Show when={p.groups.length > 0}>
-          <div class="group-header" style="cursor: default">
+          <div
+            class={`group-header ${
+              drop()?.kind === "into-group" && (drop() as any).targetId === null
+                ? "drop-into"
+                : ""
+            }`}
+            style="cursor: default"
+            onDragOver={(e) => {
+              if (dragKind() !== "ws") return;
+              e.preventDefault();
+              if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+              setDrop({ kind: "into-group", targetId: null });
+            }}
+            onDrop={(e) => {
+              if (dragKind() !== "ws" || !dragId()) return;
+              e.preventDefault();
+              const wsId = dragId()!;
+              p.onWorkspaceReorder(wsId, null, scopeSize(null));
+              cancelDrag();
+            }}
+          >
             <span class="group-header-name">{t("sidebar.ungrouped")}</span>
             <span class="group-header-count">({groupedWorkspaces().ungrouped.length})</span>
           </div>
@@ -261,14 +322,69 @@ export function Sidebar(p: Props) {
         <For each={groupedWorkspaces().ungrouped}>
           {(w) => renderWorkspaceItem(w)}
         </For>
-        <For each={p.groups}>
+        <For each={sortedGroups()}>
           {(g) => {
             const members = () => groupedWorkspaces().byGroup.get(g.id) ?? [];
             const collapsed = () => g.is_collapsed;
             return (
               <>
                 <div
-                  class={`group-header ${collapsed() ? "group-collapsed" : ""}`}
+                  class={`group-header ${collapsed() ? "group-collapsed" : ""} ${
+                    dragKind() === "group" && dragId() === g.id ? "dragging" : ""
+                  } ${
+                    drop()?.kind === "into-group" && (drop() as any).targetId === g.id
+                      ? "drop-into"
+                      : ""
+                  } ${
+                    drop()?.kind === "group-line" && (drop() as any).targetId === g.id
+                      ? `drop-${(drop() as any).where}`
+                      : ""
+                  }`}
+                  draggable={true}
+                  onDragStart={(e) => {
+                    setDragKind("group");
+                    setDragId(g.id);
+                    setDrop(null);
+                    if (e.dataTransfer) {
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData(
+                        "application/x-winmux-drag",
+                        JSON.stringify({ kind: "group", id: g.id }),
+                      );
+                    }
+                  }}
+                  onDragEnd={cancelDrag}
+                  onDragOver={(e) => {
+                    if (dragKind() === "ws") {
+                      e.preventDefault();
+                      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+                      setDrop({ kind: "into-group", targetId: g.id });
+                    } else if (dragKind() === "group" && dragId() !== g.id) {
+                      e.preventDefault();
+                      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+                      const where = whereByMidpoint(e, e.currentTarget as HTMLElement);
+                      setDrop({ kind: "group-line", targetId: g.id, where });
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (dragKind() === "ws" && dragId()) {
+                      e.preventDefault();
+                      const wsId = dragId()!;
+                      const size = scopeSize(g.id);
+                      p.onWorkspaceReorder(wsId, g.id, size);
+                      cancelDrag();
+                    } else if (dragKind() === "group" && dragId() && dragId() !== g.id) {
+                      e.preventDefault();
+                      const gid = dragId()!;
+                      const targetIdx = groupIndexOf(g.id);
+                      const draggingIdx = groupIndexOf(gid);
+                      const w = whereByMidpoint(e, e.currentTarget as HTMLElement);
+                      let idx = w === "above" ? targetIdx : targetIdx + 1;
+                      if (draggingIdx !== -1 && draggingIdx < targetIdx) idx -= 1;
+                      p.onGroupReorder(gid, Math.max(0, idx));
+                      cancelDrag();
+                    }
+                  }}
                   onClick={() => p.onGroupToggleCollapse(g.id, !collapsed())}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -316,7 +432,6 @@ export function Sidebar(p: Props) {
                   <span class="group-header-count">({members().length})</span>
                   <span class="group-header-chevron"><IconChevronDown size={12} /></span>
                 </div>
-                {/* Group context menu (fixed-position; keyed by g.id). */}
                 <Show when={groupMenuFor() === g.id}>
                   <div
                     class="group-menu"
@@ -353,7 +468,6 @@ export function Sidebar(p: Props) {
                     </button>
                   </div>
                 </Show>
-                {/* Color picker popover — inline under the header. */}
                 <Show when={colorPickerFor() === g.id}>
                   <div class="group-swatch-picker" onClick={(e) => e.stopPropagation()}>
                     <For each={GROUP_PICKER_COLORS}>
@@ -379,12 +493,6 @@ export function Sidebar(p: Props) {
           }}
         </For>
       </div>
-      {/* Phase 39: Notes + Settings + Ports row, then New workspace,
-          then Provision server.
-          Phase 62.B (item I): each button is an emoji icon + a text
-          label span. In icons mode CSS hides the labels and stacks the
-          row vertically, so these stay reachable as icons (with
-          tooltips) instead of disappearing. */}
       <div class="sidebar-actions-row">
         <button class="ws-action-half" onClick={p.onOpenNotes} title={t("sidebar.notes.tooltip")}>
           <span class="ws-action-emoji"><IconNotes /></span>
@@ -399,16 +507,10 @@ export function Sidebar(p: Props) {
           <span class="ws-action-label">{t("sidebar.ports.label")}</span>
         </button>
       </div>
-      {/* Phase 60 (smoke-test 2a): the Browser + Files row moved to
-          the workspace header next to "+ diff" — they're workspace-
-          scoped tools and Yossi found them misplaced here. */}
       <button class="ws-add" onClick={p.onCreate} title={t("sidebar.new_workspace")}>
         <span class="ws-action-emoji"><IconPlus /></span>
         <span class="ws-action-label">{t("sidebar.new_workspace")}</span>
       </button>
-      {/* cmux-A A2: create a new sidebar group. Inline text input,
-          Enter commits, Esc cancels. Shown as a compact "+" button
-          at the sidebar bottom, respecting icons-mode compact layout. */}
       <Show
         when={newGroupName() === null}
         fallback={
@@ -434,9 +536,6 @@ export function Sidebar(p: Props) {
           {t("sidebar.new_group")}
         </button>
       </Show>
-      {/* Phase 65.R: single entry — "Provision server" opens the wizard
-          whose mode picker covers both "new server" and "connect to an
-          existing server". The standalone 🔗 button was removed. */}
       <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
         <span class="ws-action-emoji"><IconCloud /></span>
         <span class="ws-action-label">{t("sidebar.provision_server")}</span>
@@ -444,19 +543,56 @@ export function Sidebar(p: Props) {
     </div>
   );
 
-  // Extracted helper so the same JSX renders both in the Ungrouped
-  // section AND under each named group. Kept inside the component so
-  // it can reach the local menu-state signals + the props closure.
   function renderWorkspaceItem(w: Workspace) {
     return (
       <div
         class={`ws-item ${p.activeId === w.id ? "active" : ""} ${
           p.waitingWorkspaceIds.has(w.id) ? "has-waiting" : ""
+        } ${dragKind() === "ws" && dragId() === w.id ? "dragging" : ""} ${
+          drop()?.kind === "ws-line" && (drop() as any).targetId === w.id
+            ? `drop-${(drop() as any).where}`
+            : ""
         }`}
         data-has-color={w.color ? "true" : "false"}
         style={w.color ? `--ws-color: ${w.color}` : undefined}
         title={p.mode === "icons" ? w.name : undefined}
-        onClick={() => p.onActivate(w.id)}
+        draggable={true}
+        onDragStart={(e) => {
+          setDragKind("ws");
+          setDragId(w.id);
+          setDrop(null);
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData(
+              "application/x-winmux-drag",
+              JSON.stringify({ kind: "ws", id: w.id }),
+            );
+          }
+        }}
+        onDragEnd={cancelDrag}
+        onDragOver={(e) => {
+          if (dragKind() !== "ws" || !dragId() || dragId() === w.id) return;
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+          const where = whereByMidpoint(e, e.currentTarget as HTMLElement);
+          setDrop({ kind: "ws-line", targetId: w.id, where });
+        }}
+        onDrop={(e) => {
+          if (dragKind() !== "ws" || !dragId() || dragId() === w.id) return;
+          e.preventDefault();
+          const draggedId = dragId()!;
+          const destScope = w.group_id ?? null;
+          const targetIdx = scopeIndexOf(destScope, w.id);
+          const where = whereByMidpoint(e, e.currentTarget as HTMLElement);
+          const srcScope = p.workspaces.find((ww) => ww.id === draggedId)?.group_id ?? null;
+          const srcIdx = scopeIndexOf(srcScope, draggedId);
+          let idx = where === "above" ? targetIdx : targetIdx + 1;
+          if (srcScope === destScope && srcIdx !== -1 && srcIdx < targetIdx) {
+            idx -= 1;
+          }
+          p.onWorkspaceReorder(draggedId, destScope, Math.max(0, idx));
+          cancelDrag();
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
           if (menuFor() === w.id) {
@@ -477,15 +613,10 @@ export function Sidebar(p: Props) {
           <Show when={w.emoji}>{w.emoji} </Show>
           <TechText text={w.name} />
         </span>
-        {/* Phase 49-B: 🌿 chip when this workspace is anchored
-            to a git worktree. Path goes in the tooltip. */}
         <Show when={w.git_worktree}>
           <span class="ws-worktree-chip" title={w.git_worktree!}><IconGitBranch size={13} /></span>
         </Show>
         <WorkspaceBadge w={w} />
-        {/* Phase 36.A: inline port-forward badge. Click opens the
-            browser (1 forward) or surfaces the workspace's Ports
-            panel by activating it (>1). */}
         {(() => {
           const fwds = p.allForwards.filter((f) => f.workspace_id === w.id);
           return (
@@ -518,15 +649,11 @@ export function Sidebar(p: Props) {
               position: "fixed",
               top: `${menuPos().y}px`,
               left: `${menuPos().x}px`,
-              // Neutralize the RTL `.ws-menu { right: 12px }` rule —
-              // we anchor by left at the cursor in both directions.
               right: "auto",
               "z-index": "1000",
             }}
             onClick={(e) => {
               e.stopPropagation();
-              // Don't auto-close when the user is drilling into the
-              // Move-to-group submenu — that would swallow the click.
               if (moveMenuFor() !== w.id) {
                 setMenuFor(null);
                 setMoveMenuFor(null);
@@ -539,14 +666,9 @@ export function Sidebar(p: Props) {
             <button onClick={() => p.onAction(w.id, "edit")}>
               {t("ws.context.edit")}
             </button>
-            {/* Phase 68 (UX): per-workspace add-ons (hooks, Insights,
-                cli, tmux-conf) live on the remote — manage them here. */}
             <button onClick={() => p.onAction(w.id, "addons")}>
               {t("ws.context.addons")}
             </button>
-            {/* cmux-A A2: Move-to-group submenu. Expands inline in the
-                same menu; the outer menu doesn't close on click while
-                the submenu is expanded (see the onClick guard above). */}
             <button
               onClick={() => {
                 setMoveMenuFor(moveMenuFor() === w.id ? null : w.id);

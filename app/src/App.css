@@ -5722,3 +5722,57 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   padding: 6px 4px;
   font-size: 14px;
 }
+
+/* ─── beta.3 (ws-dragdrop): drag-and-drop reordering ─────────────────
+   Drop indicators use ::before / ::after 2px bars that render at the
+   top or bottom of the target. Because they're horizontal, they render
+   identically in LTR and RTL — the vertical layout of the sidebar is
+   the reorder axis regardless of writing direction.
+   The dragging element gets reduced opacity so the user can see what
+   they picked up (browsers render a live drag-image of the element,
+   this only styles the source-in-place). */
+.ws-item[draggable="true"],
+.group-header[draggable="true"] {
+  cursor: grab;
+}
+.ws-item.dragging,
+.group-header.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+/* Horizontal 2px bar above/below the target, absolutely positioned so
+   it never re-flows the list (a reflow-during-drag would repeatedly
+   swap the item under the cursor and set off oscillation). */
+.ws-item.drop-above::before,
+.ws-item.drop-below::after,
+.group-header.drop-above::before,
+.group-header.drop-below::after {
+  content: "";
+  position: absolute;
+  inset-inline: 4px;
+  height: 2px;
+  background: var(--w-accent, #7aa2f7);
+  border-radius: 1px;
+  pointer-events: none;
+  box-shadow: 0 0 6px rgba(122, 162, 247, 0.6);
+}
+.ws-item.drop-above::before,
+.group-header.drop-above::before { top: -1px; }
+.ws-item.drop-below::after,
+.group-header.drop-below::after { bottom: -1px; }
+/* group headers are position-static by default; anchor for the pseudos. */
+.group-header { position: relative; }
+/* Whole-group highlight when a workspace hovers a group header. The
+   background tint reads as "release here to add to this group". */
+.group-header.drop-into {
+  background: color-mix(in srgb, var(--w-accent, #7aa2f7) 15%, transparent);
+  outline: 1px dashed var(--w-accent, #7aa2f7);
+  outline-offset: -1px;
+}
+/* Small transition on background/transform so post-drop reordering
+   settles smoothly instead of snapping. Kept short — long animations
+   fight the pointer during rapid consecutive drags. */
+.ws-item, .group-header {
+  transition: background 80ms ease, color 80ms ease, transform 120ms ease,
+    opacity 120ms ease;
+}

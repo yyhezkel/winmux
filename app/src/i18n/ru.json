@@ -833,5 +833,13 @@
   "workspace.separateClaudeAccount.hint": "По умолчанию все рабочие пространства используют один аккаунт Claude, поэтому использование запрашивается один раз. Включайте это только если этот сервер входит в другой аккаунт Claude — тогда его использование запрашивается и показывается отдельно.",
   "notifications.pending_count": "{count} панелей ждут внимания",
   "notifications.pane_pulse_label": "Пульсация панели при активности",
-  "notifications.pane_pulse_help": "При получении уведомления OSC 9/99/777 рамка панели пульсирует, пока вы не переключитесь на неё."
+  "notifications.pane_pulse_help": "При получении уведомления OSC 9/99/777 рамка панели пульсирует, пока вы не переключитесь на неё.",
+  "sidebar.ungrouped": "Без группы",
+  "sidebar.new_group": "+ Группа",
+  "sidebar.group_name_prompt": "Название группы",
+  "sidebar.rename_group": "Переименовать группу",
+  "sidebar.delete_group": "Удалить группу",
+  "sidebar.change_color": "Изменить цвет",
+  "sidebar.move_to_group": "Переместить в группу",
+  "sidebar.move_out_of_group": "Убрать из группы"
 }

@@ -15,6 +15,8 @@ export type { BrowserState } from "./bindings/BrowserState";
 export type { EnvVar } from "./bindings/EnvVar";
 export type { LayoutNode } from "./bindings/LayoutNode";
 export type { Workspace } from "./bindings/Workspace";
+// cmux-A A2: sidebar collapsible groups.
+export type { WorkspaceGroup } from "./bindings/WorkspaceGroup";
 export type { FeedItem } from "./bindings/FeedItem";
 export type { FeedItemState } from "./bindings/FeedItemState";
 export type { ClaudeUsage } from "./bindings/ClaudeUsage";
@@ -92,6 +94,9 @@ export type WorkspacesFile = {
   version: 1;
   active_workspace_id: string | null;
   workspaces: Workspace[];
+  // cmux-A A2: sidebar groups. Older workspaces.json without this
+  // key deserializes as an empty array (backend serde default).
+  groups?: import("./bindings/WorkspaceGroup").WorkspaceGroup[];
 };
 
 export type PtyDataEvent = { session_id: string; data: string };

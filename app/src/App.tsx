@@ -71,6 +71,7 @@ import {
   type PtyExitEvent,
   type SplitDirection,
   type Workspace,
+  type WorkspaceGroup,
   type WorkspacesFile,
 } from "./types";
 import "@xterm/xterm/css/xterm.css";
@@ -2205,6 +2206,61 @@ function App() {
           connectedIds={liveWorkspaceIds()}
           waitingWorkspaceIds={waitingWorkspaceIds()}
           pendingNotifCount={paneNotified().size}
+          groups={file().groups ?? []}
+          onGroupCreate={(name, color) => {
+            void (async () => {
+              try {
+                await invoke<WorkspaceGroup>("workspace_group_create", { name, color });
+                const f = await invoke<WorkspacesFile>("workspaces_load");
+                updateFile(f);
+              } catch (e) { console.error("workspace_group_create failed", e); }
+            })();
+          }}
+          onGroupRename={(id, name) => {
+            void (async () => {
+              try {
+                await invoke("workspace_group_update", { id, name, color: null, isCollapsed: null });
+                const f = await invoke<WorkspacesFile>("workspaces_load");
+                updateFile(f);
+              } catch (e) { console.error("workspace_group_update rename failed", e); }
+            })();
+          }}
+          onGroupSetColor={(id, color) => {
+            void (async () => {
+              try {
+                await invoke("workspace_group_update", { id, name: null, color, isCollapsed: null });
+                const f = await invoke<WorkspacesFile>("workspaces_load");
+                updateFile(f);
+              } catch (e) { console.error("workspace_group_update color failed", e); }
+            })();
+          }}
+          onGroupToggleCollapse={(id, isCollapsed) => {
+            void (async () => {
+              try {
+                await invoke("workspace_group_update", { id, name: null, color: null, isCollapsed });
+                const f = await invoke<WorkspacesFile>("workspaces_load");
+                updateFile(f);
+              } catch (e) { console.error("workspace_group_update collapse failed", e); }
+            })();
+          }}
+          onGroupDelete={(id) => {
+            void (async () => {
+              try {
+                await invoke("workspace_group_delete", { id });
+                const f = await invoke<WorkspacesFile>("workspaces_load");
+                updateFile(f);
+              } catch (e) { console.error("workspace_group_delete failed", e); }
+            })();
+          }}
+          onWorkspaceSetGroup={(workspaceId, groupId) => {
+            void (async () => {
+              try {
+                await invoke("workspace_set_group", { workspaceId, groupId });
+                const f = await invoke<WorkspacesFile>("workspaces_load");
+                updateFile(f);
+              } catch (e) { console.error("workspace_set_group failed", e); }
+            })();
+          }}
           onActivate={handleSetActive}
           onCreate={() => setShowCreate(true)}
           onProvision={() => setShowProvision(true)}

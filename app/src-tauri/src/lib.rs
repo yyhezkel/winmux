@@ -197,6 +197,7 @@ struct PtyExitEvent {
 // since the export_to path resolves to the same on-disk location.
 pub(crate) use winmux_types::{
     BrowserState, Connection, DiffSource, EnvVar, LayoutNode, PaneKind, SplitDirection, Workspace,
+    WorkspaceGroup,
 };
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -207,6 +208,12 @@ struct WorkspacesFile {
     active_workspace_id: Option<String>,
     #[serde(default)]
     workspaces: Vec<Workspace>,
+    // cmux-A A2: sidebar collapsible groups. `#[serde(default)]` so a
+    // pre-A2 workspaces.json (no `groups` key) loads with an empty
+    // vec; the file only grows a `groups` array once the user creates
+    // one, keeping the persisted file backwards-compatible.
+    #[serde(default)]
+    groups: Vec<WorkspaceGroup>,
 }
 
 fn default_version() -> u32 {
@@ -378,6 +385,7 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
             version: 1,
             active_workspace_id: None,
             workspaces: Vec::new(),
+            groups: Vec::new(),
         });
     }
     let text = std::fs::read_to_string(&path).map_err(|e| format!("read {:?}: {e}", path))?;
@@ -1916,6 +1924,8 @@ async fn provision_existing_install_key(
         last_active_at: 0,
         git_worktree: None,
         claude_separate_account: false,
+        // cmux-A A2: fresh workspaces default to ungrouped.
+        group_id: None,
     };
     {
         let mut file = state.workspaces.lock().map_err(|e| e.to_string())?;
@@ -3032,6 +3042,8 @@ fn workspace_create(
         last_active_at: 0,
         git_worktree: None,
         claude_separate_account: false,
+        // cmux-A A2: fresh workspaces default to ungrouped.
+        group_id: None,
     };
     {
         let mut file = state.workspaces.lock().unwrap();
@@ -3210,6 +3222,138 @@ fn live_ssh_connection_for_workspace(
 
 // Phase 51.B1: first_terminal_connection + backfill_terminal_connections
 // moved to winmux-core.
+
+// ─── cmux-A A2: workspace group commands ────────────────────────────
+
+fn new_group_id() -> String {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("g_{:x}", t)
+}
+
+#[tauri::command]
+fn workspace_group_create(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    name: String,
+    color: String,
+) -> Result<WorkspaceGroup, String> {
+    let trimmed = name.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("group name is required".to_string());
+    }
+    let group = WorkspaceGroup {
+        id: new_group_id(),
+        name: trimmed,
+        color,
+        is_collapsed: false,
+    };
+    {
+        let mut file = state
+            .workspaces
+            .lock()
+            .map_err(|e| format!("workspaces lock poisoned: {e}"))?;
+        file.groups.push(group.clone());
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(group)
+}
+
+#[tauri::command]
+fn workspace_group_update(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    id: String,
+    name: Option<String>,
+    color: Option<String>,
+    is_collapsed: Option<bool>,
+) -> Result<(), String> {
+    {
+        let mut file = state
+            .workspaces
+            .lock()
+            .map_err(|e| format!("workspaces lock poisoned: {e}"))?;
+        let g = file
+            .groups
+            .iter_mut()
+            .find(|g| g.id == id)
+            .ok_or_else(|| format!("no group {id}"))?;
+        if let Some(n) = name {
+            let trimmed = n.trim().to_string();
+            if !trimmed.is_empty() {
+                g.name = trimmed;
+            }
+        }
+        if let Some(c) = color {
+            g.color = c;
+        }
+        if let Some(collapsed) = is_collapsed {
+            g.is_collapsed = collapsed;
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn workspace_group_delete(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    id: String,
+) -> Result<(), String> {
+    {
+        let mut file = state
+            .workspaces
+            .lock()
+            .map_err(|e| format!("workspaces lock poisoned: {e}"))?;
+        // Move any workspaces in this group back to ungrouped before
+        // dropping the group itself — no orphaned group_id references.
+        for ws in file.workspaces.iter_mut() {
+            if ws.group_id.as_deref() == Some(id.as_str()) {
+                ws.group_id = None;
+            }
+        }
+        file.groups.retain(|g| g.id != id);
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn workspace_set_group(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    group_id: Option<String>,
+) -> Result<(), String> {
+    {
+        let mut file = state
+            .workspaces
+            .lock()
+            .map_err(|e| format!("workspaces lock poisoned: {e}"))?;
+        // Validate that group_id, if set, exists — otherwise the
+        // workspace would be assigned to a dangling group.
+        if let Some(gid) = group_id.as_deref() {
+            if !file.groups.iter().any(|g| g.id == gid) {
+                return Err(format!("no group {gid}"));
+            }
+        }
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        ws.group_id = group_id;
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(())
+}
 
 #[tauri::command]
 fn workspace_rename(
@@ -5810,6 +5954,11 @@ pub fn run() {
             workspace_update,
             workspace_rename,
             workspace_set_identity,
+            // cmux-A A2: workspace groups (sidebar collapsible sections).
+            workspace_group_create,
+            workspace_group_update,
+            workspace_group_delete,
+            workspace_set_group,
             workspace_set_auto_port_forward,
             workspace_set_claude_separate_account,
             port_forward_stop,
@@ -6069,6 +6218,7 @@ mod migration_tests {
             last_active_at: 0,
             git_worktree: None,
             claude_separate_account: false,
+            group_id: None,
         }
     }
 
@@ -6134,6 +6284,7 @@ mod migration_tests {
             last_active_at: 0,
             git_worktree: None,
             claude_separate_account: false,
+            group_id: None,
         }
     }
 
@@ -6221,6 +6372,7 @@ mod migration_tests {
                 last_active_at: 0,
                 git_worktree: None,
                 claude_separate_account: false,
+                group_id: None,
             }],
             ..Default::default()
         };

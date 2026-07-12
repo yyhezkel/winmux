@@ -5583,3 +5583,142 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   line-height: 1;
   box-shadow: 0 0 6px 1px rgba(224, 175, 104, 0.45);
 }
+
+/* ─── cmux-A A2: workspace groups ──────────────────────────────────
+   Collapsible sidebar sections. Header carries color swatch + name +
+   count + chevron. When collapsed, the group's workspace rows are
+   simply not rendered (Solid conditional). Uses logical padding so
+   RTL flips automatically. */
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  padding-inline-start: 10px;
+  margin-top: 4px;
+  border-radius: var(--w-r-sm, 4px);
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--w-text-dim, #999);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.group-header:hover {
+  background: color-mix(in srgb, var(--w-text, #e6edf3) 6%, transparent);
+}
+.group-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--group-color, #6b7682);
+  flex-shrink: 0;
+}
+.group-header-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--w-text, #e6edf3);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.group-header-count {
+  font-size: 11px;
+  color: var(--w-text-dim, #999);
+  flex-shrink: 0;
+}
+.group-header-chevron {
+  font-size: 10px;
+  color: var(--w-text-dim, #999);
+  transition: transform 120ms ease;
+  flex-shrink: 0;
+}
+.group-header.group-collapsed .group-header-chevron {
+  transform: rotate(-90deg);
+}
+[dir="rtl"] .group-header.group-collapsed .group-header-chevron {
+  transform: rotate(90deg);
+}
+.group-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--w-surface, #161b22);
+  border: 1px solid var(--w-border, #21262d);
+  border-radius: var(--w-r-sm, 4px);
+  min-width: 160px;
+  padding: 4px 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.group-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: 0;
+  color: var(--w-text, #e6edf3);
+  text-align: start;
+  cursor: pointer;
+  font-size: 13px;
+}
+.group-menu button:hover {
+  background: color-mix(in srgb, var(--w-text, #e6edf3) 8%, transparent);
+}
+.group-menu button.danger { color: var(--w-error, #f7768e); }
+.group-swatch-picker {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+  flex-wrap: wrap;
+}
+.group-swatch-picker button {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+.group-swatch-picker button.selected {
+  border-color: var(--w-text, #e6edf3);
+}
+.ws-add-group {
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px dashed var(--w-border, #21262d);
+  border-radius: var(--w-r-sm, 4px);
+  color: var(--w-text-dim, #999);
+  cursor: pointer;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.ws-add-group:hover {
+  color: var(--w-text, #e6edf3);
+  border-color: var(--w-border-hi, #333);
+}
+.group-inline-input {
+  width: 100%;
+  padding: 4px 6px;
+  background: var(--w-bg, #0e1116);
+  border: 1px solid var(--w-border-hi, #21262d);
+  border-radius: var(--w-r-sm, 4px);
+  color: var(--w-text, #e6edf3);
+  font-size: 13px;
+  box-sizing: border-box;
+  margin-top: 4px;
+}
+/* Icons-mode sidebar hides labels; groups become just a compact
+   chevron+swatch row so the sidebar stays scannable at 48px wide. */
+.sidebar.icons .group-header-name,
+.sidebar.icons .group-header-count {
+  display: none;
+}
+.sidebar.icons .ws-add-group {
+  padding: 6px 4px;
+  font-size: 14px;
+}

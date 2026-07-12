@@ -113,19 +113,44 @@ type DockerContainer struct {
 	MemPct  float64 `json:"mem_pct"`
 }
 
-// dockerHTTP returns an http.Client that talks to the Docker unix socket
-// (no heavy SDK dependency — keeps the daemon tiny).
+// Phase 77.hotfix (2.1.3): single package-level http.Client shared across every
+// poll. Prior versions constructed a fresh Client + Transport per call — every
+// dropped Transport leaked its keep-alive idle pool, so a 34-container host
+// polled every ~2.5s leaked ~14 conns/sec into dockerd (fd numbers climbed
+// monotonically, dockerd RSS grew to 8 GB in ~16 h). Reusing one Transport
+// keeps the idle pool bounded and reusable.
+var (
+	dockerClientOnce sync.Once
+	dockerClientPtr  *http.Client
+)
+
+// dockerHTTP returns the shared http.Client that talks to the Docker unix
+// socket (no heavy SDK dependency — keeps the daemon tiny). A single Client
+// with a single Transport is used across all polls so idle keep-alive conns
+// are pooled and reused instead of leaked (see 2.1.3 hotfix note above).
 func dockerHTTP() *http.Client {
-	sock := dockerSockPath()
-	return &http.Client{
-		Timeout: 4 * time.Second,
-		Transport: &http.Transport{
+	dockerClientOnce.Do(func() {
+		transport := &http.Transport{
+			// Small pool: we only ever talk to the local unix socket. Cap
+			// idle conns so bursty polls (list + N concurrent stats) can't
+			// grow the pool unboundedly, and expire idle conns quickly.
+			MaxIdleConns:        4,
+			MaxIdleConnsPerHost: 4,
+			IdleConnTimeout:     30 * time.Second,
+			// Resolve the socket path on every dial so the client survives a
+			// Docker restart or an $XDG_RUNTIME_DIR change without needing
+			// to rebuild the Client. os.Stat calls are cheap.
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer
-				return d.DialContext(ctx, "unix", sock)
+				return d.DialContext(ctx, "unix", dockerSockPath())
 			},
-		},
-	}
+		}
+		dockerClientPtr = &http.Client{
+			Timeout:   4 * time.Second,
+			Transport: transport,
+		}
+	})
+	return dockerClientPtr
 }
 
 func dockerList() ([]DockerContainer, error) {
@@ -133,7 +158,12 @@ func dockerList() ([]DockerContainer, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	// Drain before Close so the keep-alive conn can be pooled and reused;
+	// an un-drained body forces the transport to discard the conn (2.1.3).
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("docker list: %d", resp.StatusCode)
 	}
@@ -183,7 +213,14 @@ func dockerStats(id string) (cpuPct float64, memUsed uint64, memPct float64, ok 
 	if err != nil {
 		return 0, 0, 0, false
 	}
-	defer resp.Body.Close()
+	// Drain + Close so the transport can reuse this keep-alive conn on the
+	// next stats poll (this is the hot path — N calls per list cycle).
+	// Un-drained bodies force the transport to discard the conn, which was
+	// the core leak fixed in 2.1.3.
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 	var s struct {
 		CPUStats struct {
 			CPUUsage    struct{ TotalUsage uint64 `json:"total_usage"` } `json:"cpu_usage"`

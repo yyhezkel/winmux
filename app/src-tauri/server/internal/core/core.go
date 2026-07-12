@@ -14,7 +14,11 @@ import (
 // guarantee introduced in Phase 77. One constant, shared by every package + cmd.
 // 2.1.0 (v0.4.3): native self-hosted push + REST hook resolution + per-device
 // scopes. Bumped so the add-on offers the update (remote pulls the new binary).
-const Version = "2.1.2"
+// 2.1.3 (hotfix): docker.sock connection leak in internal/insights — dockerHTTP
+// used to create a fresh http.Client + Transport per poll, leaking each
+// Transport's keep-alive idle pool into dockerd (RSS growth to 8 GB on a
+// 34-container host in ~16 h). See app/src-tauri/server/internal/insights/docker.go.
+const Version = "2.1.3"
 
 // FrameVersion is the WebSocket frame-contract version (PHASE-77-DESIGN §4.4).
 // It is sent in the WS `hello` frame; a client that refuses an unknown value

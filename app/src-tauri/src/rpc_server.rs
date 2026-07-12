@@ -447,6 +447,7 @@ async fn dispatch(
                 claude_separate_account: false,
                 // cmux-A A2: RPC-created workspaces default to ungrouped.
                 group_id: None,
+                sort_order: None,
             };
             let cloned = ws.clone();
             {

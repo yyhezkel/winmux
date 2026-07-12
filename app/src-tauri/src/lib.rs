@@ -463,6 +463,15 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
             }
         }
     }
+    // beta.3 (ws-dragdrop): backfill `sort_order` on any workspace or
+    // group that never went through the reorder path. The pre-beta.3
+    // sidebar rendered in insertion order, so that's the stable ordering
+    // we crystallize into consecutive 0..N-1 keys — per group_id scope
+    // for workspaces, and across the group list for groups. Idempotent:
+    // if every entry already has Some(_) this branch is a no-op.
+    if backfill_sort_orders(&mut file) {
+        migrated = true;
+    }
     if migrated {
         dlog("load_from_disk: migration ran — saving migrated layout");
         match save_to_disk(&file) {
@@ -471,6 +480,102 @@ fn load_from_disk() -> Result<WorkspacesFile, String> {
         }
     }
     Ok(file)
+}
+
+// beta.3 (ws-dragdrop): fill in any missing `sort_order` values with a
+// consecutive 0..N-1 sequence per scope. Returns true if anything was
+// changed (so the caller knows to save). Runs once at load time and
+// then implicitly at each reorder call — every reorder renumbers the
+// affected scope(s) fully, so the file stays dense.
+fn backfill_sort_orders(file: &mut WorkspacesFile) -> bool {
+    let mut changed = false;
+
+    // Workspaces: bucket by group_id (None = Ungrouped scope). Assign
+    // 0..N-1 within each bucket using CURRENT insertion order for the
+    // ones missing a sort_order; already-numbered entries keep their
+    // key. The result: any pre-beta.3 file gets a stable initial order,
+    // and any post-beta.3 file with a fresh workspace grafted at the
+    // end (create-flow) gets that fresh workspace's None coerced to
+    // `max_existing + 1` (i.e. appended below its siblings).
+    let mut scopes: std::collections::HashMap<Option<String>, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (idx, w) in file.workspaces.iter().enumerate() {
+        scopes.entry(w.group_id.clone()).or_default().push(idx);
+    }
+    for (_scope, indices) in scopes.iter() {
+        // Everything already numbered keeps its key; the max of those
+        // keys anchors where new (None) entries append. If the whole
+        // scope is None-only we hand out 0..N-1 in insertion order.
+        let mut next = indices
+            .iter()
+            .filter_map(|i| file.workspaces[*i].sort_order)
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(0);
+        for i in indices {
+            if file.workspaces[*i].sort_order.is_none() {
+                file.workspaces[*i].sort_order = Some(next);
+                next += 1;
+                changed = true;
+            }
+        }
+    }
+
+    // Groups: single scope, same logic.
+    {
+        let mut next = file
+            .groups
+            .iter()
+            .filter_map(|g| g.sort_order)
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(0);
+        for g in file.groups.iter_mut() {
+            if g.sort_order.is_none() {
+                g.sort_order = Some(next);
+                next += 1;
+                changed = true;
+            }
+        }
+    }
+
+    changed
+}
+
+// beta.3 (ws-dragdrop): renumber all workspaces in `scope` to
+// consecutive 0..N-1 based on their CURRENT sort_order (ties broken by
+// insertion order). Any missing sort_order is treated as +∞ so it lands
+// at the end. Used by workspace_reorder after it has slotted the moved
+// workspace at the target index. Pure over the file, safe to call
+// inside the workspaces lock.
+fn renumber_workspace_scope(file: &mut WorkspacesFile, scope: Option<&str>) {
+    // Collect indices in this scope, tagged with (sort_order or +∞,
+    // insertion_order) so the sort is total.
+    let mut in_scope: Vec<(usize, i32, usize)> = file
+        .workspaces
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| w.group_id.as_deref() == scope)
+        .map(|(idx, w)| (idx, w.sort_order.unwrap_or(i32::MAX), idx))
+        .collect();
+    in_scope.sort_by_key(|(_, order, ins)| (*order, *ins));
+    for (new_key, (idx, _, _)) in in_scope.into_iter().enumerate() {
+        file.workspaces[idx].sort_order = Some(new_key as i32);
+    }
+}
+
+// beta.3 (ws-dragdrop): same idea, but for the top-level group list.
+fn renumber_group_list(file: &mut WorkspacesFile) {
+    let mut in_scope: Vec<(usize, i32, usize)> = file
+        .groups
+        .iter()
+        .enumerate()
+        .map(|(idx, g)| (idx, g.sort_order.unwrap_or(i32::MAX), idx))
+        .collect();
+    in_scope.sort_by_key(|(_, order, ins)| (*order, *ins));
+    for (new_key, (idx, _, _)) in in_scope.into_iter().enumerate() {
+        file.groups[idx].sort_order = Some(new_key as i32);
+    }
 }
 
 // Diagnostic: tag every persist with its caller so debug.log shows the exact
@@ -1926,6 +2031,7 @@ async fn provision_existing_install_key(
         claude_separate_account: false,
         // cmux-A A2: fresh workspaces default to ungrouped.
         group_id: None,
+        sort_order: None,
     };
     {
         let mut file = state.workspaces.lock().map_err(|e| e.to_string())?;
@@ -3044,6 +3150,7 @@ fn workspace_create(
         claude_separate_account: false,
         // cmux-A A2: fresh workspaces default to ungrouped.
         group_id: None,
+        sort_order: None,
     };
     {
         let mut file = state.workspaces.lock().unwrap();
@@ -3249,6 +3356,11 @@ fn workspace_group_create(
         name: trimmed,
         color,
         is_collapsed: false,
+        // beta.3 (ws-dragdrop): freshly-created groups get no
+        // sort_order; they append at the end of the group list. The
+        // first `workspace_group_reorder` call renumbers everyone into
+        // consecutive 0..N-1.
+        sort_order: None,
     };
     {
         let mut file = state
@@ -3353,6 +3465,166 @@ fn workspace_set_group(
     persist(&state)?;
     let _ = app.emit("workspaces:changed", ());
     Ok(())
+}
+
+// beta.3 (ws-dragdrop): direct drag-reorder of workspaces in the
+// sidebar. `group_id` is the destination scope (None = Ungrouped); if
+// the workspace was in a different scope before, both scopes get
+// renumbered so they stay dense. `new_index` is clamped to the
+// destination scope's valid range (0..=N where N is the size AFTER the
+// move, so appending at the end works). Returns the full
+// `WorkspacesFile` so the frontend can drop its old snapshot without a
+// second round-trip.
+#[tauri::command]
+fn workspace_reorder(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    group_id: Option<String>,
+    new_index: i32,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state
+            .workspaces
+            .lock()
+            .map_err(|e| format!("workspaces lock poisoned: {e}"))?;
+
+        // Validate destination group_id if provided.
+        if let Some(gid) = group_id.as_deref() {
+            if !file.groups.iter().any(|g| g.id == gid) {
+                return Err(format!("no group {gid}"));
+            }
+        }
+
+        // Snapshot the workspace's current group so we know whether we
+        // also have to renumber a SOURCE scope after the move.
+        let (old_group, ws_index) = {
+            let (idx, ws) = file
+                .workspaces
+                .iter()
+                .enumerate()
+                .find(|(_, w)| w.id == workspace_id)
+                .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+            (ws.group_id.clone(), idx)
+        };
+
+        // Reassign group_id first — that changes the workspace's scope
+        // membership, which the renumber pass below relies on.
+        if old_group.as_deref() != group_id.as_deref() {
+            file.workspaces[ws_index].group_id = group_id.clone();
+        }
+
+        // Compute the destination scope's ordered id list AFTER the
+        // move (skip the target if it was already there, then splice
+        // at new_index). Assign 0..N-1 by walking that list.
+        let dest_scope = group_id.as_deref();
+        let mut dest_ids: Vec<String> = file
+            .workspaces
+            .iter()
+            .filter(|w| w.group_id.as_deref() == dest_scope && w.id != workspace_id)
+            .map(|w| {
+                // Sort by current sort_order (missing = end), tie-break
+                // by insertion; the collect step below reorders.
+                w.id.clone()
+            })
+            .collect();
+        // Stable sort dest_ids by the sibling's current sort_order so
+        // "insert at new_index" is meaningful against the on-screen
+        // ordering, not against arbitrary vec order.
+        {
+            // Build a lookup: id -> (sort_order or +∞, insertion idx).
+            let mut key: std::collections::HashMap<&str, (i32, usize)> =
+                std::collections::HashMap::new();
+            for (idx, w) in file.workspaces.iter().enumerate() {
+                key.insert(w.id.as_str(), (w.sort_order.unwrap_or(i32::MAX), idx));
+            }
+            dest_ids.sort_by(|a, b| {
+                let ka = key.get(a.as_str()).copied().unwrap_or((i32::MAX, 0));
+                let kb = key.get(b.as_str()).copied().unwrap_or((i32::MAX, 0));
+                ka.cmp(&kb)
+            });
+        }
+        let insert_at = (new_index.max(0) as usize).min(dest_ids.len());
+        dest_ids.insert(insert_at, workspace_id.clone());
+
+        // Write consecutive 0..N-1 keys into the destination scope,
+        // matching dest_ids' new order.
+        for (new_key, id) in dest_ids.into_iter().enumerate() {
+            if let Some(w) = file.workspaces.iter_mut().find(|w| w.id == id) {
+                w.sort_order = Some(new_key as i32);
+            }
+        }
+
+        // If the source scope was different, renumber it too — the
+        // hole left by the moved workspace collapses to 0..M-1.
+        if old_group.as_deref() != group_id.as_deref() {
+            renumber_workspace_scope(&mut file, old_group.as_deref());
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(state
+        .workspaces
+        .lock()
+        .map_err(|e| format!("workspaces lock poisoned: {e}"))?
+        .clone())
+}
+
+// beta.3 (ws-dragdrop): drag-reorder a group among its siblings. Same
+// clamp/renumber pattern as `workspace_reorder` but with a single
+// scope (the whole group list).
+#[tauri::command]
+fn workspace_group_reorder(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    group_id: String,
+    new_index: i32,
+) -> Result<WorkspacesFile, String> {
+    {
+        let mut file = state
+            .workspaces
+            .lock()
+            .map_err(|e| format!("workspaces lock poisoned: {e}"))?;
+
+        if !file.groups.iter().any(|g| g.id == group_id) {
+            return Err(format!("no group {group_id}"));
+        }
+
+        // Build the ordered id list minus the target, then splice.
+        let mut ordered: Vec<String> = file
+            .groups
+            .iter()
+            .filter(|g| g.id != group_id)
+            .map(|g| g.id.clone())
+            .collect();
+        {
+            let mut key: std::collections::HashMap<&str, (i32, usize)> =
+                std::collections::HashMap::new();
+            for (idx, g) in file.groups.iter().enumerate() {
+                key.insert(g.id.as_str(), (g.sort_order.unwrap_or(i32::MAX), idx));
+            }
+            ordered.sort_by(|a, b| {
+                let ka = key.get(a.as_str()).copied().unwrap_or((i32::MAX, 0));
+                let kb = key.get(b.as_str()).copied().unwrap_or((i32::MAX, 0));
+                ka.cmp(&kb)
+            });
+        }
+        let insert_at = (new_index.max(0) as usize).min(ordered.len());
+        ordered.insert(insert_at, group_id.clone());
+
+        for (new_key, id) in ordered.into_iter().enumerate() {
+            if let Some(g) = file.groups.iter_mut().find(|g| g.id == id) {
+                g.sort_order = Some(new_key as i32);
+            }
+        }
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(state
+        .workspaces
+        .lock()
+        .map_err(|e| format!("workspaces lock poisoned: {e}"))?
+        .clone())
 }
 
 #[tauri::command]
@@ -5959,6 +6231,9 @@ pub fn run() {
             workspace_group_update,
             workspace_group_delete,
             workspace_set_group,
+            // beta.3 (ws-dragdrop): direct drag reorder from the sidebar.
+            workspace_reorder,
+            workspace_group_reorder,
             workspace_set_auto_port_forward,
             workspace_set_claude_separate_account,
             port_forward_stop,
@@ -6219,6 +6494,7 @@ mod migration_tests {
             git_worktree: None,
             claude_separate_account: false,
             group_id: None,
+            sort_order: None,
         }
     }
 
@@ -6285,6 +6561,7 @@ mod migration_tests {
             git_worktree: None,
             claude_separate_account: false,
             group_id: None,
+            sort_order: None,
         }
     }
 
@@ -6373,6 +6650,7 @@ mod migration_tests {
                 git_worktree: None,
                 claude_separate_account: false,
                 group_id: None,
+                sort_order: None,
             }],
             ..Default::default()
         };

@@ -427,6 +427,18 @@ Yossi tested v0.2.8 end-to-end. "רוב הדברים עובדים." The bugs, wi
 
 ## Decided
 
+### 2026-07-12 — v0.4.4-beta.2 — icons, mouse fix, notifications, workspace groups (cut off `main`)
+Second public beta on 0.4.4 (same version; the tag suffix distinguishes it). Cut directly off `main`, which now carries the beta.1 UX wave plus five new items:
+- **Emoji → Lucide SVG icon migration** (`d7a64a3`) — a shared `icons.tsx` layer (`lucide-solid`) replaces ~150 emoji glyphs across ~24 components; glyphs stripped from i18n values so labels are plain text in all 4 languages with one language-agnostic SVG per button. Also: usage pill centered + passive (dbl-click refresh), resizable side-drawer, toolbar/tabs collapse to icon-only when narrow.
+- **Claude subscription-usage metrics** (`d7a64a3`) — centered top pill shows session / week / top-model % from `claude -p /usage`; reset time converted to the computer's local timezone; Monitor "Claude Usage" tab + settings.
+- **Mouse-tracking auto-cleanup** (`6694249`, `85bf082`) — on pane connect/attach and on pane process exit, winmux emits the mouse-disable set so leaked `\e[<…M` SGR sequences from an uncleanly-exited app (vim/fzf/less) stop rendering as literal text in the bare shell. `docs/MOUSE-DEBUG.md`.
+- **Notification pulse rings + sidebar badge (cmux-A A1)** (`e99bfeb`, `2c16837`) — a pane that receives an OSC 9/99/777 terminal notification pulses an amber ring until focused (focused pane gets a brief one-shot flash); sidebar header shows an aggregate count badge. Setting-gated (`notifications.pane_pulse_on_activity`, default on). Ring drawn as an inset overlay so it survives a workspace-colour border and tight pane packing.
+- **Workspace groups (cmux-A A2)** (`4fd7689`) — collapsible sidebar sections with a color swatch, count, chevron, context menu, and move-to-group; backend `WorkspaceGroup` type + `Workspace.group_id` + `workspace_group_create/update/delete/set_group`. A2 was cherry-picked onto main and re-iconified to Lucide to match the rest of the chrome.
+- **Version stays 0.4.4** — no bump; `v0.4.4-beta.2` tag distinguishes from beta.1.
+- **manifest.json intentionally NOT bumped** — beta ships as a manual GitHub download; stable auto-updater users are not pushed the beta.
+- **Mobile APK not attached** in this cut — awaiting `assembleRelease`; will attach retroactively.
+- **Note on cmux-A branch:** `beta.2-cmux-A` kept as a backup; its commits were entangled (A1's commit carried A2's CSS/i18n), so A1 and A2 were extracted onto main as clean, separately-verified cherry-picks rather than a wholesale merge.
+
 ### 2026-07-06 — v0.4.4-beta.1 — desktop UX wave (cut off `ux-improvements-v0.4.4`)
 Public beta of a cohort-feedback UX wave. **8 changes, all on `ux-improvements-v0.4.4`, merged to main for the beta cut:**
 - **Auto-connect on secondary panels** (`dfe45b5`) — opening Monitor/Files/Browser/Ports in a disconnected SSH workspace headlessly arms the SSH handle first (idempotent, PTY/tmux-free) with a "מחבר…" pill; no more "no active SSH session".

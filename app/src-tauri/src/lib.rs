@@ -5976,15 +5976,6 @@ pub fn run() {
             )
             .title("winmux")
             .inner_size(1100.0, 700.0)
-            // beta.3 (ws-dragdrop): Tauri registers an OS-level IDropTarget on
-            // the WebView2 HWND by default. On Windows that handler swallows
-            // in-page HTML5 drag-and-drop — the sidebar reorder showed a drag
-            // cursor but the DOM `drop` never fired, so nothing moved. Disabling
-            // it hands drag-drop back to the DOM so the sidebar reorder works.
-            // Trade-off: OS *file* drops onto panes (Phase 49-A `onDragDropEvent`)
-            // no longer fire in this window; URL/text drags still work via the
-            // HTML5 `ondrop` fallback in PaneView.
-            .disable_drag_drop_handler()
             .build()
             .map_err(|e| Box::<dyn std::error::Error>::from(format!("main window: {e}")))?;
             dlog("setup: main webview created");

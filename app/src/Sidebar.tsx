@@ -556,6 +556,11 @@ export function Sidebar(p: Props) {
         data-has-color={w.color ? "true" : "false"}
         style={w.color ? `--ws-color: ${w.color}` : undefined}
         title={p.mode === "icons" ? w.name : undefined}
+        // beta.3 (ws-dragdrop) regression fix: the drag refactor dropped the
+        // click-to-switch handler. A plain click (no drag gesture) still fires
+        // `click`; a completed HTML5 drag suppresses the trailing click, so
+        // switching and reordering coexist without a flag.
+        onClick={() => p.onActivate(w.id)}
         draggable={true}
         onDragStart={(e) => {
           setDragKind("ws");

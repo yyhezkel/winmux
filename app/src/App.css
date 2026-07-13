@@ -5728,17 +5728,41 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
    top or bottom of the target. Because they're horizontal, they render
    identically in LTR and RTL — the vertical layout of the sidebar is
    the reorder axis regardless of writing direction.
-   The dragging element gets reduced opacity so the user can see what
-   they picked up (browsers render a live drag-image of the element,
-   this only styles the source-in-place). */
-.ws-item[draggable="true"],
-.group-header[draggable="true"] {
+   The dragging element gets reduced opacity so the user can see what they
+   picked up; a `.ws-ghost` clone follows the cursor (pointer-based drag has no
+   native drag-image). */
+.ws-item,
+.group-header {
   cursor: grab;
 }
 .ws-item.dragging,
 .group-header.dragging {
   opacity: 0.4;
   cursor: grabbing;
+}
+/* While a pointer drag is active the body suppresses text selection and forces
+   the grabbing cursor everywhere (the pointer often leaves the source item). */
+body.winmux-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+/* Floating clone that follows the cursor during a pointer drag. */
+.ws-ghost {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--w-surface-hi, #2a2f3a);
+  color: var(--w-text, #e6e6e6);
+  border: 1px solid var(--w-accent, #7aa2f7);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.9;
 }
 /* Horizontal 2px bar above/below the target, absolutely positioned so
    it never re-flows the list (a reflow-during-drag would repeatedly

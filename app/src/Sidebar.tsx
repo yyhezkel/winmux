@@ -176,7 +176,17 @@ export function Sidebar(p: Props) {
     return arr.map((x) => x.g);
   });
 
-  // beta.3 (ws-dragdrop): drag state.
+  // beta.3 (ws-dragdrop): pointer-based drag-reorder.
+  //
+  // HTML5 drag-and-drop can't be used here: Tauri's WebView2 OS drop handler
+  // stays enabled so Phase 49-A file drops onto terminal panes keep working,
+  // and on Windows that handler swallows in-page HTML5 drags (the drop event
+  // never fires — a cursor showed but nothing moved). So reorder is driven by
+  // pointer events instead. A small move threshold separates a click
+  // (switch / collapse) from a drag; the drop target is found by hit-testing
+  // the DOM under the cursor. `newIndex` in the reorder callbacks is a 0-based
+  // index within the destination scope; the App handler wraps these to call
+  // `workspace_reorder` / `workspace_group_reorder` and reload the file.
   type Drop =
     | { kind: "ws-line"; targetId: string; where: "above" | "below" }
     | { kind: "group-line"; targetId: string; where: "above" | "below" }
@@ -185,22 +195,38 @@ export function Sidebar(p: Props) {
   const [dragKind, setDragKind] = createSignal<"ws" | "group" | null>(null);
   const [dragId, setDragId] = createSignal<string | null>(null);
   const [drop, setDrop] = createSignal<Drop>(null);
-  const cancelDrag = () => {
-    setDragKind(null);
-    setDragId(null);
-    setDrop(null);
+  const [ghostPos, setGhostPos] = createSignal<{ x: number; y: number } | null>(null);
+
+  // Typed accessors for the drop indicator classes (avoids `as any` casts in
+  // the JSX class strings while keeping the discriminated union narrowed).
+  const dropWsWhere = (id: string): "above" | "below" | null => {
+    const d = drop();
+    return d && d.kind === "ws-line" && d.targetId === id ? d.where : null;
   };
-  onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && dragKind() !== null) cancelDrag();
-    };
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => window.removeEventListener("keydown", onKey));
-  });
-  const whereByMidpoint = (ev: DragEvent, el: HTMLElement): "above" | "below" => {
-    const r = el.getBoundingClientRect();
-    return ev.clientY < r.top + r.height / 2 ? "above" : "below";
+  const dropGroupWhere = (id: string): "above" | "below" | null => {
+    const d = drop();
+    return d && d.kind === "group-line" && d.targetId === id ? d.where : null;
   };
+  const dropIntoGroup = (id: string | null): boolean => {
+    const d = drop();
+    return !!d && d.kind === "into-group" && d.targetId === id;
+  };
+  // Label for the floating ghost that follows the cursor mid-drag.
+  const ghostLabel = (): string => {
+    const id = dragId();
+    if (!id) return "";
+    if (dragKind() === "ws") return p.workspaces.find((w) => w.id === id)?.name ?? "";
+    if (dragKind() === "group") return p.groups.find((g) => g.id === id)?.name ?? "";
+    return "";
+  };
+
+  // Non-reactive scratch state for the in-flight gesture. `pending` holds the
+  // press until the move threshold is crossed; `didDrag` guards the trailing
+  // click so a completed drag never also switches/collapses.
+  const DRAG_THRESHOLD = 5;
+  let pending: { kind: "ws" | "group"; id: string; startX: number; startY: number } | null = null;
+  let didDrag = false;
+
   const scopeIndexOf = (scope: string | null, wsId: string): number => {
     const list = scope === null
       ? groupedWorkspaces().ungrouped
@@ -214,6 +240,150 @@ export function Sidebar(p: Props) {
     return list.length;
   };
   const groupIndexOf = (gid: string): number => sortedGroups().findIndex((g) => g.id === gid);
+  const whereByMidpoint = (clientY: number, el: HTMLElement): "above" | "below" => {
+    const r = el.getBoundingClientRect();
+    return clientY < r.top + r.height / 2 ? "above" : "below";
+  };
+
+  // Resolve the cursor position to a drop target using the DOM under it.
+  const updateDropTarget = (x: number, y: number) => {
+    const kind = dragKind();
+    const id = dragId();
+    if (!kind || !id) {
+      setDrop(null);
+      return;
+    }
+    const under = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (!under) {
+      setDrop(null);
+      return;
+    }
+    if (kind === "ws") {
+      const wsEl = under.closest<HTMLElement>("[data-ws-id]");
+      if (wsEl) {
+        const targetId = wsEl.dataset.wsId ?? "";
+        if (targetId === id || targetId === "") {
+          setDrop(null);
+          return;
+        }
+        setDrop({ kind: "ws-line", targetId, where: whereByMidpoint(y, wsEl) });
+        return;
+      }
+      const gEl = under.closest<HTMLElement>("[data-group-id]");
+      if (gEl) {
+        const raw = gEl.dataset.groupId ?? "";
+        setDrop({ kind: "into-group", targetId: raw === "" ? null : raw });
+        return;
+      }
+      setDrop(null);
+    } else {
+      // Dragging a group: only *other* real group headers are valid targets.
+      const gEl = under.closest<HTMLElement>("[data-group-id]");
+      if (gEl) {
+        const raw = gEl.dataset.groupId ?? "";
+        if (raw === "" || raw === id) {
+          setDrop(null);
+          return;
+        }
+        setDrop({ kind: "group-line", targetId: raw, where: whereByMidpoint(y, gEl) });
+        return;
+      }
+      setDrop(null);
+    }
+  };
+
+  const applyDrop = (kind: "ws" | "group", id: string, d: Drop) => {
+    if (!d) return;
+    if (kind === "ws") {
+      if (d.kind === "ws-line") {
+        const destScope = p.workspaces.find((w) => w.id === d.targetId)?.group_id ?? null;
+        const targetIdx = scopeIndexOf(destScope, d.targetId);
+        const srcScope = p.workspaces.find((w) => w.id === id)?.group_id ?? null;
+        const srcIdx = scopeIndexOf(srcScope, id);
+        let idx = d.where === "above" ? targetIdx : targetIdx + 1;
+        if (srcScope === destScope && srcIdx !== -1 && srcIdx < targetIdx) idx -= 1;
+        p.onWorkspaceReorder(id, destScope, Math.max(0, idx));
+      } else if (d.kind === "into-group") {
+        p.onWorkspaceReorder(id, d.targetId, scopeSize(d.targetId));
+      }
+    } else if (d.kind === "group-line") {
+      const targetIdx = groupIndexOf(d.targetId);
+      const draggingIdx = groupIndexOf(id);
+      let idx = d.where === "above" ? targetIdx : targetIdx + 1;
+      if (draggingIdx !== -1 && draggingIdx < targetIdx) idx -= 1;
+      p.onGroupReorder(id, Math.max(0, idx));
+    }
+  };
+
+  const onWinPointerMove = (e: PointerEvent) => {
+    if (!pending) return;
+    if (!didDrag) {
+      if (Math.hypot(e.clientX - pending.startX, e.clientY - pending.startY) < DRAG_THRESHOLD) {
+        return;
+      }
+      didDrag = true;
+      setDragKind(pending.kind);
+      setDragId(pending.id);
+      setDrop(null);
+      document.body.classList.add("winmux-dragging");
+    }
+    setGhostPos({ x: e.clientX, y: e.clientY });
+    updateDropTarget(e.clientX, e.clientY);
+  };
+  const onWinPointerUp = () => {
+    const wasDrag = didDrag;
+    const kind = dragKind();
+    const id = dragId();
+    const d = drop();
+    endPointerGesture();
+    if (wasDrag && kind && id) applyDrop(kind, id, d);
+    // `didDrag` stays true until the next pointerdown resets it, so the click
+    // the browser fires immediately after a drag is swallowed by the guards.
+  };
+  // A cancelled pointer (focus loss, touch interruption) aborts with no reorder.
+  const onWinPointerCancel = () => abortDrag();
+  // Tear down window listeners + transient drag UI. Leaves `didDrag` intact
+  // (the click guard); `pending` is cleared so no stale press lingers.
+  function endPointerGesture() {
+    window.removeEventListener("pointermove", onWinPointerMove);
+    window.removeEventListener("pointerup", onWinPointerUp);
+    window.removeEventListener("pointercancel", onWinPointerCancel);
+    document.body.classList.remove("winmux-dragging");
+    setGhostPos(null);
+    setDragKind(null);
+    setDragId(null);
+    setDrop(null);
+    pending = null;
+  }
+  // Escape / unmount: abort with no reorder and clear the click guard too.
+  const abortDrag = () => {
+    endPointerGesture();
+    didDrag = false;
+  };
+  const startPointerDrag = (kind: "ws" | "group", id: string, e: PointerEvent) => {
+    if (e.button !== 0) return; // left button only; right-click → context menu
+    const el = e.target as HTMLElement;
+    // Never start a drag from an interactive child — those own their clicks.
+    if (el.closest("button, input, .ws-menu, .ws-port-badge, .group-menu, .group-swatch-picker")) {
+      return;
+    }
+    didDrag = false;
+    pending = { kind, id, startX: e.clientX, startY: e.clientY };
+    window.addEventListener("pointermove", onWinPointerMove);
+    window.addEventListener("pointerup", onWinPointerUp);
+    window.addEventListener("pointercancel", onWinPointerCancel);
+  };
+
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && (pending || dragKind() !== null)) abortDrag();
+    };
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => {
+      window.removeEventListener("keydown", onKey);
+      endPointerGesture();
+    });
+  });
 
   const openMenuAt = (e: MouseEvent, setter: (v: { x: number; y: number }) => void) => {
     setter({
@@ -295,25 +465,9 @@ export function Sidebar(p: Props) {
       <div class="sidebar-list">
         <Show when={p.groups.length > 0}>
           <div
-            class={`group-header ${
-              drop()?.kind === "into-group" && (drop() as any).targetId === null
-                ? "drop-into"
-                : ""
-            }`}
+            data-group-id=""
+            class={`group-header ${dropIntoGroup(null) ? "drop-into" : ""}`}
             style="cursor: default"
-            onDragOver={(e) => {
-              if (dragKind() !== "ws") return;
-              e.preventDefault();
-              if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-              setDrop({ kind: "into-group", targetId: null });
-            }}
-            onDrop={(e) => {
-              if (dragKind() !== "ws" || !dragId()) return;
-              e.preventDefault();
-              const wsId = dragId()!;
-              p.onWorkspaceReorder(wsId, null, scopeSize(null));
-              cancelDrag();
-            }}
           >
             <span class="group-header-name">{t("sidebar.ungrouped")}</span>
             <span class="group-header-count">({groupedWorkspaces().ungrouped.length})</span>
@@ -329,63 +483,17 @@ export function Sidebar(p: Props) {
             return (
               <>
                 <div
+                  data-group-id={g.id}
                   class={`group-header ${collapsed() ? "group-collapsed" : ""} ${
                     dragKind() === "group" && dragId() === g.id ? "dragging" : ""
-                  } ${
-                    drop()?.kind === "into-group" && (drop() as any).targetId === g.id
-                      ? "drop-into"
-                      : ""
-                  } ${
-                    drop()?.kind === "group-line" && (drop() as any).targetId === g.id
-                      ? `drop-${(drop() as any).where}`
-                      : ""
+                  } ${dropIntoGroup(g.id) ? "drop-into" : ""} ${
+                    dropGroupWhere(g.id) ? `drop-${dropGroupWhere(g.id)}` : ""
                   }`}
-                  draggable={true}
-                  onDragStart={(e) => {
-                    setDragKind("group");
-                    setDragId(g.id);
-                    setDrop(null);
-                    if (e.dataTransfer) {
-                      e.dataTransfer.effectAllowed = "move";
-                      e.dataTransfer.setData(
-                        "application/x-winmux-drag",
-                        JSON.stringify({ kind: "group", id: g.id }),
-                      );
-                    }
+                  onPointerDown={(e) => startPointerDrag("group", g.id, e)}
+                  onClick={() => {
+                    if (didDrag) return;
+                    p.onGroupToggleCollapse(g.id, !collapsed());
                   }}
-                  onDragEnd={cancelDrag}
-                  onDragOver={(e) => {
-                    if (dragKind() === "ws") {
-                      e.preventDefault();
-                      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-                      setDrop({ kind: "into-group", targetId: g.id });
-                    } else if (dragKind() === "group" && dragId() !== g.id) {
-                      e.preventDefault();
-                      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-                      const where = whereByMidpoint(e, e.currentTarget as HTMLElement);
-                      setDrop({ kind: "group-line", targetId: g.id, where });
-                    }
-                  }}
-                  onDrop={(e) => {
-                    if (dragKind() === "ws" && dragId()) {
-                      e.preventDefault();
-                      const wsId = dragId()!;
-                      const size = scopeSize(g.id);
-                      p.onWorkspaceReorder(wsId, g.id, size);
-                      cancelDrag();
-                    } else if (dragKind() === "group" && dragId() && dragId() !== g.id) {
-                      e.preventDefault();
-                      const gid = dragId()!;
-                      const targetIdx = groupIndexOf(g.id);
-                      const draggingIdx = groupIndexOf(gid);
-                      const w = whereByMidpoint(e, e.currentTarget as HTMLElement);
-                      let idx = w === "above" ? targetIdx : targetIdx + 1;
-                      if (draggingIdx !== -1 && draggingIdx < targetIdx) idx -= 1;
-                      p.onGroupReorder(gid, Math.max(0, idx));
-                      cancelDrag();
-                    }
-                  }}
-                  onClick={() => p.onGroupToggleCollapse(g.id, !collapsed())}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     if (groupMenuFor() === g.id) {
@@ -540,63 +648,39 @@ export function Sidebar(p: Props) {
         <span class="ws-action-emoji"><IconCloud /></span>
         <span class="ws-action-label">{t("sidebar.provision_server")}</span>
       </button>
+      <Show when={dragKind() !== null && ghostPos() !== null}>
+        <div
+          class="ws-ghost"
+          style={{
+            left: `${ghostPos()!.x + 12}px`,
+            top: `${ghostPos()!.y + 10}px`,
+          }}
+        >
+          {ghostLabel()}
+        </div>
+      </Show>
     </div>
   );
 
   function renderWorkspaceItem(w: Workspace) {
     return (
       <div
+        data-ws-id={w.id}
         class={`ws-item ${p.activeId === w.id ? "active" : ""} ${
           p.waitingWorkspaceIds.has(w.id) ? "has-waiting" : ""
         } ${dragKind() === "ws" && dragId() === w.id ? "dragging" : ""} ${
-          drop()?.kind === "ws-line" && (drop() as any).targetId === w.id
-            ? `drop-${(drop() as any).where}`
-            : ""
+          dropWsWhere(w.id) ? `drop-${dropWsWhere(w.id)}` : ""
         }`}
         data-has-color={w.color ? "true" : "false"}
         style={w.color ? `--ws-color: ${w.color}` : undefined}
         title={p.mode === "icons" ? w.name : undefined}
-        // beta.3 (ws-dragdrop) regression fix: the drag refactor dropped the
-        // click-to-switch handler. A plain click (no drag gesture) still fires
-        // `click`; a completed HTML5 drag suppresses the trailing click, so
-        // switching and reordering coexist without a flag.
-        onClick={() => p.onActivate(w.id)}
-        draggable={true}
-        onDragStart={(e) => {
-          setDragKind("ws");
-          setDragId(w.id);
-          setDrop(null);
-          if (e.dataTransfer) {
-            e.dataTransfer.effectAllowed = "move";
-            e.dataTransfer.setData(
-              "application/x-winmux-drag",
-              JSON.stringify({ kind: "ws", id: w.id }),
-            );
-          }
-        }}
-        onDragEnd={cancelDrag}
-        onDragOver={(e) => {
-          if (dragKind() !== "ws" || !dragId() || dragId() === w.id) return;
-          e.preventDefault();
-          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-          const where = whereByMidpoint(e, e.currentTarget as HTMLElement);
-          setDrop({ kind: "ws-line", targetId: w.id, where });
-        }}
-        onDrop={(e) => {
-          if (dragKind() !== "ws" || !dragId() || dragId() === w.id) return;
-          e.preventDefault();
-          const draggedId = dragId()!;
-          const destScope = w.group_id ?? null;
-          const targetIdx = scopeIndexOf(destScope, w.id);
-          const where = whereByMidpoint(e, e.currentTarget as HTMLElement);
-          const srcScope = p.workspaces.find((ww) => ww.id === draggedId)?.group_id ?? null;
-          const srcIdx = scopeIndexOf(srcScope, draggedId);
-          let idx = where === "above" ? targetIdx : targetIdx + 1;
-          if (srcScope === destScope && srcIdx !== -1 && srcIdx < targetIdx) {
-            idx -= 1;
-          }
-          p.onWorkspaceReorder(draggedId, destScope, Math.max(0, idx));
-          cancelDrag();
+        // beta.3 (ws-dragdrop): pointer-drag reorder. A press that never crosses
+        // the move threshold is a click → switch; a completed drag sets
+        // `didDrag`, which swallows the trailing click here.
+        onPointerDown={(e) => startPointerDrag("ws", w.id, e)}
+        onClick={() => {
+          if (didDrag) return;
+          p.onActivate(w.id);
         }}
         onContextMenu={(e) => {
           e.preventDefault();

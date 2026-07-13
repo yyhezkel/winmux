@@ -794,7 +794,24 @@ export function PaneView(p: Props) {
       <Show when={dropMsg()}>
         <div class="pane-drop-toast">{dropMsg()}</div>
       </Show>
-      <div class="pane-header">
+      <div
+        class="pane-header"
+        onPointerDown={(e) => {
+          // beta.3 (pane-dragdrop) Fix 1: the whole header is the drag
+          // surface (was just the title span — too small to hit).
+          // startPaneDrag is left-button-only and bails on interactive
+          // children (buttons / .pane-btn), so their clicks keep working.
+          const label =
+            p.pane.title
+              ?? p.workspaceName
+              ?? (p.pane.connection
+                ? describeConnection(p.pane.connection)
+                : p.workspaceConnection
+                  ? describeConnection(p.workspaceConnection)
+                  : p.pane.pane_id);
+          startPaneDrag(p.pane.pane_id, label, e);
+        }}
+      >
         {/* Phase 23.I: header fallback chain — user-set pane.title
             beats workspace name beats the raw SSH URL. The old
             describeConnection() output (e.g. "ssh runner@1.2.3.4:22")
@@ -814,17 +831,6 @@ export function PaneView(p: Props) {
                 ? describeConnection(p.workspaceConnection)
                 : undefined
           }
-          onPointerDown={(e) => {
-            const label =
-              p.pane.title
-                ?? p.workspaceName
-                ?? (p.pane.connection
-                  ? describeConnection(p.pane.connection)
-                  : p.workspaceConnection
-                    ? describeConnection(p.workspaceConnection)
-                    : p.pane.pane_id);
-            startPaneDrag(p.pane.pane_id, label, e);
-          }}
         >
           <Show when={liveEffective().emoji}>
             <span class="pane-emoji">{liveEffective().emoji}</span>{" "}

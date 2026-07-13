@@ -877,7 +877,13 @@ body {
   font-family: var(--w-font-mono);
   color: var(--w-text-dim);
   flex-shrink: 0;
+  /* beta.3 (pane-dragdrop) Fix 1: the whole header is the drag surface. */
+  cursor: grab;
 }
+.pane-header:active { cursor: grabbing; }
+/* Interactive children keep their own cursor (not grab). */
+.pane-header .pane-btn,
+.pane-header button { cursor: pointer; }
 .pane-conn {
   white-space: nowrap;
   overflow: hidden;

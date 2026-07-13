@@ -25,6 +25,30 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+<!-- Backlog seeded from a scan of herdr (https://github.com/ogulcancelik/herdr) —
+     a CLI agent multiplexer, v0.5.9 / 906★ as of May 2026. Ideas, not commitments. -->
+
+### 2026-07-13 — Notification delivery matrix (per-hook target)
+- **Idea:** Configurable notification target — user chooses, per hook, where a notification lands: system toast / terminal notification / in-app Feed only.
+- **Reference:** [herdr v0.5.1](https://github.com/ogulcancelik/herdr) — `ui.toast.delivery = "system"|"terminal"|"in-app"` (v0.5.1 changelog).
+- **Rationale:** winmux currently emits only a Windows system toast. A delivery matrix gives users control — e.g. silent/low-priority hooks route to the Feed only, high-priority to system toast + sound.
+- **Effort:** M
+- **State:** Open — deferred to post-beta.3 hooks work.
+
+### 2026-07-13 — Hook stale / out-of-order state audit
+- **Idea:** Audit hook-event processing for stale, out-of-order reports; base notifications on the *effective* agent state rather than raw hook arrival order.
+- **Reference:** [herdr v0.5.8](https://github.com/ogulcancelik/herdr) — "Hook-based agent integrations now reject stale out-of-order reports and base notifications on effective agent state, reducing duplicate or stuck state changes" (v0.5.8 changelog).
+- **Rationale:** winmux has deep hook wiring (RPC bridge → Feed). Audit whether stale/duplicate hooks produce duplicate Feed cards or missed state transitions.
+- **Effort:** S+M (audit S, fix M).
+- **State:** Open — deferred to post-beta.3.
+
+### 2026-07-13 — Live config reload (no restart)
+- **Idea:** Live-reload settings from the Settings modal or CLI (`winmux server reload-config`) without an app restart.
+- **Reference:** [herdr v0.5.2](https://github.com/ogulcancelik/herdr) — "Config can now be reloaded in the running app/server from the global menu or with `herdr server reload-config`" (v0.5.2 changelog).
+- **Rationale:** Some winmux settings currently require a restart to take effect. Live reload improves DX. Needs enumerating which settings are safely live-reloadable.
+- **Effort:** M
+- **State:** Open — deferred to v0.5.x.
+
 ### 2026-07-06 — v0.4.4 UX wave (branch `ux-improvements-v0.4.4`, NOT merged to main)
 A cohort-feedback wave off main. **DONE + committed on the branch:** (1) Task 1 auto-connect on secondary panels (`dfe45b5`); (2) Task 2 unified new-connection picker (`b36e693`); (3) hook-debug.log verbosity cut to concise one-liners + `WINMUX_HOOK_VERBOSE=1` gate + Rule-#1 reason scrub (`94ba208`); (4) i18n for feed-card kind/subkind/state (`f399b6e`); (5) hook notifications — Stop "your turn" toast gated by window-focus, SessionEnd toast+duration default-ON, SessionStart+Notification dropped (CLI silent-ack + spec 1.1.0→1.2.0) (`350f670`); (6) feed cards show workspace name + session badge + per-ws grouping + "current workspace only" filter (`8ebcf24`). DEBUG exe rebuilt + live-tested each round.
 - **PENDING Yossi approval before implementing (all v0.4.4):**

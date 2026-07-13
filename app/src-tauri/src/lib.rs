@@ -3627,6 +3627,141 @@ fn workspace_group_reorder(
         .clone())
 }
 
+// beta.3 (pane-dragdrop): swap the layout positions of two panes
+// inside a workspace. Called by paneDrag.ts on pointerup after the
+// user drops a pane on another pane.
+//
+// The whole `LayoutNode::Pane { .. }` node (including its `pane_id`,
+// connection, browser state, title, colour, everything) is moved as
+// a unit — so PTY sessions keyed by pane_id keep their state and
+// there's no PTY kill/respawn (Rule #1). The frontend's PaneView has
+// a createEffect on p.pane.pane_id: when a slot's pane_id changes
+// after the swap, it detaches the previous xterm container and
+// attaches the new one from the g_terminals registry, so xterm
+// scrollback + connection state survive the reorder untouched.
+//
+// Same-pane no-ops early. Missing panes → clean error to the
+// frontend (Rule #6). workspaces.json write goes through `persist`
+// (atomic tmp+rename, Rule #7).
+fn take_pane_from_layout(
+    node: &mut LayoutNode,
+    target: &str,
+    replacement: LayoutNode,
+) -> Result<LayoutNode, LayoutNode> {
+    // Returns Ok(the extracted pane node) on hit, Err(replacement) on
+    // miss so the caller can hand the same replacement to the next
+    // sibling without cloning it every level. The tree is a binary
+    // split-or-leaf shape, so depth stays shallow (<= number of panes).
+    match node {
+        LayoutNode::Pane { pane_id, .. } if pane_id == target => {
+            Ok(std::mem::replace(node, replacement))
+        }
+        LayoutNode::Pane { .. } => Err(replacement),
+        LayoutNode::Split { first, second, .. } => {
+            match take_pane_from_layout(first.as_mut(), target, replacement) {
+                Ok(v) => Ok(v),
+                Err(replacement) => {
+                    take_pane_from_layout(second.as_mut(), target, replacement)
+                }
+            }
+        }
+    }
+}
+
+fn make_swap_placeholder_pane(pane_id: String) -> LayoutNode {
+    LayoutNode::Pane {
+        pane_id,
+        pane_kind: PaneKind::default(),
+        connection: None,
+        browser: None,
+        title: None,
+        annotation: None,
+        color: None,
+        emoji: None,
+        help_topic: None,
+        diff_source: None,
+        smart_bidi: None,
+    }
+}
+
+fn swap_two_panes_in_layout(
+    layout: &mut LayoutNode,
+    pane_a_id: &str,
+    pane_b_id: &str,
+) -> Result<(), String> {
+    if pane_a_id == pane_b_id {
+        return Ok(());
+    }
+    // Marker id is guaranteed not to collide with any real pane_id
+    // (pane_ids are UUIDs). The marker never persists — it's replaced
+    // in step 3 below, and if step 2 or 3 fails, the caller wraps the
+    // Result and rejects the whole mutation (frontend won't see it).
+    let marker = format!("__winmux_swap_placeholder__{pane_a_id}");
+    let placeholder = make_swap_placeholder_pane(marker.clone());
+    // Step 1: take A out, leave placeholder in A's slot.
+    let pane_a = take_pane_from_layout(layout, pane_a_id, placeholder)
+        .map_err(|_| format!("no pane {pane_a_id} in workspace layout"))?;
+    // Step 2: take B out, drop pane_a into B's slot. Now the tree has
+    // pane_a where B was, and the marker placeholder where A was.
+    let pane_b = match take_pane_from_layout(layout, pane_b_id, pane_a) {
+        Ok(v) => v,
+        Err(pane_a) => {
+            // B wasn't found — put pane_a back into A's slot to
+            // undo step 1's mutation, so the layout is unchanged on
+            // error. The caller sees a clean Err.
+            let _ = take_pane_from_layout(layout, &marker, pane_a);
+            return Err(format!("no pane {pane_b_id} in workspace layout"));
+        }
+    };
+    // Step 3: replace the marker with pane_b.
+    take_pane_from_layout(layout, &marker, pane_b).map_err(|_| {
+        "internal: swap placeholder not found on final pass".to_string()
+    })?;
+    Ok(())
+}
+
+#[tauri::command]
+fn workspace_swap_panes(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    workspace_id: String,
+    pane_a_id: String,
+    pane_b_id: String,
+) -> Result<WorkspacesFile, String> {
+    if pane_a_id == pane_b_id {
+        // No-op swap: return the current file unchanged so the
+        // frontend doesn't do a wasted state update.
+        return Ok(state
+            .workspaces
+            .lock()
+            .map_err(|e| format!("workspaces lock poisoned: {e}"))?
+            .clone());
+    }
+    {
+        let mut file = state
+            .workspaces
+            .lock()
+            .map_err(|e| format!("workspaces lock poisoned: {e}"))?;
+        let ws = file
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or_else(|| format!("no workspace {workspace_id}"))?;
+        let layout = ws
+            .layout
+            .as_mut()
+            .ok_or_else(|| format!("workspace {workspace_id} has no layout"))?;
+        swap_two_panes_in_layout(layout, &pane_a_id, &pane_b_id)?;
+    }
+    persist(&state)?;
+    let _ = app.emit("workspaces:changed", ());
+    Ok(state
+        .workspaces
+        .lock()
+        .map_err(|e| format!("workspaces lock poisoned: {e}"))?
+        .clone())
+}
+
 #[tauri::command]
 fn workspace_rename(
     state: State<'_, AppState>,
@@ -6234,6 +6369,9 @@ pub fn run() {
             // beta.3 (ws-dragdrop): direct drag reorder from the sidebar.
             workspace_reorder,
             workspace_group_reorder,
+            // beta.3 (pane-dragdrop): swap two panes' positions in the
+            // layout tree (drag a pane header onto another pane).
+            workspace_swap_panes,
             workspace_set_auto_port_forward,
             workspace_set_claude_separate_account,
             port_forward_stop,
@@ -6467,6 +6605,177 @@ mod tcp_probe_tests {
         let target = format!("127.0.0.1:{port}");
         let r = tcp_probe(&target, Duration::from_millis(300)).await;
         assert!(r.is_err(), "expected Err for vacant port, got {:?}", r);
+    }
+}
+
+#[cfg(test)]
+mod pane_swap_tests {
+    // beta.3 (pane-dragdrop): unit tests for the layout-tree pane
+    // swap. These don't touch the AppState / Tauri command layer —
+    // they exercise `swap_two_panes_in_layout` directly against a
+    // hand-built LayoutNode tree, which is what matters for
+    // correctness (the command wrapper is just lock + persist +
+    // emit).
+    use super::{swap_two_panes_in_layout, LayoutNode, PaneKind, SplitDirection};
+
+    fn pane(id: &str) -> LayoutNode {
+        LayoutNode::Pane {
+            pane_id: id.to_string(),
+            pane_kind: PaneKind::Terminal,
+            connection: None,
+            browser: None,
+            title: Some(format!("title-{id}")),
+            annotation: None,
+            color: None,
+            emoji: None,
+            help_topic: None,
+            diff_source: None,
+            smart_bidi: None,
+        }
+    }
+
+    fn pane_id_of(node: &LayoutNode) -> &str {
+        match node {
+            LayoutNode::Pane { pane_id, .. } => pane_id,
+            LayoutNode::Split { .. } => panic!("expected Pane, got Split"),
+        }
+    }
+
+    fn title_of(node: &LayoutNode) -> Option<&str> {
+        match node {
+            LayoutNode::Pane { title, .. } => title.as_deref(),
+            LayoutNode::Split { .. } => None,
+        }
+    }
+
+    #[test]
+    fn swap_two_leaves_in_a_split() {
+        let mut layout = LayoutNode::Split {
+            split_id: "s".into(),
+            direction: SplitDirection::Horizontal,
+            first: Box::new(pane("A")),
+            second: Box::new(pane("B")),
+            ratio: 0.5,
+        };
+        swap_two_panes_in_layout(&mut layout, "A", "B").unwrap();
+        match &layout {
+            LayoutNode::Split { first, second, .. } => {
+                // The whole pane node moved: id AND title. That's how
+                // xterm content stays "with" the pane_id — the pane_id
+                // travels with the connection state to the new slot.
+                assert_eq!(pane_id_of(first), "B");
+                assert_eq!(pane_id_of(second), "A");
+                assert_eq!(title_of(first), Some("title-B"));
+                assert_eq!(title_of(second), Some("title-A"));
+            }
+            _ => panic!("expected Split at root"),
+        }
+    }
+
+    #[test]
+    fn swap_across_nested_splits() {
+        // Tree: Split[ Split[A, B], Split[C, D] ]. Swap A with D.
+        let mut layout = LayoutNode::Split {
+            split_id: "root".into(),
+            direction: SplitDirection::Vertical,
+            first: Box::new(LayoutNode::Split {
+                split_id: "L".into(),
+                direction: SplitDirection::Horizontal,
+                first: Box::new(pane("A")),
+                second: Box::new(pane("B")),
+                ratio: 0.5,
+            }),
+            second: Box::new(LayoutNode::Split {
+                split_id: "R".into(),
+                direction: SplitDirection::Horizontal,
+                first: Box::new(pane("C")),
+                second: Box::new(pane("D")),
+                ratio: 0.5,
+            }),
+            ratio: 0.5,
+        };
+        swap_two_panes_in_layout(&mut layout, "A", "D").unwrap();
+        // A ↔ D crossed the root split; B and C stay put.
+        let (left, right) = match &layout {
+            LayoutNode::Split { first, second, .. } => (first, second),
+            _ => panic!(),
+        };
+        let (a_slot, b_slot) = match left.as_ref() {
+            LayoutNode::Split { first, second, .. } => (first, second),
+            _ => panic!(),
+        };
+        let (c_slot, d_slot) = match right.as_ref() {
+            LayoutNode::Split { first, second, .. } => (first, second),
+            _ => panic!(),
+        };
+        assert_eq!(pane_id_of(a_slot), "D");
+        assert_eq!(pane_id_of(b_slot), "B");
+        assert_eq!(pane_id_of(c_slot), "C");
+        assert_eq!(pane_id_of(d_slot), "A");
+    }
+
+    #[test]
+    fn swap_same_id_is_noop() {
+        let mut layout = LayoutNode::Split {
+            split_id: "s".into(),
+            direction: SplitDirection::Horizontal,
+            first: Box::new(pane("A")),
+            second: Box::new(pane("B")),
+            ratio: 0.5,
+        };
+        swap_two_panes_in_layout(&mut layout, "A", "A").unwrap();
+        // Nothing moved.
+        match &layout {
+            LayoutNode::Split { first, second, .. } => {
+                assert_eq!(pane_id_of(first), "A");
+                assert_eq!(pane_id_of(second), "B");
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn swap_missing_pane_errors_and_leaves_layout_untouched() {
+        let mut layout = LayoutNode::Split {
+            split_id: "s".into(),
+            direction: SplitDirection::Horizontal,
+            first: Box::new(pane("A")),
+            second: Box::new(pane("B")),
+            ratio: 0.5,
+        };
+        // First missing → early error, layout untouched.
+        let err = swap_two_panes_in_layout(&mut layout, "ZZ", "B").unwrap_err();
+        assert!(err.contains("ZZ"));
+        match &layout {
+            LayoutNode::Split { first, second, .. } => {
+                assert_eq!(pane_id_of(first), "A");
+                assert_eq!(pane_id_of(second), "B");
+            }
+            _ => panic!(),
+        }
+        // Second missing → the code path takes A out, fails to find
+        // ZZ, must put A back so the tree is unchanged.
+        let err = swap_two_panes_in_layout(&mut layout, "A", "ZZ").unwrap_err();
+        assert!(err.contains("ZZ"));
+        match &layout {
+            LayoutNode::Split { first, second, .. } => {
+                assert_eq!(pane_id_of(first), "A");
+                assert_eq!(pane_id_of(second), "B");
+                assert_eq!(title_of(first), Some("title-A"));
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn swap_root_leaf_only_workspace_has_no_partner() {
+        // Trivial: a single-pane workspace has no other pane to swap
+        // with. Frontend won't invoke this, but the backend must not
+        // panic if it does.
+        let mut layout = pane("only");
+        let err = swap_two_panes_in_layout(&mut layout, "only", "other").unwrap_err();
+        assert!(err.contains("other"));
+        assert_eq!(pane_id_of(&layout), "only");
     }
 }
 

@@ -335,6 +335,15 @@ pub struct Workspace {
     // byte-identical after touching a workspace that isn't in a group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_id: Option<String>,
+    // beta.3 (ws-dragdrop): 0-based sort key WITHIN a group_id scope
+    // (Ungrouped = None scope). Absent → the workspace hasn't been
+    // touched by the reorder path yet; the sidebar falls back to
+    // insertion order. On first successful `workspace_reorder` the
+    // backend fills in consecutive 0..N-1 within each scope, so a
+    // pre-beta.3 workspaces.json round-trips byte-identical until the
+    // user actually drags something.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i32>,
 }
 
 // ─── cmux-A A2: WorkspaceGroup ──────────────────────────────────────
@@ -358,6 +367,14 @@ pub struct WorkspaceGroup {
     /// hand-edit still loads.
     #[serde(default)]
     pub is_collapsed: bool,
+    /// beta.3 (ws-dragdrop): 0-based sort key across groups. Absent →
+    /// hasn't been ordered by the reorder path yet; the sidebar falls
+    /// back to array position. The backend fills in consecutive 0..N-1
+    /// on the first `workspace_group_reorder` call so a pre-beta.3
+    /// workspaces.json round-trips byte-identical until the user
+    /// actually drags a group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i32>,
 }
 
 // ─── Phase 59: serde back-compat tests ──────────────────────────────
@@ -734,6 +751,7 @@ mod tests {
             git_worktree: None,
             claude_separate_account: false,
             group_id: None,
+            sort_order: None,
         };
         let v = serde_json::to_value(&w).unwrap();
         // Spot-check the wire format.

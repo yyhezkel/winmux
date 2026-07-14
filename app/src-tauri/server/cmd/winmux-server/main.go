@@ -231,6 +231,10 @@ func main() {
 		if chatMgr != nil {
 			wmgr.SetDriver(chat.NewWorkspaceBridge(chatMgr, wmgr))
 			log.Printf("workspace: claude_chat engine bridge enabled")
+			// beta.3 Fix 3: chat sessions surface a workspace-name label on
+			// emitted hook_request events. Wired here (both managers exist)
+			// so tests can build a chat.SessionManager without a workspace.
+			chatMgr.SetWorkspaceResolver(wmgr.WorkspaceNameByID)
 		}
 		log.Printf("workspace: API enabled")
 	}

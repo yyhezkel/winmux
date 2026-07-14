@@ -8,6 +8,10 @@ import type { TerminalInstance } from "./terminalInstance";
 import { t } from "./i18n";
 import { TechText } from "./TechText";
 import {
+  paneDragStore,
+  startPaneDrag,
+} from "./paneDrag";
+import {
   IconPencil,
   IconPower,
   IconChevronDown,
@@ -599,13 +603,39 @@ export function PaneView(p: Props) {
     );
   };
 
-  onMount(() => {
-    ti = p.ensureTerm(p.pane.pane_id);
+  // beta.3 (pane-dragdrop): terminal attach is a createEffect so a
+  // pane_id swap (workspace_swap_panes moves the two Pane leaves in
+  // the layout tree — same tree slots, different pane_ids in them)
+  // detaches the previous terminal container and attaches the new
+  // one keyed to the new pane_id. Under the pre-dragdrop code this
+  // was in onMount() and would stick to the first pane_id, leaving
+  // the wrong xterm mounted after a swap. The xterm instance itself
+  // survives in the g_terminals registry across detach/reattach.
+  createEffect(() => {
+    const paneId = p.pane.pane_id;
+    if (!slotRef) return;
+    const nextTi = p.ensureTerm(paneId);
+    if (ti && ti !== nextTi) {
+      // Detach previous terminal's container from THIS slot before
+      // hooking up the new one. If it was moved elsewhere already
+      // (the other PaneView's effect ran first), parentElement will
+      // be that slot — leave it alone.
+      if (ti.container.parentElement === slotRef) {
+        slotRef.removeChild(ti.container);
+      }
+    }
+    ti = nextTi;
     if (ti.container.parentElement !== slotRef) {
+      // If the container is currently hosted in the OTHER slot (mid-
+      // swap), detach it there so appendChild here moves it cleanly.
+      ti.container.parentElement?.removeChild(ti.container);
       slotRef.appendChild(ti.container);
     }
     ti.container.style.display = "block";
     requestAnimationFrame(() => ti?.fitAndResize());
+  });
+
+  onMount(() => {
     window.addEventListener("winmux:pane-rename", onRenameRequest);
 
     // Phase 49-A: subscribe to the window-wide drag-drop event. Each
@@ -710,13 +740,38 @@ export function PaneView(p: Props) {
       emoji: p.pane.emoji ?? e.emoji,
     };
   };
+  // beta.3 (pane-dragdrop): reactive drop-zone classes for this pane.
+  // A pane can be either the drag SOURCE (.pane-dragging → dim) or
+  // the drag TARGET (.pane-drop-target → outline + zone-specific
+  // .pane-drop-{center|left|right|top|bottom} for a half-tint hint).
+  // MVP: only center performs the swap on release — half-zone visuals
+  // hint the future split-creation but currently fall back to swap.
+  const paneDragClasses = (): string => {
+    const cls: string[] = [];
+    if (paneDragStore.dragPaneId() === p.pane.pane_id) cls.push("pane-dragging");
+    if (paneDragStore.dropTargetId() === p.pane.pane_id) {
+      cls.push("pane-drop-target");
+      const z = paneDragStore.dropZone();
+      if (z) cls.push(`pane-drop-${z}`);
+    }
+    return cls.join(" ");
+  };
+
   return (
     <div
       ref={(el) => (paneRef = el)}
-      class={`pane ${p.isActive ? "active" : ""} ${p.isWaiting ? "waiting" : ""} ${p.isNotified ? "pane-pulse" : ""} ${dropping() ? "drop-target" : ""}`}
+      data-pane-id={p.pane.pane_id}
+      class={`pane ${p.isActive ? "active" : ""} ${p.isWaiting ? "waiting" : ""} ${p.isNotified ? "pane-pulse" : ""} ${dropping() ? "drop-target" : ""} ${paneDragClasses()}`}
       data-has-color={liveEffective().color ? "true" : "false"}
       style={liveEffective().color ? `--pane-color: ${liveEffective().color}` : undefined}
-      onMouseDown={() => p.onFocus(p.pane.pane_id)}
+      onMouseDown={() => {
+        // A short click on the header still focuses the pane. A completed
+        // drag sets `didDrag` in paneDrag — but focusing during a drag
+        // is harmless and, in fact, matches the sidebar's UX (the source
+        // stays selected). The workspace_swap_panes command keeps
+        // pane_ids stable, so this focus survives the swap unchanged.
+        p.onFocus(p.pane.pane_id);
+      }}
       onDrop={onHtml5Drop}
       onDragOver={onHtml5DragOver}
       onDblClick={(e) => {
@@ -739,12 +794,34 @@ export function PaneView(p: Props) {
       <Show when={dropMsg()}>
         <div class="pane-drop-toast">{dropMsg()}</div>
       </Show>
-      <div class="pane-header">
+      <div
+        class="pane-header"
+        onPointerDown={(e) => {
+          // beta.3 (pane-dragdrop) Fix 1: the whole header is the drag
+          // surface (was just the title span — too small to hit).
+          // startPaneDrag is left-button-only and bails on interactive
+          // children (buttons / .pane-btn), so their clicks keep working.
+          const label =
+            p.pane.title
+              ?? p.workspaceName
+              ?? (p.pane.connection
+                ? describeConnection(p.pane.connection)
+                : p.workspaceConnection
+                  ? describeConnection(p.workspaceConnection)
+                  : p.pane.pane_id);
+          startPaneDrag(p.pane.pane_id, label, e);
+        }}
+      >
         {/* Phase 23.I: header fallback chain — user-set pane.title
             beats workspace name beats the raw SSH URL. The old
             describeConnection() output (e.g. "ssh runner@1.2.3.4:22")
             was noisy and only useful for debugging.
-            Phase 31: prepend the effective emoji glyph when set. */}
+            Phase 31: prepend the effective emoji glyph when set.
+            beta.3 (pane-dragdrop): this span is also the pane's drag
+            handle — pointerdown starts a pointer-drag reorder. A short
+            press stays a click (pane focus + no swap); a >5px move
+            promotes to a drag and drops on the pane under the cursor.
+            Escape / pointercancel abort with no swap. */}
         <span
           class="pane-conn"
           title={

@@ -123,7 +123,7 @@ func (s *Server) Notify(deviceID string, payload map[string]any) error {
 }
 
 func envelope(deviceID string, seq int64, event any) map[string]any {
-	return map[string]any{
+	env := map[string]any{
 		"v":         envelopeVersion,
 		"type":      "event",
 		"device_id": deviceID,
@@ -131,6 +131,22 @@ func envelope(deviceID string, seq int64, event any) map[string]any {
 		"ts":        time.Now().Unix(),
 		"event":     event,
 	}
+	// beta.3 Fixes 3+6: hoist workspace label + set a category so Android/iOS
+	// can route the push at their own priority. hook_request → "msg" (highest
+	// user-attention bucket — user is being asked to decide something). Other
+	// event types fall back to Android's default "recommendation" bucket.
+	if evMap, ok := event.(map[string]any); ok {
+		if wsID, ok := evMap["workspace_id"].(string); ok && wsID != "" {
+			env["workspace_id"] = wsID
+		}
+		if wsName, ok := evMap["workspace_name"].(string); ok && wsName != "" {
+			env["workspace_name"] = wsName
+		}
+		if typ, _ := evMap["type"].(string); typ == "hook_request" {
+			env["category"] = "msg"
+		}
+	}
+	return env
 }
 
 // Handler serves GET /api/v2/push/subscribe (WS upgrade). Auth: the device's

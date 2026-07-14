@@ -877,7 +877,13 @@ body {
   font-family: var(--w-font-mono);
   color: var(--w-text-dim);
   flex-shrink: 0;
+  /* beta.3 (pane-dragdrop) Fix 1: the whole header is the drag surface. */
+  cursor: grab;
 }
+.pane-header:active { cursor: grabbing; }
+/* Interactive children keep their own cursor (not grab). */
+.pane-header .pane-btn,
+.pane-header button { cursor: pointer; }
 .pane-conn {
   white-space: nowrap;
   overflow: hidden;
@@ -4139,6 +4145,108 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   pointer-events: none;
 }
 
+/* beta.3: "Hooks & Notifications" settings card — 2 sub-tabs. */
+.hooksNotif-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 6px 0 12px 0;
+  border-bottom: 1px solid var(--w-border);
+}
+.hooksNotif-tab {
+  background: transparent;
+  border: none;
+  color: var(--w-text-dim);
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.hooksNotif-tab.active {
+  color: var(--w-text);
+  border-bottom-color: var(--w-accent);
+}
+.hooksNotif-group {
+  margin: 8px 0 12px 0;
+  padding: 8px;
+  background: var(--w-surface);
+  border: 1px solid var(--w-border);
+  border-radius: 6px;
+}
+.hooksNotif-group-head {
+  margin: 0 0 6px 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--w-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.hooksNotif-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.hooksNotif-row-dim {
+  opacity: 0.5;
+}
+.hooksNotif-row-label {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.hooksNotif-row-name {
+  font-size: 13px;
+  color: var(--w-text);
+}
+.hooksNotif-row-hint {
+  font-size: 11px;
+  color: var(--w-text-dim);
+}
+.hooksNotif-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.hooksNotif-badge-blocking {
+  background: color-mix(in srgb, var(--w-error) 18%, transparent);
+  color: var(--w-error);
+}
+.hooksNotif-badge-passive {
+  background: color-mix(in srgb, var(--w-accent) 15%, transparent);
+  color: var(--w-accent);
+}
+.hooksNotif-deprecated {
+  font-size: 10px;
+  color: var(--w-text-dim);
+  font-style: italic;
+}
+
+/* beta.3 Fix 4: soft amber breathing pulse on the workspace row when a
+   passive hook (pre-tool-use audit, stop, notification, or one of the
+   observability subkinds) landed there in the last 4 seconds. Layered on
+   top of `.has-waiting` (blocking red dot) so both can coexist: dot for
+   "someone needs a decision," breath for "something just happened."
+   Reduced-motion users see a static amber outline instead of the pulse. */
+@keyframes winmux-attn-pulse {
+  0%, 100% {
+    box-shadow: inset 0 0 0 0 rgba(224, 175, 104, 0.0);
+  }
+  50% {
+    box-shadow: inset 0 0 0 2px rgba(224, 175, 104, 0.55);
+  }
+}
+.ws-item.hook-pulse {
+  animation: winmux-attn-pulse 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-item.hook-pulse {
+    animation: none;
+    box-shadow: inset 0 0 0 2px rgba(224, 175, 104, 0.55);
+  }
+}
+
 /* ───────────────────────────────────────────────────────────────
    Phase 30: per-workspace identity (color + emoji)
    ─────────────────────────────────────────────────────────────── */
@@ -4807,11 +4915,107 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: var(--w-error, #f7768e);
   border-color: var(--w-error, #f7768e);
 }
+/* Beta.3: tab bar between the header and the port bar. Each tab is a
+   (port, path) pair — no free-form URL. Height (26) + header (32) +
+   port bar (32) = CHROME_TOP_PX (90) in BrowserWindow.tsx. */
+.browser-window-tabs {
+  height: 26px;
+  flex: 0 0 26px;
+  display: flex;
+  align-items: stretch;
+  background: var(--w-surface, #161b22);
+  border-bottom: 1px solid var(--w-border, #21262d);
+  overflow: hidden;
+}
+.bw-tabs-list {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: stretch;
+  gap: 2px;
+  padding: 3px 4px 0 4px;
+  overflow-x: auto;
+  /* Tabs always read left-to-right (matches Chrome, keeps the bar
+     visually stable when the app language flips to RTL). */
+  direction: ltr;
+}
+.bw-tabs-list::-webkit-scrollbar { height: 0; }
+.bw-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  min-width: 60px;
+  max-width: 220px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  color: var(--w-text-secondary, #7d8590);
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+.bw-tab:hover {
+  background: var(--w-surface-raised, #1c232c);
+  color: var(--w-text-primary, #e6edf3);
+}
+.bw-tab-active {
+  background: var(--w-surface-raised, #1c232c);
+  color: var(--w-text-primary, #e6edf3);
+  border-color: var(--w-border, #21262d);
+}
+.bw-tab-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bw-tab-close {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  opacity: 0.6;
+}
+.bw-tab-close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+.bw-tab-new {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--w-text-secondary, #7d8590);
+  cursor: pointer;
+  width: 28px;
+  font-size: 16px;
+  padding: 0;
+  line-height: 1;
+  border-radius: 4px;
+  margin-inline: 2px;
+}
+.bw-tab-new:hover {
+  color: var(--w-text-primary, #e6edf3);
+  background: var(--w-surface-raised, #1c232c);
+}
+
 /* Phase 60: URL bar between the header and the slot. Heights here
    MUST stay in sync with CHROME_TOP_PX in BrowserWindow.tsx (header
-   32 + urlbar 32 = 64). */
+   32 + tabs 26 + portbar 32 = 90). */
 /* Phase 62.C: port bar — replaces the free URL bar. Refresh · server:
-   port dropdown · path · Go. Height (32) + header (32) = CHROME_TOP_PX. */
+   port dropdown · path · Go. Height (32) + header (32) + tabs (26)
+   = CHROME_TOP_PX. */
 .browser-window-portbar {
   height: 32px;
   flex: 0 0 32px;
@@ -5721,4 +5925,166 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
 .sidebar.icons .ws-add-group {
   padding: 6px 4px;
   font-size: 14px;
+}
+
+/* ─── beta.3 (ws-dragdrop): drag-and-drop reordering ─────────────────
+   Drop indicators use ::before / ::after 2px bars that render at the
+   top or bottom of the target. Because they're horizontal, they render
+   identically in LTR and RTL — the vertical layout of the sidebar is
+   the reorder axis regardless of writing direction.
+   The dragging element gets reduced opacity so the user can see what they
+   picked up; a `.ws-ghost` clone follows the cursor (pointer-based drag has no
+   native drag-image). */
+.ws-item,
+.group-header {
+  cursor: grab;
+}
+.ws-item.dragging,
+.group-header.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+/* While a pointer drag is active the body suppresses text selection and forces
+   the grabbing cursor everywhere (the pointer often leaves the source item). */
+body.winmux-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+/* Floating clone that follows the cursor during a pointer drag. */
+.ws-ghost {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--w-surface-hi, #2a2f3a);
+  color: var(--w-text, #e6e6e6);
+  border: 1px solid var(--w-accent, #7aa2f7);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+/* Horizontal 2px bar above/below the target, absolutely positioned so
+   it never re-flows the list (a reflow-during-drag would repeatedly
+   swap the item under the cursor and set off oscillation). */
+.ws-item.drop-above::before,
+.ws-item.drop-below::after,
+.group-header.drop-above::before,
+.group-header.drop-below::after {
+  content: "";
+  position: absolute;
+  inset-inline: 4px;
+  height: 2px;
+  background: var(--w-accent, #7aa2f7);
+  border-radius: 1px;
+  pointer-events: none;
+  box-shadow: 0 0 6px rgba(122, 162, 247, 0.6);
+}
+.ws-item.drop-above::before,
+.group-header.drop-above::before { top: -1px; }
+.ws-item.drop-below::after,
+.group-header.drop-below::after { bottom: -1px; }
+/* group headers are position-static by default; anchor for the pseudos. */
+.group-header { position: relative; }
+/* Whole-group highlight when a workspace hovers a group header. The
+   background tint reads as "release here to add to this group". */
+.group-header.drop-into {
+  background: color-mix(in srgb, var(--w-accent, #7aa2f7) 15%, transparent);
+  outline: 1px dashed var(--w-accent, #7aa2f7);
+  outline-offset: -1px;
+}
+/* Small transition on background/transform so post-drop reordering
+   settles smoothly instead of snapping. Kept short — long animations
+   fight the pointer during rapid consecutive drags. */
+.ws-item, .group-header {
+  transition: background 80ms ease, color 80ms ease, transform 120ms ease,
+    opacity 120ms ease;
+}
+
+/* ─── beta.3 (pane-dragdrop): drag-and-drop reordering panes ─────────
+   Grab the pane by its title (.pane-conn), drag onto another pane's
+   body, release to swap. Same pointer-events model as the sidebar's
+   ws-dragdrop: WebView2's OS drop handler stays enabled (Phase 49-A
+   file drops into terminals still work), so we can't use HTML5 DnD
+   here either.
+   MVP: only the center zone actually swaps; left/right/top/bottom
+   render a half-tint hint but currently also fall back to swap on
+   release. Split-creation on the halves is Phase 2.
+   RTL: left/right map to screen-left / screen-right (physical, not
+   logical). The visual highlight uses inset-inline so the amber wash
+   still lines up with the cursor in RTL. */
+.pane-conn {
+  cursor: grab;
+  user-select: none;
+}
+body.winmux-dragging .pane-conn {
+  cursor: grabbing;
+}
+/* Source pane while a drag is active — dim so the user sees what they
+   picked up. Distinct from .pane.drop-target (Phase 49-A OS file
+   drop), which uses a dashed outline. */
+.pane.pane-dragging {
+  opacity: 0.55;
+}
+/* Target pane the cursor is over. A soft accent outline signals
+   "release here to swap"; the box-shadow ring reinforces it above
+   the normal border. */
+.pane.pane-drop-target {
+  outline: 2px solid var(--w-accent, #7aa2f7);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 1px rgba(122, 162, 247, 0.25),
+    0 0 12px rgba(122, 162, 247, 0.35);
+}
+/* Half-zone hints. Rendered as an amber-tinted overlay via ::after so
+   they don't touch the pane's own border. MVP: all four fall back to
+   the same swap behaviour as center; the hint is here so the Phase 2
+   split-creation lands on top of a UI Yossi has already trained on. */
+.pane.pane-drop-target::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  z-index: 5;
+  background: color-mix(in srgb, var(--w-accent, #7aa2f7) 22%, transparent);
+  transition: inset 80ms ease, background 80ms ease;
+}
+.pane.pane-drop-target.pane-drop-center::after {
+  inset: 20%;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--w-accent, #7aa2f7) 28%, transparent);
+}
+.pane.pane-drop-target.pane-drop-left::after {
+  inset: 0 50% 0 0;
+}
+.pane.pane-drop-target.pane-drop-right::after {
+  inset: 0 0 0 50%;
+}
+.pane.pane-drop-target.pane-drop-top::after {
+  inset: 0 0 50% 0;
+}
+.pane.pane-drop-target.pane-drop-bottom::after {
+  inset: 50% 0 0 0;
+}
+/* Floating label follows the cursor mid-drag. Positioned in the
+   LayoutView root so it sits over the workspace pane grid. Same
+   look as .ws-ghost but keyed to pane vocab. */
+.pane-ghost {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--w-surface-hi, #2a2f3a);
+  color: var(--w-text, #e6e6e6);
+  border: 1px solid var(--w-accent, #7aa2f7);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.92;
 }

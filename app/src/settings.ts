@@ -88,6 +88,51 @@ export interface HooksSettings {
   auto_install?: boolean;
 }
 
+// beta.3: canonical Claude Code hook types. Wire strings are kebab-case
+// (round-trips with rpc_server.rs subkind handling).
+export type HookType =
+  | "pre-tool-use"
+  | "notification"
+  | "stop"
+  | "session-end"
+  | "post-tool-use"
+  | "subagent-stop"
+  | "user-prompt-submit"
+  | "pre-compact"
+  | "session-start";
+
+// beta.3: per-hook-type "processed?" + "play sound?" toggles + master.
+// Mirrors the Rust `HookSettings` struct in settings.rs. Ts-rs also emits
+// a binding under app/src/bindings/HookSettings.ts; this hand-mirrored
+// type is what the app imports because HashSet<T> serialises as an array
+// and we want a plain TS shape for the UI.
+export interface HookNotificationSettings {
+  enabled_types: HookType[];
+  sound_types: HookType[];
+  sound_master: boolean;
+}
+
+export const INTERACTIVE_HOOKS: HookType[] = [
+  "pre-tool-use",
+  "notification",
+  "stop",
+  "session-end",
+];
+
+export const OBSERVABILITY_HOOKS: HookType[] = [
+  "post-tool-use",
+  "subagent-stop",
+  "user-prompt-submit",
+  "pre-compact",
+  "session-start",
+];
+
+export const DEFAULT_HOOK_NOTIFICATIONS: HookNotificationSettings = {
+  enabled_types: [...INTERACTIVE_HOOKS],
+  sound_types: ["pre-tool-use", "notification", "stop"],
+  sound_master: true,
+};
+
 export interface NotificationSettings {
   toast_enabled: boolean;
   sound_enabled: boolean;
@@ -213,6 +258,8 @@ export interface Settings {
   terminal: TerminalSettings;
   hooks: HooksSettings;
   notifications: NotificationSettings;
+  // beta.3: per-hook-type enable + sound toggles (Hooks & Notifications card).
+  hook_notifications?: HookNotificationSettings;
   updates: UpdatesSettings;
   i18n: I18nSettings;
   shortcuts?: ShortcutsSettings;

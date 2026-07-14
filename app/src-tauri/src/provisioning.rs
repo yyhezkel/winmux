@@ -1054,6 +1054,7 @@ fn finalize_workspace(
         claude_separate_account: false,
         // cmux-A A2: newly-provisioned workspaces default to ungrouped.
         group_id: None,
+        sort_order: None,
     };
     let id_out = ws.id.clone();
     {

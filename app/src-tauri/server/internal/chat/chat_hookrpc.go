@@ -45,6 +45,36 @@ func (m *SessionManager) SetHookAddr(addr string) {
 	m.mu.Unlock()
 }
 
+// SetWorkspaceResolver (beta.3 Fix 3) injects a workspace-id → display-name
+// resolver from the workspace manager. Called from `cmd` after both managers
+// exist. Left nil in tests / when the workspace subsystem isn't wired — in
+// that case chat sessions emit workspace_name="" and downstream (mobile UI)
+// falls back to session id.
+func (m *SessionManager) SetWorkspaceResolver(r func(id string) (string, bool)) {
+	m.mu.Lock()
+	m.wsResolver = r
+	m.mu.Unlock()
+}
+
+// resolveWorkspace looks up the (id, name) pair for a chat session. Chat
+// sessions aren't linked to a workspace explicitly today, so the id defaults
+// to the shared "ws_default" sentinel (workspace.DefaultID) which the mobile
+// app also uses. Name resolution is best-effort — a nil resolver or a missing
+// workspace yields an empty name and the mobile app renders the id.
+func (m *SessionManager) resolveWorkspace(_ *Session) (string, string) {
+	const defaultWorkspaceID = "ws_default"
+	m.mu.Lock()
+	r := m.wsResolver
+	m.mu.Unlock()
+	if r == nil {
+		return defaultWorkspaceID, ""
+	}
+	if name, ok := r(defaultWorkspaceID); ok {
+		return defaultWorkspaceID, name
+	}
+	return defaultWorkspaceID, ""
+}
+
 func (m *SessionManager) HandleHookConn(conn net.Conn) {
 	defer conn.Close()
 	br := bufio.NewReader(conn)
@@ -194,6 +224,13 @@ func (s *Session) awaitHookDecision(p *feedPushParams, denyOnTimeout bool) strin
 	toolName, toolInput := extractToolFields(p.Payload)
 	prev := s.getStatus()
 	s.setStatus(stWaitingHook)
+	// beta.3 Fix 3: include workspace_id + workspace_name so the mobile app can
+	// render "[<workspace>] approve X?" rather than surfacing the raw session
+	// id. Chat sessions aren't linked to a workspace yet (Phase 77 §16 lands
+	// that wiring); until then the workspace_name is filled in by the manager
+	// when it can resolve it, else empty. `workspace_id` defaults to the
+	// always-present "ws_default" sentinel so downstream code has a stable key.
+	wsID, wsName := s.mgr.resolveWorkspace(s)
 	s.emit(jsonEvent(map[string]any{
 		"type":              "hook_request",
 		"req_id":            p.RequestID,
@@ -201,6 +238,8 @@ func (s *Session) awaitHookDecision(p *feedPushParams, denyOnTimeout bool) strin
 		"tool_name":         toolName,
 		"tool_input":        toolInput,
 		"title":             p.Title,
+		"workspace_id":      wsID,
+		"workspace_name":    wsName,
 		"decision_required": true,
 	}))
 

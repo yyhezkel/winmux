@@ -361,6 +361,7 @@
   "browser.urlBar.go.tooltip": "Go to the address",
   "fm.unzip.confirmOverwrite": "The folder \"{dest}\" already exists — extracting will overwrite files inside it. Continue?",
   "browser.window.urlBar.placeholder": "Enter URL and press Enter…",
+  "browser.tabs.new": "New tab (Ctrl+T)",
   "browser.ports.refresh": "Re-scan open ports on the server",
   "browser.ports.refresh.label": "Refresh ports",
   "browser.ports.serverPrefix": "server:",

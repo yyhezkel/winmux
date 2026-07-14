@@ -8,6 +8,10 @@
 //! 51.B is being landed in incremental sub-commits (51.B1, 51.B2, …)
 //! rather than as one ~5,000-LOC move, so intermediate states stay
 //! green and the build is never left broken between commits.
+
+// beta.3 (netfree): shared HTTP retry helper for the updater path.
+// See http.rs — GET-only, jittered exponential backoff on transport errors.
+pub mod http;
 //!
 //! Things explicitly NOT in this crate (yet): SshClient + russh
 //! handler impl, Session/SshSession types, ForwardEntry, AppState +
@@ -16,6 +20,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use portable_pty::{ChildKiller, MasterPty};
@@ -524,6 +529,13 @@ pub struct SshSession {
     pub user: String,
     pub port: u16,
     pub key_path: Option<String>,
+    /// beta.3 (netfree, Track 1b): set by the io-loop when the SSH transport
+    /// drops so a background reconnect task can announce itself to the UI
+    /// and reject a second cascading drop-emit if the same session flaps
+    /// twice in quick succession. Cleared by the `ssh_cancel_reconnect`
+    /// Tauri command or when the reconnect flow completes / gives up.
+    /// Arc<AtomicBool> so multiple `_for_task` clones share one flag.
+    pub reconnecting: Arc<AtomicBool>,
 }
 
 impl SshSession {

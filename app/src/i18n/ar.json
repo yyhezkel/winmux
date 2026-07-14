@@ -871,5 +871,11 @@
   "sidebar.delete_group": "حذف المجموعة",
   "sidebar.change_color": "تغيير اللون",
   "sidebar.move_to_group": "نقل إلى مجموعة",
-  "sidebar.move_out_of_group": "إخراج من المجموعة"
+  "sidebar.move_out_of_group": "إخراج من المجموعة",
+  "reconnect.title": "انقطع الاتصال بـ {host}",
+  "reconnect.attempt": "جارٍ إعادة الاتصال… (المحاولة {n}/{max})",
+  "reconnect.cancel": "إلغاء",
+  "reconnect.success": "تمت إعادة الاتصال بـ {host}",
+  "reconnect.failed": "تعذّرت إعادة الاتصال بـ {host}. انقر على اللوحة للمحاولة مجددًا."
 }
+

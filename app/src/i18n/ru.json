@@ -871,5 +871,11 @@
   "sidebar.delete_group": "Удалить группу",
   "sidebar.change_color": "Изменить цвет",
   "sidebar.move_to_group": "Переместить в группу",
-  "sidebar.move_out_of_group": "Убрать из группы"
+  "sidebar.move_out_of_group": "Убрать из группы",
+  "reconnect.title": "Соединение с {host} разорвано",
+  "reconnect.attempt": "Переподключение… (попытка {n}/{max})",
+  "reconnect.cancel": "Отмена",
+  "reconnect.success": "Переподключено к {host}",
+  "reconnect.failed": "Не удалось переподключиться к {host}. Кликните панель, чтобы повторить."
 }
+

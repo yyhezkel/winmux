@@ -10,7 +10,7 @@
 //! Rule #1: we log only the workspace id + percentages, never the `/usage`
 //! body (it names the user's subagents / skills / MCP servers).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -48,6 +48,73 @@ pub(crate) struct ClaudeUsage {
 // ─── cache (per workspace, 5-min TTL) — mirrors updater.rs ───────────────────
 static USAGE_CACHE: Mutex<Option<HashMap<String, (Instant, ClaudeUsage)>>> = Mutex::new(None);
 const USAGE_CACHE_TTL: Duration = Duration::from_secs(300);
+
+// ─── beta.3 safety nets (backoff + in-flight dedupe) ────────────────────────
+//
+// A misbehaving caller (frontend effect loop, third-party addon polling
+// too hard, etc.) must NOT be able to open a new remote `claude -p
+// /usage` every few seconds — each failed exec that hits the SSH
+// timeout leaves an orphan `claude` process on the server and eventually
+// exhausts sshd's MaxSessions, killing the whole session. Two defenses:
+//
+//   1. `USAGE_FAILED_AT` — after any failed fetch (parse error, exec
+//      timeout, connection drop) we refuse further fetches for the same
+//      workspace for `USAGE_BACKOFF`, serving stale cache if we have it.
+//   2. `USAGE_INFLIGHT`  — at most one in-flight fetch per workspace;
+//      concurrent callers fall through to stale cache or an error
+//      without spawning a second exec channel. Guard is RAII (see
+//      `InFlight`) so panics/aborts still release it.
+static USAGE_FAILED_AT: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+const USAGE_BACKOFF: Duration = Duration::from_secs(300);
+static USAGE_INFLIGHT: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// Try to claim the sole "fetch in flight" slot for `workspace_id`.
+/// Returns `None` if another fetch is already running; the caller
+/// should fall back to stale cache. The returned guard clears the
+/// slot on drop.
+struct InFlight(String);
+impl InFlight {
+    fn try_acquire(workspace_id: &str) -> Option<Self> {
+        let mut guard = USAGE_INFLIGHT.lock().ok()?;
+        let set = guard.get_or_insert_with(HashSet::new);
+        if set.contains(workspace_id) {
+            return None;
+        }
+        set.insert(workspace_id.to_string());
+        Some(InFlight(workspace_id.to_string()))
+    }
+}
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = USAGE_INFLIGHT.lock() {
+            if let Some(set) = guard.as_mut() {
+                set.remove(&self.0);
+            }
+        }
+    }
+}
+
+fn in_backoff(workspace_id: &str) -> bool {
+    let Ok(guard) = USAGE_FAILED_AT.lock() else { return false; };
+    let Some(map) = guard.as_ref() else { return false; };
+    match map.get(workspace_id) {
+        Some(at) => at.elapsed() < USAGE_BACKOFF,
+        None => false,
+    }
+}
+fn mark_failed(workspace_id: &str) {
+    if let Ok(mut guard) = USAGE_FAILED_AT.lock() {
+        guard.get_or_insert_with(HashMap::new)
+            .insert(workspace_id.to_string(), Instant::now());
+    }
+}
+fn clear_failed(workspace_id: &str) {
+    if let Ok(mut guard) = USAGE_FAILED_AT.lock() {
+        if let Some(map) = guard.as_mut() {
+            map.remove(workspace_id);
+        }
+    }
+}
 
 fn cache_fresh(workspace_id: &str, force: bool) -> Option<ClaudeUsage> {
     if force {
@@ -190,16 +257,41 @@ pub(crate) async fn claude_usage_fetch(
     if let Some(cached) = cache_fresh(&workspace_id, force) {
         return Ok(cached);
     }
+    // beta.3 safety net #1 — refuse to spam remote after a recent failure.
+    if in_backoff(&workspace_id) {
+        crate::dlog_tag("USAGE", &format!("workspace={workspace_id} backoff"));
+        return cache_stale(&workspace_id)
+            .ok_or_else(|| "usage temporarily unavailable (backoff)".to_string());
+    }
+    // beta.3 safety net #2 — at most one in-flight fetch per workspace.
+    let _guard = match InFlight::try_acquire(&workspace_id) {
+        Some(g) => g,
+        None => {
+            crate::dlog_tag("USAGE", &format!("workspace={workspace_id} inflight"));
+            return cache_stale(&workspace_id)
+                .ok_or_else(|| "usage fetch already in progress".to_string());
+        }
+    };
     let handle = crate::addons::pick_handle(&state, &workspace_id)
         .ok_or("no active SSH session for this workspace")?;
     // Login shell so `claude` is on PATH in a non-interactive session; stderr
-    // dropped so `result` stays clean JSON.
-    let out = crate::addons::exec(
+    // dropped so `result` stays clean JSON. `timeout 18` on the REMOTE side
+    // guarantees the `claude` process dies even if our local exec timeout
+    // fires and we drop the channel — no orphans left on the server.
+    let out = match crate::addons::exec(
         &handle,
-        "bash -lc 'claude -p \"/usage\" --output-format json 2>/dev/null'",
+        "bash -lc 'timeout 18 claude -p \"/usage\" --output-format json 2>/dev/null'",
         20,
     )
-    .await?;
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            mark_failed(&workspace_id);
+            crate::dlog_tag("USAGE", &format!("workspace={workspace_id} exec_failed"));
+            return cache_stale(&workspace_id).ok_or(e);
+        }
+    };
     let now = now_unix();
     match parse_usage(&out, now) {
         Ok(usage) => {
@@ -211,10 +303,12 @@ pub(crate) async fn claude_usage_fetch(
                 ),
             );
             cache_store(&workspace_id, &usage);
+            clear_failed(&workspace_id);
             Ok(usage)
         }
         // Serve stale on a transient parse/fetch miss before surfacing the error.
         Err(e) => {
+            mark_failed(&workspace_id);
             crate::dlog_tag("USAGE", &format!("workspace={workspace_id} unavailable"));
             cache_stale(&workspace_id).ok_or(e)
         }

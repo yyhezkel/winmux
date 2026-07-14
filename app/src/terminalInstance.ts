@@ -32,6 +32,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { reorderRtlForDisplay } from "./bidi";
 import { detectDirection, detectRowDirections } from "./textDirection";
+import { transformMouseX, findRow } from "./mouseRtl";
 import { t } from "./i18n";
 
 // Phase 62.B (item J): parse a `file://` URI (as emitted in Claude Code's
@@ -400,6 +401,11 @@ export class TerminalInstance {
   // and flush a single merged write per animation frame.
   private pendingChunks: string[] = [];
   private flushRafId: number | null = null;
+  // v0.4.4-beta.4 (RTL mouse fix): capture-phase mouse listener disposer.
+  // The listener runs before xterm.js's own bubble-phase handlers and, for
+  // events over an RTL row, dispatches a synthetic MouseEvent with clientX
+  // mirrored around the row midpoint. See mouseRtl.ts for the rationale.
+  private rtlMouseTeardown: (() => void) | null = null;
 
   constructor(paneId: string) {
     this.paneId = paneId;
@@ -627,6 +633,7 @@ export class TerminalInstance {
     g_terminals.add(this);
 
     this.ensureDirObserver();
+    this.installRtlMouseCapture();
 
     // Font-init fix: a fresh pane rendered "compressed" until the user
     // swapped the terminal font and back (notably with Courier). Root
@@ -638,6 +645,102 @@ export class TerminalInstance {
     // the bad metrics. Schedule a one-shot re-measure once the container
     // is actually in the DOM and fonts are ready.
     this.scheduleInitialFontMeasure();
+  }
+
+  /**
+   * v0.4.4-beta.4 (RTL mouse fix): capture-phase listeners on the terminal
+   * element that mirror `clientX` for events landing over an RTL row. See
+   * mouseRtl.ts for the math and the docs on why we intercept in capture
+   * phase (xterm.js binds its own mousedown to `this.element` in bubble
+   * phase, and its drag lifecycle attaches mousemove/mouseup to `document`
+   * -- also bubble). Capture on `this.container` fires before either.
+   *
+   * The listener is a no-op when the pointer is over an LTR row, over no
+   * row (whitespace / outside `.xterm-rows`), or when the DOM renderer
+   * isn't being used (the `dir` attributes only get set in `auto_per_line`
+   * mode with the DOM renderer -- the WebGL renderer has no per-row DOM).
+   *
+   * Re-entry: `dispatchEvent` re-enters the capture phase, so we gate on
+   * `event.isTrusted` to skip synthetic events we ourselves fired.
+   */
+  private installRtlMouseCapture(): void {
+    if (this.rtlModeAtConstruct !== "auto_per_line") return;
+    const el = this.container;
+
+    const forward = (e: MouseEvent): void => {
+      // Skip synthetic events we dispatched (re-entry guard). Only real
+      // OS-generated events are trusted.
+      if (!e.isTrusted) return;
+      const rowsHost = el.querySelector(".xterm-rows") as HTMLElement | null;
+      if (!rowsHost) return;
+      const row = findRow(rowsHost, e.clientY);
+      if (!row || row.dir !== "rtl") return;
+      const newX = transformMouseX(e.clientX, row);
+      if (newX === e.clientX) return;
+
+      // Suppress the original event before it reaches xterm's own handlers
+      // (bubble phase on this.element for mousedown, on document for
+      // mousemove/mouseup during a drag). stopPropagation is enough --
+      // stopImmediatePropagation would also block any OTHER capture
+      // listener on the way down, which we don't need to do.
+      e.stopPropagation();
+      // preventDefault so the browser doesn't also start a native text
+      // selection over the mirrored coord (which would clash with xterm's).
+      e.preventDefault();
+
+      const target = (e.target as EventTarget | null) ?? el;
+      const clone = new MouseEvent(e.type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        button: e.button,
+        buttons: e.buttons,
+        clientX: newX,
+        clientY: e.clientY,
+        screenX: e.screenX + (newX - e.clientX),
+        screenY: e.screenY,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+        altKey: e.altKey,
+        metaKey: e.metaKey,
+        detail: e.detail,
+        view: window,
+      });
+      target.dispatchEvent(clone);
+    };
+
+    // Deliberately NOT included:
+    //  - `contextmenu`: the existing handler in the constructor positions
+    //    the custom Copy/Paste menu at the raw clientX. Mirroring would put
+    //    the menu on the "wrong" (visual-opposite) side of the click.
+    //  - `wheel`: no per-column meaning; xterm's wheel handling is scroll-
+    //    based, not cell-based.
+    const events: Array<keyof HTMLElementEventMap> = [
+      "mousedown",
+      "mousemove",
+      "mouseup",
+      "click",
+      "dblclick",
+    ];
+    for (const ev of events) {
+      el.addEventListener(ev, forward as EventListener, true);
+    }
+    // Drag past the terminal edge: xterm's SelectionService binds mousemove
+    // and mouseup on `document` for the drag lifecycle. When the pointer
+    // stays inside the terminal those events also propagate through
+    // `this.container`, so the listeners above catch them. But if the
+    // pointer LEAVES the terminal (drag out, release outside), the target
+    // is no longer under `this.container` and only the document-level
+    // listener would need mirroring. We accept the minor drop-off there --
+    // most drags start and end inside the pane, and mirroring outside-row
+    // coords would require guessing which row the pointer "would have"
+    // hit. Documented as a known limitation.
+
+    this.rtlMouseTeardown = () => {
+      for (const ev of events) {
+        el.removeEventListener(ev, forward as EventListener, true);
+      }
+    };
   }
 
   /**
@@ -1006,6 +1109,11 @@ export class TerminalInstance {
     this.ro = null;
     this.dirObserver?.disconnect();
     this.dirObserver = null;
+    // v0.4.4-beta.4 (RTL mouse fix): tear down the capture-phase listener
+    // so a disposed pane doesn't keep intercepting document/element mouse
+    // events for the rest of the app's lifetime.
+    this.rtlMouseTeardown?.();
+    this.rtlMouseTeardown = null;
     // v0.4.4: cancel a pending per-line direction pass so a freed terminal
     // doesn't touch detached DOM after disposal.
     if (this.dirRafId != null) {

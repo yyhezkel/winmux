@@ -909,20 +909,53 @@ export class TerminalInstance {
    * no-op but a *different string*, so the option-change fires even if the
    * value is otherwise unchanged) and finish on the clean value.
    */
+  /**
+   * The first family in the current `fontFamily` list that the browser can
+   * actually render (via `document.fonts.check`), skipping CSS generics and
+   * junk tokens from a malformed name (`Courier 10,12,15 (120)` splits into
+   * `Courier 10` / `12` / `15 (120)`, none of which are real faces). This is
+   * the face that will actually paint, so bouncing THROUGH it primes exactly
+   * the right measurement.
+   */
+  private firstRenderableFamily(size: number): string | null {
+    const list = String(this.term.options.fontFamily ?? "");
+    for (const raw of list.split(",")) {
+      const f = raw.trim().replace(/^["']|["']$/g, "");
+      if (!f) continue;
+      if (
+        /^(monospace|serif|sans-serif|ui-monospace|system-ui|cursive|fantasy)$/i.test(
+          f,
+        )
+      )
+        continue;
+      try {
+        if (document.fonts.check(`${size}px "${f}"`)) return f;
+      } catch {}
+    }
+    return null;
+  }
+
   remeasureFont(): void {
     this.logFontMetrics("remeasure:before");
     const fam = this.term.options.fontFamily ?? "monospace";
+    const size = Number(this.term.options.fontSize ?? 14);
     // xterm de-dupes a no-op fontFamily write (same string → no re-measure),
-    // so a plain toggle never re-measured. Instead bounce through a
-    // genuinely DIFFERENT sentinel family, then restore on the next frame —
-    // two real option changes, exactly what the manual font-swap does
-    // (Courier → Cascadia → Courier), which is the only thing that forced a
-    // correct measurement. The sentinel is visible for at most one frame.
-    const sentinel = fam.trim() === "monospace" ? "serif" : "monospace";
+    // so we must bounce through a DIFFERENT family and restore. The manual
+    // font-swap that renders correctly bounces through the REAL face
+    // ("Cascadia Mono"), which primes that face so the restored list keeps
+    // measuring it. A neutral "monospace" sentinel instead let the restore
+    // fall to a later fallback (Consolas → 10.996px, the "weird letter
+    // gaps"). So bounce through the first *renderable* family in the list.
+    const bounce = this.firstRenderableFamily(size) ?? "monospace";
     try {
-      this.term.options.fontFamily = sentinel;
+      this.term.options.fontFamily = bounce;
+      // Measure the primed face this tick (mirrors setTerminalFont, which
+      // sets family+size+fit+refresh together — that synchronous cycle is
+      // what actually lands the correct measurement).
+      this.fitAndResize(true);
+      this.term.refresh(0, this.term.rows - 1);
     } catch (e) {
-      console.warn("remeasureFont: sentinel set failed", e);
+      console.warn("remeasureFont: bounce set failed", e);
     }
     requestAnimationFrame(() => {
       if (!g_terminals.has(this)) return;

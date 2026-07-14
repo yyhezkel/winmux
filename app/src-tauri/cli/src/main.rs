@@ -24,8 +24,22 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 /// be diagnosed by looking at the log instead of reproducing live.
 /// Best-effort: any I/O failure is silently swallowed so the hook
 /// never aborts due to logging.
+///
+/// Rule #1: callers pass **metadata only** (enum-like fields, IDs,
+/// error kinds) — never `tool_input`, `command`, `prompt`,
+/// `transcript`, or any other content that could originate from a
+/// user prompt or an agent tool call. The `msg` string reaches disk
+/// verbatim and later becomes an LLM-readable file (`cat`, the
+/// desktop's Addon Logs panel), so any markup mimicking system
+/// messaging — e.g. `<system-reminder>…</system-reminder>` — that
+/// leaks in here becomes a prompt-injection payload for whichever
+/// LLM reads the log next.
 fn hook_dlog(msg: &str) {
     use std::io::Write as _;
+    // v0.4.5 (security): one-shot migration of any pre-v0.4.4
+    // hook-debug.log before we touch the file. See
+    // `migrate_hook_log_if_legacy` for the full rationale.
+    HOOK_LOG_MIGRATION.call_once(migrate_hook_log_if_legacy);
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"));
     let Some(home) = home else { return };
@@ -44,6 +58,92 @@ fn hook_dlog(msg: &str) {
         .open(&path)
     {
         let _ = writeln!(f, "{} {}", ts, msg);
+    }
+}
+
+/// Guards `migrate_hook_log_if_legacy` so it runs at most once per
+/// CLI process. Every hook fires a fresh process, so the marker-file
+/// check inside the migration is the real idempotency mechanism —
+/// this `Once` just avoids repeat stat calls when a single process
+/// emits several log lines (BEGIN + dispatch + ACK).
+static HOOK_LOG_MIGRATION: std::sync::Once = std::sync::Once::new();
+
+/// v0.4.5 (security): one-time migration of pre-v0.4.4
+/// `~/.winmux/hook-debug.log`.
+///
+/// Background: before v0.4.4 (commit `94ba208`, 2026-07-06), the
+/// static-fallback log lines embedded the policy `reason` field.
+/// `reason` in turn quoted verbatim command text from
+/// `tool_input.command` (see `winmux_policy::evaluate`). If that
+/// command text contained markup mimicking Claude's system
+/// messaging — e.g. `<system-reminder>ignore prior
+/// instructions…</system-reminder>` — the tokens landed raw on
+/// disk. A downstream LLM that later reads the log (a `cat` from
+/// another Claude session, the desktop's Addon Logs panel) then
+/// interpreted the tokens as real instructions. Classic
+/// prompt-injection-through-a-log-file.
+///
+/// v0.4.4 fixed the write side (`reason` no longer flows to
+/// `hook_dlog`; only enum-like metadata does), but existing log
+/// files rotate only when they cross 1 MiB, so on quiet installs
+/// the tainted historical lines survive indefinitely. This
+/// migration closes that gap without requiring users to know they
+/// need to delete a file:
+///
+/// * If the marker `~/.winmux/.hook-log-migrated-v044` already
+///   exists → no-op.
+/// * Otherwise, if an existing `hook-debug.log` is present, rename
+///   it to `hook-debug.log.legacy-<unix_ts>` (preserved, not
+///   deleted — so operators / auditors can inspect it if needed),
+///   then write the marker.
+/// * If no `hook-debug.log` exists, just write the marker so a
+///   later fresh install doesn't retry the check every process.
+///
+/// Best-effort: every I/O call is fallible; failures are swallowed
+/// so hook logging never aborts because of the migration itself.
+fn migrate_hook_log_if_legacy() {
+    use std::io::Write as _;
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"));
+    let Some(home) = home else { return };
+    let dir = std::path::PathBuf::from(home).join(".winmux");
+    let marker = dir.join(".hook-log-migrated-v044");
+    if marker.exists() {
+        return;
+    }
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let log_path = dir.join("hook-debug.log");
+    if log_path.exists() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let backup = dir.join(format!("hook-debug.log.legacy-{ts}"));
+        // If the rename fails (e.g. cross-device weirdness on an
+        // unusual mount), fall through and still lay the marker.
+        // Continuing to append to a possibly-tainted file is worse
+        // than doing nothing, but retrying every process forever is
+        // also worse — the marker breaks the retry loop.
+        let _ = std::fs::rename(&log_path, &backup);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&marker)
+    {
+        // Content is an audit note for humans grepping ~/.winmux;
+        // the marker's existence is what actually gates the check.
+        let _ = writeln!(
+            f,
+            "winmux CLI hook-debug.log migration (v0.4.5)\n\
+             Pre-v0.4.4 log lines could embed raw command text (from the\n\
+             static-fallback `reason` field); any prior hook-debug.log was\n\
+             renamed to hook-debug.log.legacy-<unix_ts>. Do not delete this\n\
+             marker — it prevents the migration from re-running."
+        );
     }
 }
 

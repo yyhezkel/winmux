@@ -447,20 +447,36 @@ function applyWebFont(url: string): void {
 }
 
 function quoteFamily(family: string): string {
-  // Wrap with single quotes if the family has a space and isn't already
-  // quoted; append safe fallbacks so a missing font doesn't break layout.
+  // `terminal_family` is a SINGLE family name from the font picker, not a
+  // hand-authored CSS list — so it must be quoted as one token before the
+  // fallbacks are appended. The old rule "quote only if it has a space and
+  // NO comma" left a name like `Courier 10,12,15 (120)` unquoted, and its
+  // internal commas then fragmented the font-family list into junk faces
+  // (`Courier 10`, `12`, `15 (120)`), which broke xterm's glyph measurement
+  // (compressed panes / weird letter gaps). Quote anything that isn't a
+  // bare CSS identifier or already quoted.
   const trimmed = family.trim();
   const isMono =
     /mono|consolas|cascadia|courier|menlo|fira|jetbrains|iosevka|hack|source code|lucida console/i.test(
       trimmed
     );
-  const head = trimmed && !/[",']/.test(trimmed) && /\s/.test(trimmed)
-    ? `"${trimmed}"`
-    : trimmed;
+  let head: string;
+  if (!trimmed) {
+    head = "";
+  } else if (/^(["']).*\1$/.test(trimmed)) {
+    // Already quoted — leave as-is.
+    head = trimmed;
+  } else if (/^[A-Za-z_-][A-Za-z0-9_-]*$/.test(trimmed)) {
+    // Bare CSS identifier (e.g. `Consolas`, `monospace`) — safe unquoted.
+    head = trimmed;
+  } else {
+    // Spaces, commas, parens, digits, etc. → quote as one family + escape.
+    head = `"${trimmed.replace(/"/g, '\\"')}"`;
+  }
   const fallback = isMono
     ? '"Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace'
     : '-apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
-  return `${head}, ${fallback}`;
+  return head ? `${head}, ${fallback}` : fallback;
 }
 
 // Minimal hex color blender (#rrggbb only). Best-effort — non-hex values

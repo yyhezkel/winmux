@@ -31,7 +31,7 @@ const g_oscClipboardProvider: IClipboardProvider = {
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { reorderRtlForDisplay } from "./bidi";
-import { detectDirection } from "./textDirection";
+import { detectDirection, detectRowDirections } from "./textDirection";
 import { t } from "./i18n";
 
 // Phase 62.B (item J): parse a `file://` URI (as emitted in Claude Code's
@@ -692,21 +692,47 @@ export class TerminalInstance {
   }
 
   /**
-   * Set `dir` on each visible row from its text. `force` recomputes every
-   * row (used on first attach and when the setting toggles); otherwise the
-   * per-row cache skips rows whose text is unchanged since the last pass.
+   * Set `dir` on each visible row from its text.
+   *
+   * `force` recomputes every row (used on first attach and when the setting
+   * toggles); otherwise the per-row cache skips rows whose text is unchanged
+   * AND whose *neighbors* haven't shifted the block classification. When any
+   * row's text changes we run the full block-aware pass ({@link
+   * detectRowDirections}) — so a Hebrew cell landing in a table drags the
+   * whole block RTL, and adding a border row that groups earlier content rows
+   * into a new block re-flows their direction too.
+   *
+   * `detectDirection` (single-row) is retained above only as a fallback for
+   * `auto_direction=false` (see below).
    */
   applyRowDirections(force: boolean): void {
     if (this.rtlModeAtConstruct !== "auto_per_line") return;
     const rowsHost = this.container.querySelector(".xterm-rows") as HTMLElement | null;
     if (!rowsHost) return;
     const auto = g_autoDirection;
-    for (const child of rowsHost.children) {
-      const el = child as HTMLElement;
-      const text = el.textContent ?? "";
-      if (!force && this.dirCache.get(el) === text) continue;
-      this.dirCache.set(el, text);
-      const dir = auto ? detectDirection(text) : "ltr";
+    const children = Array.from(rowsHost.children) as HTMLElement[];
+    const texts = children.map((el) => el.textContent ?? "");
+
+    // Fast path: if not forced AND every row text is unchanged since last
+    // pass, we can skip the whole recompute. Block classification depends on
+    // ALL rows, so a per-row cache with per-row skip (as before) would race
+    // with block-boundary shifts. Cheap array-equality check instead.
+    if (!force) {
+      let allSame = children.length > 0;
+      for (let i = 0; i < children.length; i++) {
+        if (this.dirCache.get(children[i]) !== texts[i]) { allSame = false; break; }
+      }
+      if (allSame) return;
+    }
+
+    const dirs = auto
+      ? detectRowDirections(texts)
+      : (texts.map(() => "ltr") as ("ltr" | "rtl")[]);
+
+    for (let i = 0; i < children.length; i++) {
+      const el = children[i];
+      this.dirCache.set(el, texts[i]);
+      const dir = dirs[i];
       if (el.getAttribute("dir") !== dir) el.setAttribute("dir", dir);
     }
   }
@@ -890,7 +916,7 @@ export class TerminalInstance {
       }
       this.fontMeasured = true;
       remeasure();
-      // Re-run after the web font has had time to load — the first pass can
+      // Re-run after the web font has had time to load - the first pass can
       // measure a fallback if the intended face isn't ready at first paint.
       for (const delay of [150, 400, 900]) {
         window.setTimeout(remeasure, delay);
@@ -908,7 +934,7 @@ export class TerminalInstance {
 
   writeData(data: string) {
     // Phase 35: queue and coalesce. Merging chunks before the reorder
-    // pipeline is also more correct than per-chunk — a chunk boundary
+    // pipeline is also more correct than per-chunk - a chunk boundary
     // that splits a line or escape sequence now gets reassembled before
     // reorderRtlForDisplay sees it.
     this.pendingChunks.push(data);
@@ -922,12 +948,12 @@ export class TerminalInstance {
     if (this.pendingChunks.length === 0) return;
     const merged = this.pendingChunks.join("");
     this.pendingChunks = [];
-    // Phase 62.C (J.1): record (once, metadata only — Rule #1) whether
+    // Phase 62.C (J.1): record (once, metadata only - Rule #1) whether
     // OSC 8 hyperlink sequences (ESC ] 8 ;) actually reach this pane. If
     // the debug.log never shows this line while Claude prints file links,
     // the sequences are being stripped upstream (or Claude isn't emitting
-    // them) — not a linkHandler bug.
-    if (!this.oscHyperlinkLogged && merged.includes("]8;")) {
+    // them) - not a linkHandler bug.
+    if (!this.oscHyperlinkLogged && merged.includes("]8;")) {
       this.oscHyperlinkLogged = true;
       void invoke("diag_log", {
         level: "info",
@@ -935,7 +961,7 @@ export class TerminalInstance {
       }).catch(() => {});
     }
     // The reorder pipeline keys off the LIVE rtl mode (g_rtlMode), so
-    // a settings change takes effect on the very next flush — no
+    // a settings change takes effect on the very next flush - no
     // need to wait for a new pane.
     if (g_rtlMode === "bidi_reorder") {
       this.term.write(reorderRtlForDisplay(merged));
@@ -954,7 +980,7 @@ export class TerminalInstance {
 
   dispose() {
     // Phase 62.A (item E): close the right-click menu if it's open over
-    // this terminal — its actions reference this.term.
+    // this terminal - its actions reference this.term.
     dismissTerminalMenu();
     // Phase 35: flush any queued PTY chunks synchronously before the
     // rAF can fire, so the last bytes aren't lost when a pane closes

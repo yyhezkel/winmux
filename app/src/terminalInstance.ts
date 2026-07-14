@@ -911,18 +911,32 @@ export class TerminalInstance {
    */
   remeasureFont(): void {
     this.logFontMetrics("remeasure:before");
+    const fam = this.term.options.fontFamily ?? "monospace";
+    // xterm de-dupes a no-op fontFamily write (same string → no re-measure),
+    // so a plain toggle never re-measured. Instead bounce through a
+    // genuinely DIFFERENT sentinel family, then restore on the next frame —
+    // two real option changes, exactly what the manual font-swap does
+    // (Courier → Cascadia → Courier), which is the only thing that forced a
+    // correct measurement. The sentinel is visible for at most one frame.
+    const sentinel = fam.trim() === "monospace" ? "serif" : "monospace";
     try {
-      const fam = this.term.options.fontFamily ?? "monospace";
-      this.term.options.fontFamily = `${fam} `;
-      this.term.options.fontFamily = fam;
+      this.term.options.fontFamily = sentinel;
     } catch (e) {
-      console.warn("remeasureFont: font re-measure failed", e);
+      console.warn("remeasureFont: sentinel set failed", e);
     }
-    this.fitAndResize(true);
-    try {
-      this.term.refresh(0, this.term.rows - 1);
-    } catch {}
-    this.logFontMetrics("remeasure:after");
+    requestAnimationFrame(() => {
+      if (!g_terminals.has(this)) return;
+      try {
+        this.term.options.fontFamily = fam;
+      } catch (e) {
+        console.warn("remeasureFont: restore failed", e);
+      }
+      this.fitAndResize(true);
+      try {
+        this.term.refresh(0, this.term.rows - 1);
+      } catch {}
+      this.logFontMetrics("remeasure:after");
+    });
   }
 
   /**

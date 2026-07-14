@@ -940,6 +940,53 @@ export class TerminalInstance {
   }
 
   /**
+   * Explicitly load every candidate font family in the current
+   * `fontFamily` list (via the CSS Font Loading API), then re-measure.
+   *
+   * Root cause of the "improved but still slightly off" pane: at mount
+   * `document.fonts.ready` can resolve before the intended face (e.g.
+   * "Cascadia Mono") has actually been requested, so the re-measure lands
+   * on a later fallback (Consolas → 10.996px) instead of the real font
+   * (Cascadia → 11.719px). Forcing each candidate to load first pins the
+   * measurement to the same face the manual font-swap produced. Junk
+   * tokens from a malformed family name (`Courier 10,12,15 (120)` splits
+   * on its commas) simply fail to load and are ignored.
+   */
+  private async preloadFontsThenRemeasure(): Promise<void> {
+    try {
+      const size = Number(this.term.options.fontSize ?? 14);
+      const list = String(this.term.options.fontFamily ?? "");
+      const families = list
+        .split(",")
+        .map((f) => f.trim().replace(/^["']|["']$/g, ""))
+        .filter(
+          (f) =>
+            f.length > 0 &&
+            // drop CSS generic keywords — they always "resolve" and would
+            // short-circuit the wait without loading the real face.
+            !/^(monospace|serif|sans-serif|ui-monospace|system-ui|cursive|fantasy)$/i.test(
+              f,
+            ) &&
+            // a real font-face name is letters/spaces/digits/.-; anything
+            // with other chars (e.g. the malformed "15 (120)") can't load.
+            /^[\w .-]+$/.test(f),
+        );
+      await Promise.all(
+        families.map((f) =>
+          document.fonts.load(`${size}px "${f}"`).catch(() => undefined),
+        ),
+      );
+      if (typeof document.fonts.ready?.then === "function") {
+        await document.fonts.ready.catch(() => undefined);
+      }
+    } catch (e) {
+      console.warn("preloadFontsThenRemeasure: font preload failed", e);
+    }
+    if (!g_terminals.has(this)) return;
+    this.remeasureFont();
+  }
+
+  /**
    * Font-init fix: as soon as this pane's container is in the DOM and the
    * web font has loaded, run a single {@link remeasureFont}. Waits for
    * `document.fonts.ready` (covers web-font load timing) and retries per
@@ -957,7 +1004,7 @@ export class TerminalInstance {
       }
       this.fontMeasured = true;
       this.logFontMetrics("mount:connected");
-      this.remeasureFont();
+      void this.preloadFontsThenRemeasure();
     };
     const kick = () => requestAnimationFrame(run);
     const fonts =

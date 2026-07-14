@@ -390,6 +390,7 @@
   "browser.urlBar.go.tooltip": "מעבר לכתובת",
   "fm.unzip.confirmOverwrite": "התיקייה \"{dest}\" כבר קיימת — החילוץ ידרוס קבצים בתוכה. להמשיך?",
   "browser.window.urlBar.placeholder": "הקלד כתובת ולחץ Enter…",
+  "browser.tabs.new": "טאב חדש (Ctrl+T)",
   "browser.ports.refresh": "סריקה מחדש של הפורטים הפתוחים בשרת",
   "browser.ports.refresh.label": "רענון פורטים",
   "browser.ports.serverPrefix": "שרת:",

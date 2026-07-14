@@ -2,6 +2,8 @@ import {
   createEffect,
   createSignal,
   For,
+  onCleanup,
+  onMount,
   Show,
 } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
@@ -63,8 +65,9 @@ interface Props {
 const DEFAULT_GEOMETRY: Geometry = { x: 120, y: 80, w: 1100, h: 700 };
 const MIN_W = 480;
 const MIN_H = 320;
-/** Header (32) + port bar (32). Must match the CSS heights. */
-const CHROME_TOP_PX = 64;
+/** Header (32) + tab bar (26) + port bar (32). Must match the CSS
+ *  heights. Beta.3: tab bar added between the header and the port bar. */
+const CHROME_TOP_PX = 90;
 /** Bottom strip that keeps the resize grip clear of the Webview. */
 const CHROME_BOTTOM_PX = 16;
 /** Horizontal inset so the native Webview clears the left/right resize
@@ -74,6 +77,90 @@ const CHROME_SIDE_PX = 6;
 const GEOM_KEY = (id: string) => `winmux.workspace-browser-geometry.${id}`;
 const PORT_KEY = (id: string) => `winmux.workspace-browser-port.${id}`;
 const PATH_KEY = (id: string) => `winmux.workspace-browser-path.${id}`;
+// Beta.3: per-workspace tabs. Each tab captures its own (port, path) —
+// no free-form URL — matching the port-picker model of the port bar
+// below. Legacy PORT_KEY / PATH_KEY are migrated into a single tab on
+// first load, then this key takes over.
+const TABS_KEY = (id: string) => `winmux.workspace-browser-tabs.${id}`;
+const ACTIVE_TAB_KEY = (id: string) =>
+  `winmux.workspace-browser-active-tab.${id}`;
+
+/** One tab inside the workspace browser. `port`/`path` mirror what the
+ *  port bar shows — nothing else is captured; the visible label is
+ *  derived at render time from `port · path`. */
+interface BrowserTab {
+  id: string;
+  port: number | null;
+  path: string;
+}
+
+function newTabId(): string {
+  const rand = Math.floor(Math.random() * 1e9).toString(36);
+  return `tab-${Date.now().toString(36)}-${rand}`;
+}
+
+function loadTabs(
+  workspaceId: string,
+): { tabs: BrowserTab[]; activeId: string } {
+  try {
+    const raw = localStorage.getItem(TABS_KEY(workspaceId));
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const tabs: BrowserTab[] = parsed
+          .filter(
+            (t): t is BrowserTab =>
+              typeof t === "object" &&
+              t !== null &&
+              typeof (t as { id?: unknown }).id === "string" &&
+              typeof (t as { path?: unknown }).path === "string" &&
+              (typeof (t as { port?: unknown }).port === "number" ||
+                (t as { port?: unknown }).port === null),
+          )
+          .map((t) => ({ id: t.id, port: t.port, path: t.path }));
+        if (tabs.length > 0) {
+          const activeRaw = localStorage.getItem(ACTIVE_TAB_KEY(workspaceId));
+          const activeId =
+            activeRaw && tabs.some((t) => t.id === activeRaw)
+              ? activeRaw
+              : tabs[0]!.id;
+          return { tabs, activeId };
+        }
+      }
+    }
+  } catch {
+    // Corrupt entry — fall through to legacy migration.
+  }
+  // Legacy migration: build a single tab from the pre-tabs PORT_KEY /
+  // PATH_KEY so users don't lose their last-used port/path on upgrade.
+  const legacyPort = loadPort(workspaceId);
+  const legacyPath = loadPath(workspaceId);
+  const tab: BrowserTab = {
+    id: newTabId(),
+    port: legacyPort,
+    path: legacyPath,
+  };
+  return { tabs: [tab], activeId: tab.id };
+}
+
+function saveTabs(
+  workspaceId: string,
+  tabs: BrowserTab[],
+  activeId: string | null,
+): void {
+  try {
+    localStorage.setItem(TABS_KEY(workspaceId), JSON.stringify(tabs));
+    if (activeId) localStorage.setItem(ACTIVE_TAB_KEY(workspaceId), activeId);
+  } catch {
+    // quota / private mode — ignore
+  }
+}
+
+/** Human-readable label for a tab: `port · path` or "New tab" if empty. */
+function tabLabel(t: BrowserTab): string {
+  if (t.port == null) return "New tab";
+  return t.path ? `${t.port} · ${t.path}` : `${t.port}`;
+}
 
 function loadGeometry(workspaceId: string): Geometry {
   // Phase 64 (N): clamp to the viewport (stored OR default) for small
@@ -171,6 +258,14 @@ export function BrowserWindow(p: Props) {
   // nothing navigated yet → Webview hidden, empty-state/hint shown.
   const [currentUrl, setCurrentUrl] = createSignal<string | null>(null);
   const [navError, setNavError] = createSignal<string | null>(null);
+  // Beta.3: per-workspace tab list. `selectedPort` / `pathInput` above
+  // stay the LIVE editing signals; a `createEffect` below mirrors them
+  // into the active tab so the persisted tab state matches what the
+  // user just typed / picked. Tab switch goes in the other direction
+  // (tab → editors), gated by `suppressActiveSync` to avoid feedback.
+  const [tabs, setTabs] = createSignal<BrowserTab[]>([]);
+  const [activeTabId, setActiveTabId] = createSignal<string | null>(null);
+  let suppressActiveSync = false;
   // One-shot guard so the persisted "last port" auto-opens only once per
   // open session (not every time detectedPorts updates).
   let autoTried = false;
@@ -189,13 +284,48 @@ export function BrowserWindow(p: Props) {
     if (!id || id === lastWsId) return;
     lastWsId = id;
     setGeom(loadGeometry(id));
-    setSelectedPort(loadPort(id));
-    setPathInput(loadPath(id));
+    // Beta.3: load tabs (migrating legacy PORT_KEY / PATH_KEY on first
+    // run) and seed the port/path editors from the active tab.
+    const { tabs: loaded, activeId } = loadTabs(id);
+    const active = loaded.find((t) => t.id === activeId) ?? loaded[0]!;
+    suppressActiveSync = true;
+    setTabs(loaded);
+    setActiveTabId(active.id);
+    setSelectedPort(active.port);
+    setPathInput(active.path);
+    suppressActiveSync = false;
+    // Persist so the legacy migration lands even if the user just
+    // opens & closes the window without editing anything.
+    saveTabs(id, loaded, active.id);
     setCurrentUrl(null);
     setNavError(null);
     autoTried = false;
     lastShownUrl = null;
     if (p.open) p.onEnsurePorts(id);
+  });
+
+  // Beta.3: mirror the live editor state (selectedPort / pathInput)
+  // into the active tab and persist. `suppressActiveSync` lets a tab
+  // switch / workspace load set the editors without a write-back.
+  createEffect(() => {
+    const port = selectedPort();
+    const path = pathInput();
+    const activeId = activeTabId();
+    const wsId = p.workspace?.id;
+    if (!activeId || !wsId) return;
+    if (suppressActiveSync) return;
+    setTabs((prev) => {
+      let changed = false;
+      const next = prev.map((t) => {
+        if (t.id !== activeId) return t;
+        if (t.port === port && t.path === path) return t;
+        changed = true;
+        return { ...t, port, path };
+      });
+      if (!changed) return prev;
+      saveTabs(wsId, next, activeId);
+      return next;
+    });
   });
 
   // Rising edge of `open`: ensure the watcher + refresh the snapshot so
@@ -287,6 +417,95 @@ export function BrowserWindow(p: Props) {
     closeGuardSelector: ".browser-window-x",
   });
 
+  // ── Beta.3: tab operations ────────────────────────────────────────
+  const switchTab = (id: string): void => {
+    const t = tabs().find((x) => x.id === id);
+    if (!t) return;
+    const wsId = p.workspace?.id;
+    suppressActiveSync = true;
+    setActiveTabId(id);
+    setSelectedPort(t.port);
+    setPathInput(t.path);
+    suppressActiveSync = false;
+    setCurrentUrl(null);
+    setNavError(null);
+    autoTried = false;
+    lastShownUrl = null;
+    if (wsId) saveTabs(wsId, tabs(), id);
+    // Auto-navigate if the tab's port is already detected on the server.
+    if (
+      t.port != null &&
+      p.detectedPorts.some((d) => d.remote_port === t.port)
+    ) {
+      void go();
+    }
+  };
+
+  const newTab = (): void => {
+    const wsId = p.workspace?.id;
+    if (!wsId) return;
+    // Inherit the current port so exploring multiple paths on one
+    // service is one keystroke; blank if nothing's been picked yet.
+    const fresh: BrowserTab = {
+      id: newTabId(),
+      port: selectedPort(),
+      path: "",
+    };
+    const next = [...tabs(), fresh];
+    setTabs(next);
+    saveTabs(wsId, next, fresh.id);
+    switchTab(fresh.id);
+  };
+
+  const closeTab = (id: string): void => {
+    const list = tabs();
+    if (list.length <= 1) return; // never close the last tab
+    const idx = list.findIndex((t) => t.id === id);
+    if (idx === -1) return;
+    const wsId = p.workspace?.id;
+    const next = list.filter((t) => t.id !== id);
+    setTabs(next);
+    if (activeTabId() === id) {
+      // Prefer the previous tab; fall through to index 0 if we closed [0].
+      const neighbor = next[Math.max(0, idx - 1)] ?? next[0]!;
+      if (wsId) saveTabs(wsId, next, neighbor.id);
+      switchTab(neighbor.id);
+    } else if (wsId) {
+      saveTabs(wsId, next, activeTabId());
+    }
+  };
+
+  // Ctrl+T / Ctrl+W / Ctrl+Tab while the browser window is open. Uses
+  // window.addEventListener so it fires whether focus is on the port
+  // bar, the webview host div, or nowhere in particular.
+  onMount(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!p.open) return;
+      if (p.anyModalOpen()) return;
+      const meta = e.ctrlKey || e.metaKey;
+      if (!meta) return;
+      if (e.key === "t" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        newTab();
+      } else if (e.key === "w" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        const id = activeTabId();
+        if (id) closeTab(id);
+      } else if (e.key === "Tab") {
+        e.preventDefault();
+        const list = tabs();
+        if (list.length < 2) return;
+        const idx = list.findIndex((t) => t.id === activeTabId());
+        if (idx === -1) return;
+        const delta = e.shiftKey ? -1 : 1;
+        const nxt = list[(idx + delta + list.length) % list.length]!;
+        switchTab(nxt.id);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    onCleanup(() => window.removeEventListener("keydown", handler));
+  });
+
   // Resolve the chosen remote port to a local tunnel port (reusing an
   // existing forward when present, else opening one) and point the
   // Webview at it.
@@ -350,9 +569,57 @@ export function BrowserWindow(p: Props) {
             <IconClose size={14} />
           </button>
         </div>
+        {/* Beta.3: tab bar. Each tab is a (port, path) pair — no
+            URL — matching the port-picker model of the port bar below.
+            Height (26) + header (32) + port bar (32) = CHROME_TOP_PX. */}
+        <div class="browser-window-tabs">
+          <div class="bw-tabs-list">
+            <For each={tabs()}>
+              {(tab) => (
+                <div
+                  class={`bw-tab${
+                    activeTabId() === tab.id ? " bw-tab-active" : ""
+                  }`}
+                  onClick={() => switchTab(tab.id)}
+                  onAuxClick={(e) => {
+                    // Middle-click closes the tab (button === 1).
+                    if (e.button === 1) {
+                      e.preventDefault();
+                      closeTab(tab.id);
+                    }
+                  }}
+                  title={tabLabel(tab)}
+                >
+                  <span class="bw-tab-label">{tabLabel(tab)}</span>
+                  <Show when={tabs().length > 1}>
+                    <button
+                      class="bw-tab-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeTab(tab.id);
+                      }}
+                      title={t("common.close")}
+                      aria-label={t("common.close")}
+                    >
+                      <IconClose size={10} />
+                    </button>
+                  </Show>
+                </div>
+              )}
+            </For>
+            <button
+              class="bw-tab-new"
+              onClick={newTab}
+              title={t("browser.tabs.new")}
+              aria-label={t("browser.tabs.new")}
+            >
+              +
+            </button>
+          </div>
+        </div>
         {/* Phase 62.C: port bar replaces the free URL bar. Refresh ·
-            remote-port dropdown · path · Go. Height must stay in sync
-            with CHROME_TOP_PX (header 32 + this 32 = 64). */}
+            remote-port dropdown · path · Go. Height (32) stays in sync
+            with CHROME_TOP_PX (header 32 + tabs 26 + this 32 = 90). */}
         <div class="browser-window-portbar">
           <button
             class="bw-port-btn"

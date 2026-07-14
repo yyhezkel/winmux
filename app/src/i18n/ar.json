@@ -390,6 +390,7 @@
   "browser.urlBar.go.tooltip": "الانتقال إلى العنوان",
   "fm.unzip.confirmOverwrite": "المجلد \"{dest}\" موجود بالفعل — سيؤدي الاستخراج إلى استبدال الملفات بداخله. هل تريد المتابعة؟",
   "browser.window.urlBar.placeholder": "أدخل العنوان واضغط Enter…",
+  "browser.tabs.new": "علامة تبويب جديدة (Ctrl+T)",
   "browser.ports.refresh": "إعادة فحص المنافذ المفتوحة على الخادم",
   "browser.ports.refresh.label": "تحديث المنافذ",
   "browser.ports.serverPrefix": "الخادم:",

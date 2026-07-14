@@ -4915,11 +4915,107 @@ button.big { padding: 10px 24px; font-size: var(--w-fs-xl); }
   background: var(--w-error, #f7768e);
   border-color: var(--w-error, #f7768e);
 }
+/* Beta.3: tab bar between the header and the port bar. Each tab is a
+   (port, path) pair — no free-form URL. Height (26) + header (32) +
+   port bar (32) = CHROME_TOP_PX (90) in BrowserWindow.tsx. */
+.browser-window-tabs {
+  height: 26px;
+  flex: 0 0 26px;
+  display: flex;
+  align-items: stretch;
+  background: var(--w-surface, #161b22);
+  border-bottom: 1px solid var(--w-border, #21262d);
+  overflow: hidden;
+}
+.bw-tabs-list {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: stretch;
+  gap: 2px;
+  padding: 3px 4px 0 4px;
+  overflow-x: auto;
+  /* Tabs always read left-to-right (matches Chrome, keeps the bar
+     visually stable when the app language flips to RTL). */
+  direction: ltr;
+}
+.bw-tabs-list::-webkit-scrollbar { height: 0; }
+.bw-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  min-width: 60px;
+  max-width: 220px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  color: var(--w-text-secondary, #7d8590);
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+.bw-tab:hover {
+  background: var(--w-surface-raised, #1c232c);
+  color: var(--w-text-primary, #e6edf3);
+}
+.bw-tab-active {
+  background: var(--w-surface-raised, #1c232c);
+  color: var(--w-text-primary, #e6edf3);
+  border-color: var(--w-border, #21262d);
+}
+.bw-tab-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bw-tab-close {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  opacity: 0.6;
+}
+.bw-tab-close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+.bw-tab-new {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--w-text-secondary, #7d8590);
+  cursor: pointer;
+  width: 28px;
+  font-size: 16px;
+  padding: 0;
+  line-height: 1;
+  border-radius: 4px;
+  margin-inline: 2px;
+}
+.bw-tab-new:hover {
+  color: var(--w-text-primary, #e6edf3);
+  background: var(--w-surface-raised, #1c232c);
+}
+
 /* Phase 60: URL bar between the header and the slot. Heights here
    MUST stay in sync with CHROME_TOP_PX in BrowserWindow.tsx (header
-   32 + urlbar 32 = 64). */
+   32 + tabs 26 + portbar 32 = 90). */
 /* Phase 62.C: port bar — replaces the free URL bar. Refresh · server:
-   port dropdown · path · Go. Height (32) + header (32) = CHROME_TOP_PX. */
+   port dropdown · path · Go. Height (32) + header (32) + tabs (26)
+   = CHROME_TOP_PX. */
 .browser-window-portbar {
   height: 32px;
   flex: 0 0 32px;

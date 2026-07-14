@@ -1,4 +1,4 @@
-import { createSignal, createEffect, onCleanup, For, Show } from "solid-js";
+import { createSignal, createEffect, on, onCleanup, For, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t, currentLanguage } from "./i18n";
 import { formatResetLocal } from "./claudeUsageFmt";
@@ -38,7 +38,6 @@ function color(pct: number): string {
 
 export function ClaudeUsageIndicator(p: Props) {
   const [usage, setUsage] = createSignal<ClaudeUsage | null>(null);
-  const [loading, setLoading] = createSignal(false);
 
   // Track viewport width so we can decide how many metrics fit.
   const [vw, setVw] = createSignal(
@@ -50,9 +49,17 @@ export function ClaudeUsageIndicator(p: Props) {
     onCleanup(() => window.removeEventListener("resize", onResize));
   }
 
+  // Bugfix (beta.3): `loading` MUST NOT be read from inside the effect
+  // below — a reactive dependency loop caused `fetchUsage` to fire every
+  // ~21 s (SSH exec timeout) instead of every `refreshMinutes`, opening
+  // a new `claude -p /usage` on the remote each time, orphaning the
+  // previous one, exhausting sshd's MaxSessions, and killing the whole
+  // SSH connection. `inFlight` is a plain `let` (untracked) so reads
+  // inside fetchUsage don't subscribe the effect.
+  let inFlight = false;
   const fetchUsage = async (force = false) => {
-    if (!p.workspaceId || !p.live || loading()) return;
-    setLoading(true);
+    if (!p.workspaceId || !p.live || inFlight) return;
+    inFlight = true;
     try {
       const u = await invoke<ClaudeUsage>("claude_usage_fetch", {
         workspaceId: p.workspaceId,
@@ -62,24 +69,28 @@ export function ClaudeUsageIndicator(p: Props) {
     } catch {
       // Leave the last-known value in place; the tab surfaces the real error.
     } finally {
-      setLoading(false);
+      inFlight = false;
     }
   };
 
-  // Fetch on (workspace, live) change, then on the auto-refresh cadence.
-  createEffect(() => {
-    const ws = p.workspaceId;
-    const live = p.live;
-    if (!ws || !live) {
-      setUsage(null);
-      return;
-    }
-    void fetchUsage();
-    const mins = p.refreshMinutes;
-    if (!mins || mins <= 0) return;
-    const id = setInterval(() => void fetchUsage(), mins * 60_000);
-    onCleanup(() => clearInterval(id));
-  });
+  // Fetch on (workspace, live, refreshMinutes) change, then on the
+  // auto-refresh cadence. Explicit `on([...])` locks the dependency list
+  // so nothing read inside the body can retrigger the effect.
+  createEffect(
+    on(
+      () => [p.workspaceId, p.live, p.refreshMinutes] as const,
+      ([ws, live, mins]) => {
+        if (!ws || !live) {
+          setUsage(null);
+          return;
+        }
+        void fetchUsage();
+        if (!mins || mins <= 0) return;
+        const id = setInterval(() => void fetchUsage(), mins * 60_000);
+        onCleanup(() => clearInterval(id));
+      },
+    ),
+  );
 
   // All metrics, most-critical first is NOT assumed — session/week/top-model in
   // a stable order so the pill doesn't reshuffle on every refresh.

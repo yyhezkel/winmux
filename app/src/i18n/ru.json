@@ -390,6 +390,7 @@
   "browser.urlBar.go.tooltip": "Перейти по адресу",
   "fm.unzip.confirmOverwrite": "Папка \"{dest}\" уже существует — распаковка перезапишет файлы внутри. Продолжить?",
   "browser.window.urlBar.placeholder": "Введите URL и нажмите Enter…",
+  "browser.tabs.new": "Новая вкладка (Ctrl+T)",
   "browser.ports.refresh": "Повторно просканировать открытые порты на сервере",
   "browser.ports.refresh.label": "Обновить порты",
   "browser.ports.serverPrefix": "сервер:",

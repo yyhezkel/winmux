@@ -17,6 +17,11 @@ import {
   DEFAULT_SHORTCUTS,
   DEFAULT_CLAUDE_SETTINGS,
   DEFAULT_CLAUDE_USAGE_SETTINGS,
+  DEFAULT_HOOK_NOTIFICATIONS,
+  HookType,
+  HookNotificationSettings,
+  INTERACTIVE_HOOKS,
+  OBSERVABILITY_HOOKS,
 } from "./settings";
 import { applyI18nSettings, LANGUAGES, t } from "./i18n";
 import { IconChevronDown, IconChevronRight, IconRefreshCcw } from "./icons";
@@ -33,10 +38,15 @@ interface Props {
   activeWorkspaceId?: string;
 }
 
-type Tab = "general" | "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "addons" | "updates" | "logs" | "language" | "stt";
+type Tab = "general" | "theme" | "font" | "terminal" | "shortcuts" | "claude" | "hooks" | "notifications" | "hooksNotif" | "addons" | "updates" | "logs" | "language" | "stt";
+
+// beta.3: sub-tab within the "Hooks & Notifications" card.
+type HooksNotifSubTab = "hooks" | "sound";
 
 export function SettingsModal(p: Props) {
   const [tab, setTab] = createSignal<Tab>("theme");
+  // beta.3: sub-tab inside the "Hooks & Notifications" card.
+  const [hnSubTab, setHnSubTab] = createSignal<HooksNotifSubTab>("hooks");
   const [presets, setPresets] = createSignal<PresetEntry[]>([]);
   const [fonts, setFonts] = createSignal<FontFamilies>({ ui: [], mono: [] });
   const [advanced, setAdvanced] = createSignal(false);
@@ -218,7 +228,7 @@ export function SettingsModal(p: Props) {
 
           <div class="settings-body">
             <nav class="settings-tabs">
-              <For each={["general", "theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "addons", "updates", "logs", "language", "stt"] as Tab[]}>
+              <For each={["general", "theme", "font", "terminal", "shortcuts", "claude", "hooks", "notifications", "hooksNotif", "addons", "updates", "logs", "language", "stt"] as Tab[]}>
                 {(name) => (
                   <button
                     class={`settings-tab ${tab() === name ? "active" : ""}`}
@@ -809,6 +819,170 @@ export function SettingsModal(p: Props) {
                     )}
                   </For>
                 </section>
+              </Show>
+
+              {/* ── beta.3: Hooks & Notifications card ─────────────────
+                    Two-tabbed card that layers on top of the existing legacy
+                    "hooks" and "notifications" tabs. The old tabs cover CLI-
+                    install (policy engine / matcher_mode) + per-event toast
+                    toggles. This one is coarser:
+                      Tab 1 (Hooks) = which hook types the backend PROCESSES
+                      Tab 2 (Sound) = which of those play a sound on the toast
+                    Storage lives on `settings.hook_notifications` (kept
+                    separate from `settings.hooks` to avoid a schema break). */}
+              <Show when={tab() === "hooksNotif"}>
+                {(() => {
+                  const getHN = (): HookNotificationSettings =>
+                    p.settings.hook_notifications ?? DEFAULT_HOOK_NOTIFICATIONS;
+                  const isEnabled = (ty: HookType) =>
+                    getHN().enabled_types.includes(ty);
+                  const isSound = (ty: HookType) => getHN().sound_types.includes(ty);
+                  const toggleEnabled = (ty: HookType, next: boolean) => {
+                    const cur = getHN();
+                    const set = new Set(cur.enabled_types);
+                    if (next) set.add(ty);
+                    else set.delete(ty);
+                    // Turning a hook OFF also drops it from sound_types — a
+                    // sound-only entry with no processing would never fire.
+                    const soundSet = new Set(cur.sound_types);
+                    if (!next) soundSet.delete(ty);
+                    update("hook_notifications", {
+                      ...cur,
+                      enabled_types: [...set],
+                      sound_types: [...soundSet],
+                    });
+                  };
+                  const toggleSound = (ty: HookType, next: boolean) => {
+                    const cur = getHN();
+                    const set = new Set(cur.sound_types);
+                    if (next) set.add(ty);
+                    else set.delete(ty);
+                    update("hook_notifications", {
+                      ...cur,
+                      sound_types: [...set],
+                    });
+                  };
+                  const category = (ty: HookType): "blocking" | "passive" =>
+                    ty === "pre-tool-use" ? "blocking" : "passive";
+                  const rowLabel = (ty: HookType) =>
+                    t(`hooksNotif.type.${ty}.label`);
+                  const rowHint = (ty: HookType) => t(`hooksNotif.type.${ty}.hint`);
+
+                  const HookRow = (
+                    ty: HookType,
+                    mode: "enable" | "sound",
+                  ) => {
+                    const checked = mode === "enable" ? isEnabled(ty) : isSound(ty);
+                    const parentOff = mode === "sound" && !isEnabled(ty);
+                    const masterOff =
+                      mode === "sound" && !getHN().sound_master;
+                    const disabled = parentOff || masterOff;
+                    const onChange = mode === "enable" ? toggleEnabled : toggleSound;
+                    return (
+                      <label
+                        class={`settings-checkbox hooksNotif-row ${
+                          disabled ? "hooksNotif-row-dim" : ""
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked && !disabled}
+                          disabled={disabled}
+                          onChange={(e) => onChange(ty, e.currentTarget.checked)}
+                        />
+                        <span class="hooksNotif-row-label">
+                          <span class="hooksNotif-row-name">{rowLabel(ty)}</span>
+                          <span class="hooksNotif-row-hint">{rowHint(ty)}</span>
+                        </span>
+                        <span
+                          class={`hooksNotif-badge hooksNotif-badge-${category(ty)}`}
+                        >
+                          {category(ty) === "blocking"
+                            ? t("hooksNotif.badge.blocking")
+                            : t("hooksNotif.badge.passive")}
+                        </span>
+                        {ty === "session-start" && (
+                          <span class="hooksNotif-deprecated">
+                            {t("hooksNotif.deprecated")}
+                          </span>
+                        )}
+                      </label>
+                    );
+                  };
+                  return (
+                    <section>
+                      <h4>{t("hooksNotif.title")}</h4>
+                      <div class="hooksNotif-tabs">
+                        <button
+                          class={`hooksNotif-tab ${hnSubTab() === "hooks" ? "active" : ""}`}
+                          onClick={() => setHnSubTab("hooks")}
+                        >
+                          {t("hooksNotif.tab.hooks")}
+                        </button>
+                        <button
+                          class={`hooksNotif-tab ${hnSubTab() === "sound" ? "active" : ""}`}
+                          onClick={() => setHnSubTab("sound")}
+                        >
+                          {t("hooksNotif.tab.sound")}
+                        </button>
+                      </div>
+
+                      <Show when={hnSubTab() === "hooks"}>
+                        <div class="hooksNotif-group">
+                          <h5 class="hooksNotif-group-head">
+                            {t("hooksNotif.group.interactive")}
+                          </h5>
+                          <For each={INTERACTIVE_HOOKS}>
+                            {(ty) => HookRow(ty, "enable")}
+                          </For>
+                        </div>
+                        <div class="hooksNotif-group">
+                          <h5 class="hooksNotif-group-head">
+                            {t("hooksNotif.group.observability")}
+                          </h5>
+                          <For each={OBSERVABILITY_HOOKS}>
+                            {(ty) => HookRow(ty, "enable")}
+                          </For>
+                        </div>
+                      </Show>
+
+                      <Show when={hnSubTab() === "sound"}>
+                        <label class="settings-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={getHN().sound_master}
+                            onChange={(e) =>
+                              update("hook_notifications", {
+                                ...getHN(),
+                                sound_master: e.currentTarget.checked,
+                              })
+                            }
+                          />
+                          <span>{t("hooksNotif.sound_master")}</span>
+                        </label>
+                        <p class="settings-hint">
+                          {t("hooksNotif.sound_master.hint")}
+                        </p>
+                        <div class="hooksNotif-group">
+                          <h5 class="hooksNotif-group-head">
+                            {t("hooksNotif.group.interactive")}
+                          </h5>
+                          <For each={INTERACTIVE_HOOKS}>
+                            {(ty) => HookRow(ty, "sound")}
+                          </For>
+                        </div>
+                        <div class="hooksNotif-group">
+                          <h5 class="hooksNotif-group-head">
+                            {t("hooksNotif.group.observability")}
+                          </h5>
+                          <For each={OBSERVABILITY_HOOKS}>
+                            {(ty) => HookRow(ty, "sound")}
+                          </For>
+                        </div>
+                      </Show>
+                    </section>
+                  );
+                })()}
               </Show>
 
               {/* ── Updates ──────────────────────────────────────────── */}

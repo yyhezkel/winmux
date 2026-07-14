@@ -4,6 +4,7 @@
 //! pattern. Mutations emit `settings:changed` to the frontend so live theme
 //! updates from the CLI reflect into the UI without a reload.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,92 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{config_dir_pub, dlog, AppState};
+
+// ─── beta.3: hook-type enum + per-hook enable/sound settings ───────────────
+
+/// beta.3: canonical list of Claude Code hook types. Serialized in the
+/// kebab-case wire form ("pre-tool-use" etc.) so it round-trips with the
+/// existing hook `subkind` strings the CLI emits (see rpc_server.rs).
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Hash, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum HookType {
+    PreToolUse,
+    Notification,
+    Stop,
+    SessionEnd,
+    PostToolUse,
+    SubagentStop,
+    UserPromptSubmit,
+    PreCompact,
+    SessionStart,
+}
+
+/// beta.3: per-hook toggles: which types the backend actually processes and
+/// which of those play a sound on the toast.
+///
+/// Migration policy (see `default_hook_notifications` / `migrate_settings`):
+/// when an older settings.json has no `hook_notifications` object, the
+/// defaults kick in — the interactive-4 (PreToolUse / Notification / Stop /
+/// SessionEnd) are enabled; the interactive-3 (PreToolUse / Notification /
+/// Stop) additionally get sound; sound_master starts on. The verbose
+/// observability hooks (PostToolUse / SubagentStop / UserPromptSubmit /
+/// PreCompact / SessionStart) are off across the board.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct HookSettings {
+    #[serde(default = "default_enabled_types")]
+    pub enabled_types: HashSet<HookType>,
+    #[serde(default = "default_sound_types")]
+    pub sound_types: HashSet<HookType>,
+    #[serde(default = "default_true")]
+    pub sound_master: bool,
+}
+
+fn default_enabled_types() -> HashSet<HookType> {
+    let mut s = HashSet::new();
+    s.insert(HookType::PreToolUse);
+    s.insert(HookType::Notification);
+    s.insert(HookType::Stop);
+    s.insert(HookType::SessionEnd);
+    s
+}
+
+fn default_sound_types() -> HashSet<HookType> {
+    let mut s = HashSet::new();
+    s.insert(HookType::PreToolUse);
+    s.insert(HookType::Notification);
+    s.insert(HookType::Stop);
+    s
+}
+
+impl Default for HookSettings {
+    fn default() -> Self {
+        Self {
+            enabled_types: default_enabled_types(),
+            sound_types: default_sound_types(),
+            sound_master: true,
+        }
+    }
+}
+
+/// beta.3: convert a wire subkind ("pre-tool-use", "notification", …) to the
+/// enum. Returns None for the retired `session-start` on legacy CLI 1.1.0 or
+/// anything unknown.
+pub(crate) fn hook_type_from_subkind(s: &str) -> Option<HookType> {
+    match s {
+        "pre-tool-use" => Some(HookType::PreToolUse),
+        "notification" => Some(HookType::Notification),
+        "stop" => Some(HookType::Stop),
+        "session-end" => Some(HookType::SessionEnd),
+        "post-tool-use" => Some(HookType::PostToolUse),
+        "subagent-stop" => Some(HookType::SubagentStop),
+        "user-prompt-submit" => Some(HookType::UserPromptSubmit),
+        "pre-compact" => Some(HookType::PreCompact),
+        "session-start" => Some(HookType::SessionStart),
+        _ => None,
+    }
+}
 
 // ─── data model ────────────────────────────────────────────────────────────
 
@@ -549,6 +636,19 @@ pub(crate) struct Settings {
     /// `default = true`.
     #[serde(default = "default_true")]
     pub persist_browser_sessions: bool,
+    /// beta.3: which hook types the backend processes, and which of those
+    /// play a sound on the toast. Kept in its own struct so the settings.rs
+    /// `Hooks` block (policy engine / matcher_mode / auto_install) stays
+    /// scoped to CLI-side hook installation, while this new struct is
+    /// purely about desktop-side event routing + sound feedback.
+    ///
+    /// **Naming note:** the task brief called this field `hooks`, but that
+    /// name is taken by the existing policy-engine struct. Named
+    /// `hook_notifications` here to preserve backwards-compat without
+    /// migrating the old field. `#[serde(default)]` fills defaults when a
+    /// pre-beta.3 settings.json loads.
+    #[serde(default)]
+    pub hook_notifications: HookSettings,
 }
 
 fn default_sidebar_mode() -> String {
@@ -842,6 +942,7 @@ impl Default for Settings {
             floating_windows: FloatingWindows::default(),
             logs: LogsSettings::default(),
             persist_browser_sessions: true,
+            hook_notifications: HookSettings::default(),
         }
     }
 }
@@ -1318,7 +1419,7 @@ fn insert_at_path(root: &mut Value, path: &str, leaf: Value) -> Result<(), Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{migrate_settings, MigrationFlags, Settings, DEFAULT_MANIFEST_URL};
+    use super::{migrate_settings, HookType, MigrationFlags, Settings, DEFAULT_MANIFEST_URL};
 
     #[test]
     fn migrates_placeholder_manifest_url() {
@@ -1384,5 +1485,63 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert!(!back.auto_connect_on_workspace_select);
+    }
+
+    #[test]
+    fn beta3_hook_settings_default_is_interactive_four() {
+        let s = Settings::default().hook_notifications;
+        // Interactive-4 enabled.
+        assert!(s.enabled_types.contains(&HookType::PreToolUse));
+        assert!(s.enabled_types.contains(&HookType::Notification));
+        assert!(s.enabled_types.contains(&HookType::Stop));
+        assert!(s.enabled_types.contains(&HookType::SessionEnd));
+        // Observability off by default.
+        assert!(!s.enabled_types.contains(&HookType::PostToolUse));
+        assert!(!s.enabled_types.contains(&HookType::SubagentStop));
+        assert!(!s.enabled_types.contains(&HookType::UserPromptSubmit));
+        assert!(!s.enabled_types.contains(&HookType::PreCompact));
+        assert!(!s.enabled_types.contains(&HookType::SessionStart));
+        // Interactive-3 sound-on.
+        assert!(s.sound_types.contains(&HookType::PreToolUse));
+        assert!(s.sound_types.contains(&HookType::Notification));
+        assert!(s.sound_types.contains(&HookType::Stop));
+        // SessionEnd enabled but silent by default.
+        assert!(!s.sound_types.contains(&HookType::SessionEnd));
+        assert!(s.sound_master);
+    }
+
+    #[test]
+    fn beta3_pre_hook_notifications_settings_json_populates_defaults() {
+        // A settings.json written before beta.3 has no `hook_notifications`
+        // key. The migration must fill it with the interactive-4 default
+        // (see `default_hook_notifications`).
+        let json = r##"{"version":1,"theme":{"preset":"x","accent":"#000","background":"#000","surface":"#000","border":"#000","text_primary":"#000","text_secondary":"#000","success":"#000","warning":"#000","error":"#000","ansi":{"black":"#000","red":"#000","green":"#000","yellow":"#000","blue":"#000","magenta":"#000","cyan":"#000","white":"#000","bright_black":"#000","bright_red":"#000","bright_green":"#000","bright_yellow":"#000","bright_blue":"#000","bright_magenta":"#000","bright_cyan":"#000","bright_white":"#000"}},"font":{"ui_family":"x","ui_size_pt":13,"terminal_family":"x","terminal_size_pt":13},"terminal":{"cursor_style":"bar","scrollback_lines":1000,"bidi_enabled":true,"allow_proposed_api":true},"hooks":{"enabled":true,"agents":[],"policy_preset":"default"},"notifications":{"toast_enabled":true,"sound_enabled":false},"updates":{"check_on_startup":true,"auto_download":false}}"##;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        // Serde default kicked in — sound_master + interactive-4 enabled.
+        assert!(s.hook_notifications.sound_master);
+        assert!(s.hook_notifications.enabled_types.contains(&HookType::Stop));
+        assert!(!s
+            .hook_notifications
+            .enabled_types
+            .contains(&HookType::PostToolUse));
+    }
+
+    #[test]
+    fn beta3_hook_type_wire_form_is_kebab_case() {
+        // The enum serializes back to the same kebab-case strings the CLI
+        // emits (see rpc_server.rs subkind dispatch). Locked here so a
+        // rename can't silently break the wire protocol.
+        assert_eq!(
+            serde_json::to_string(&HookType::PreToolUse).unwrap(),
+            "\"pre-tool-use\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HookType::SessionEnd).unwrap(),
+            "\"session-end\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HookType::UserPromptSubmit).unwrap(),
+            "\"user-prompt-submit\""
+        );
     }
 }

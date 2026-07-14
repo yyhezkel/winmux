@@ -810,6 +810,46 @@ function App() {
     }
     return s;
   };
+  // beta.3 Fix 4: workspace_ids that received a *passive* hook (pre-tool-use
+  // audit, stop, notification, or one of the new observability subkinds) in
+  // the last 4 seconds. Feeds a soft amber breathing pulse on the sidebar
+  // row so Yossi sees "something happened over there" without a modal ask.
+  // Cleared by 4s decay + the row's own tick (App re-renders on any feed
+  // change; the cutoff is recomputed each read). Blocking items are already
+  // caught by `waitingWorkspaceIds` — this only adds the passive stream.
+  const HOOK_PULSE_WINDOW_MS = 4_000;
+  const activeHookWorkspaceIds = (): Set<string> => {
+    const s = new Set<string>();
+    const now = Date.now();
+    const passiveSubkinds = new Set([
+      "pre-tool-use",
+      "stop",
+      "notification",
+      "session-end",
+      "post-tool-use",
+      "subagent-stop",
+      "user-prompt-submit",
+      "pre-compact",
+    ]);
+    for (const it of feedItems()) {
+      if (!it.workspace_id) continue;
+      if (!passiveSubkinds.has(it.subkind)) continue;
+      if (now - it.created_ms > HOOK_PULSE_WINDOW_MS) continue;
+      s.add(it.workspace_id);
+    }
+    return s;
+  };
+  // beta.3 Fix 4: 250ms ticker so the pulse fades on its own after 4s even
+  // when no new feed items arrive. Piggybacks a signal `pulseTick` that
+  // `activeHookWorkspaceIds` reads through (see below).
+  const [pulseTick, setPulseTick] = createSignal(0);
+  const pulseTimer = setInterval(() => setPulseTick((n) => n + 1), 250);
+  onCleanup(() => clearInterval(pulseTimer));
+  // Re-evaluate on tick — the closure reads pulseTick() so Solid tracks the dep.
+  const activeHookWorkspaceIdsReactive = (): Set<string> => {
+    void pulseTick();
+    return activeHookWorkspaceIds();
+  };
 
   // Phase 30 → Phase 31: live-update the OS window title from the
   // FOCUSED pane's effective identity (pane override falls back to
@@ -2205,6 +2245,7 @@ function App() {
           activeId={file().active_workspace_id}
           connectedIds={liveWorkspaceIds()}
           waitingWorkspaceIds={waitingWorkspaceIds()}
+          hookPulseWorkspaceIds={activeHookWorkspaceIdsReactive()}
           pendingNotifCount={paneNotified().size}
           groups={file().groups ?? []}
           onGroupCreate={(name, color) => {

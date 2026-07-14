@@ -110,6 +110,21 @@ func (m *Manager) EnsureWorkspace(id, name string) (Workspace, error) {
 func (m *Manager) ListWorkspaces() ([]Workspace, error)     { return m.store.ListWorkspaces() }
 func (m *Manager) GetWorkspace(id string) (Workspace, error) { return m.store.GetWorkspace(id) }
 
+// WorkspaceNameByID resolves a workspace id → display name (beta.3 Fix 3).
+// Returns ("", false) when the workspace was deleted or the id is unknown so
+// the caller can fall back to an empty prefix rather than surfacing a stale
+// name. Cheap Store lookup — no lock beyond what the store already holds.
+func (m *Manager) WorkspaceNameByID(id string) (string, bool) {
+	if id == "" {
+		return "", false
+	}
+	w, err := m.store.GetWorkspace(id)
+	if err != nil {
+		return "", false
+	}
+	return w.Name, true
+}
+
 // DeleteWorkspace cascades (kills sessions + their state) and drops live subs.
 func (m *Manager) DeleteWorkspace(id string) error {
 	sessions, _ := m.store.ListSessions(id)
@@ -187,6 +202,21 @@ func (m *Manager) maybePush(ev Event) {
 	}
 	log.Printf("push: fanout event=%s session=%s → %d device(s)", ev.Type, ev.SessionID, len(targets))
 	frame := eventPayloadMap(ev)
+	// beta.3 Fix 3: resolve the workspace name so the phone can render
+	// "[<workspace>] tool needs approval" instead of just the session id.
+	// Both fields are always present in the frame (empty string when the
+	// lookup fails) so the mobile client can rely on the key existing.
+	if s, err := m.store.GetSession(ev.SessionID); err == nil {
+		frame["workspace_id"] = s.WorkspaceID
+		if name, ok := m.WorkspaceNameByID(s.WorkspaceID); ok {
+			frame["workspace_name"] = name
+		} else {
+			frame["workspace_name"] = ""
+		}
+	} else {
+		frame["workspace_id"] = ""
+		frame["workspace_name"] = ""
+	}
 	notifier := m.notifier
 	go func() {
 		for _, id := range targets {

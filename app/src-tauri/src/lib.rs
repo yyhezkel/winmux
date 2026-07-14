@@ -995,6 +995,13 @@ pub(crate) fn find_workspace_for_pane(file: &WorkspacesFile, pane_id: &str) -> O
     None
 }
 
+/// beta.3 Fix 2: resolve a workspace id → user-visible name. Returns None
+/// when the workspace was deleted or the caller passed an id that never
+/// existed. Cheap linear scan (workspace count is small in practice).
+pub(crate) fn workspace_name_by_id(file: &WorkspacesFile, id: &str) -> Option<String> {
+    file.workspaces.iter().find(|w| w.id == id).map(|w| w.name.clone())
+}
+
 fn set_split_ratio_in(node: LayoutNode, target: &str, new_ratio: f32) -> LayoutNode {
     match node {
         p @ LayoutNode::Pane { .. } => p,

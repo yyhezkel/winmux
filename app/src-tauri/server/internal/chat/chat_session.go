@@ -80,6 +80,11 @@ type SessionManager struct {
 	// chat path is testable before 69.C lands).
 	rpcAddr   string
 	paneIndex map[string]string // "mob_<sessionID>" -> sessionID
+
+	// beta.3 Fix 3: optional workspace-id → name resolver, injected by the
+	// workspace manager via SetWorkspaceResolver so chat_hookrpc can attach
+	// a workspace label to emitted hook_request events. Nil in tests.
+	wsResolver func(id string) (string, bool)
 }
 
 type chatConfig struct {

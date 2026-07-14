@@ -13,9 +13,9 @@ use crate::{
     collect_panes, collect_panes_with_kind, config_dir_pub, decide_feed,
     find_workspace_for_pane, new_pane_id, new_workspace_id,
     persist, split_pane_in,
-    update_pane_in, write_to_session, AppState, Connection, CreateInput, EnvVar, FeedItem,
-    FeedItemState, LayoutNode, NotificationItem, PaneKind, Session, SplitDirection, Workspace,
-    NOTIF_COUNTER,
+    update_pane_in, workspace_name_by_id, write_to_session, AppState, Connection, CreateInput,
+    EnvVar, FeedItem, FeedItemState, LayoutNode, NotificationItem, PaneKind, Session,
+    SplitDirection, Workspace, NOTIF_COUNTER,
 };
 
 const FEED_MAX_ITEMS_LIMIT: usize = 50;
@@ -218,15 +218,34 @@ fn translate_key(key: &str) -> Vec<u8> {
 }
 
 fn show_toast(title: &str, body: &str) {
+    show_toast_with_sound(title, body, false);
+}
+
+/// beta.3 (Fix 1): fire a toast, optionally with a platform-native "default"
+/// sound. Callers decide `with_sound` from `hook_notifications.sound_master`
+/// AND `sound_types.contains(subkind)`. Kept as a separate fn so
+/// pre-beta.3 call sites (block toast, updater banner) stay silent.
+fn show_toast_with_sound(title: &str, body: &str, with_sound: bool) {
     let title = title.to_string();
     let body = body.to_string();
     std::thread::spawn(move || {
-        let r = notify_rust::Notification::new()
-            .summary(&title)
-            .body(&body)
-            .appname("winmux")
-            .show();
-        if let Err(e) = r {
+        let mut n = notify_rust::Notification::new();
+        n.summary(&title).body(&body).appname("winmux");
+        if with_sound {
+            #[cfg(target_os = "windows")]
+            {
+                n.sound_name("Default");
+            }
+            #[cfg(target_os = "macos")]
+            {
+                n.sound_name("Default");
+            }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            {
+                n.sound_name("dialog-information");
+            }
+        }
+        if let Err(e) = n.show() {
             tracing::warn!("toast failed: {e}");
         }
     });
@@ -244,11 +263,18 @@ fn clip(s: &str, max: usize) -> String {
 
 /// Phase 66 (KK): turn a raw hook payload into a friendly (title, body)
 /// toast instead of dumping the JSON. `subkind` is the hook event
-/// (session-start / session-end / stop / notification / pre-tool-use).
-/// `lang` is the UI language (he/ar/ru/en) — Hebrew is first-class; ar/ru
-/// fall back to English for the toast text (the Settings labels are fully
-/// translated separately).
-fn humanize_notification(subkind: &str, payload: &Value, lang: &str) -> (String, String) {
+/// (session-start / session-end / stop / notification / pre-tool-use / …).
+/// `ws_name` is the resolved workspace label; when non-empty, it is
+/// prepended in `[ws]` form to the body so Yossi can tell which client
+/// a toast belongs to when several projects are running side-by-side
+/// (beta.3 Fix 2). `lang` is the UI language (he/ar/ru/en) — Hebrew is
+/// first-class; ar/ru fall back to English for the toast text (the
+/// Settings labels are fully translated separately).
+///
+/// beta.3 Fix 5: added the four Observability hooks (PostToolUse /
+/// SubagentStop / UserPromptSubmit / PreCompact) so `_ =>` no longer
+/// swallows them into an empty body.
+fn humanize_notification(subkind: &str, payload: &Value, ws_name: &str, lang: &str) -> (String, String) {
     let cwd = payload.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
     let tool = payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
     let cmd = payload
@@ -272,43 +298,70 @@ fn humanize_notification(subkind: &str, payload: &Value, lang: &str) -> (String,
         let s = secs % 60;
         if m > 0 { format!("{m}m {s}s") } else { format!("{s}s") }
     };
+    // beta.3 Fix 2: "[<workspace>] …" prefix so multi-client desktops can tell
+    // at a glance which workspace the toast belongs to. Empty ws_name → no
+    // prefix (backwards-compat for callers that don't yet resolve).
+    let prefix = |s: String| -> String {
+        if ws_name.is_empty() {
+            s
+        } else {
+            format!("[{ws_name}] 🎯 {s}")
+        }
+    };
     match subkind {
         "session-start" => (
             "Claude".into(),
-            if he { format!("סשן התחיל ב-{cwd}") } else { format!("Session started in {cwd}") },
+            prefix(if he { format!("סשן התחיל ב-{cwd}") } else { format!("Session started in {cwd}") }),
         ),
         "session-end" => (
             if he { "🎯 Session נסגר".into() } else { "🎯 Session ended".into() },
-            match dur_secs {
+            prefix(match dur_secs {
                 Some(d) if he => format!("{cwd} · משך {}", fmt_dur(d)),
                 Some(d) => format!("{cwd} · {} elapsed", fmt_dur(d)),
                 None if he => format!("סשן הסתיים — {cwd}"),
                 None => format!("Session ended — {cwd}"),
-            },
+            }),
         ),
         "stop" => (
             if he { "🎯 Claude סיים — התור שלך".into() } else { "🎯 Claude finished — your turn".into() },
-            if !summary.is_empty() {
+            prefix(if !summary.is_empty() {
                 clip(summary, 120)
             } else if he {
                 format!("סיים ב-{cwd}")
             } else {
                 format!("Finished in {cwd}")
-            },
+            }),
         ),
         "notification" => (
             "Claude".into(),
-            if !msg.is_empty() {
+            prefix(if !msg.is_empty() {
                 msg.to_string()
             } else if he {
                 "Claude זקוק לך".into()
             } else {
                 "Claude needs you".into()
-            },
+            }),
         ),
         "pre-tool-use" => (
             if he { format!("Claude רוצה להריץ: {tool}") } else { format!("Claude wants to run: {tool}") },
-            clip(cmd, 100),
+            prefix(clip(cmd, 100)),
+        ),
+        // beta.3 Fix 5: Observability hooks (opt-in via HookSettings.enabled_types).
+        "post-tool-use" => (
+            if he { format!("🔧 {tool} סיים") } else { format!("🔧 {tool} completed") },
+            prefix(String::new()),
+        ),
+        "subagent-stop" => (
+            if he { "🤖 סוכן-משנה סיים".into() } else { "🤖 sub-agent finished".into() },
+            prefix(String::new()),
+        ),
+        "user-prompt-submit" => (
+            if he { "💬 שאלה נשלחה".into() } else { "💬 prompt sent".into() },
+            prefix(String::new()),
+        ),
+        "pre-compact" => (
+            if he { "📦 קונטקסט דוחס".into() } else { "📦 context compacted".into() },
+            prefix(String::new()),
         ),
         _ => ("Claude".into(), String::new()),
     }
@@ -316,9 +369,22 @@ fn humanize_notification(subkind: &str, payload: &Value, lang: &str) -> (String,
 
 /// Phase 66 (KK): is a toast wanted for this hook event, per the
 /// per-event Notifications toggles? `toast_enabled` is the master switch.
-fn hook_toast_enabled(n: &settings::Notifications, subkind: &str) -> bool {
+///
+/// beta.3: ALSO gate on `HookSettings.enabled_types` — a hook type disabled
+/// there means "don't process at all" (feed card still lands, but no toast).
+/// The two switches are independent: the legacy per-event `toast_*` flags
+/// stay for backwards-compat + fine-grained tuning; the new
+/// `enabled_types` is the coarse "do I even care about this hook type"
+/// gate exposed in the Hooks & Notifications card.
+fn hook_toast_enabled(n: &settings::Notifications, h: &settings::HookSettings, subkind: &str) -> bool {
     if !n.toast_enabled {
         return false;
+    }
+    // beta.3: enabled_types gate first.
+    if let Some(ty) = settings::hook_type_from_subkind(subkind) {
+        if !h.enabled_types.contains(&ty) {
+            return false;
+        }
     }
     match subkind {
         "session-start" => n.toast_session_start,
@@ -326,8 +392,44 @@ fn hook_toast_enabled(n: &settings::Notifications, subkind: &str) -> bool {
         "stop" => n.toast_stop,
         "notification" => n.toast_notification,
         "pre-tool-use" => n.toast_gate,
+        // beta.3 Fix 5: the new Observability hooks are gated purely by
+        // `enabled_types` above — no legacy per-event flag pairs them, so
+        // opting in via the Hooks tab is the single knob for these.
+        "post-tool-use"
+        | "subagent-stop"
+        | "user-prompt-submit"
+        | "pre-compact" => true,
         _ => false,
     }
+}
+
+/// beta.3 Fix 1: should a hook's toast play a sound? Master switch AND
+/// per-hook-type inclusion in `sound_types`. Silent by default for the
+/// four Observability hooks (they're opt-in).
+fn hook_toast_should_sound(h: &settings::HookSettings, subkind: &str) -> bool {
+    if !h.sound_master {
+        return false;
+    }
+    match settings::hook_type_from_subkind(subkind) {
+        Some(ty) => h.sound_types.contains(&ty),
+        None => false,
+    }
+}
+
+/// beta.3 Fix 2: resolve a workspace id → user-visible name. Returns empty
+/// string when the id is None, the workspace was deleted, or the lookup
+/// races with a rename (best-effort; the toast just renders without a
+/// prefix rather than blocking on the workspace lock).
+fn resolve_workspace_name(state: &AppState, ws_id: Option<&str>) -> String {
+    let Some(id) = ws_id else { return String::new() };
+    if id.is_empty() {
+        return String::new();
+    }
+    let file = match state.workspaces.lock() {
+        Ok(g) => g,
+        Err(_) => return String::new(),
+    };
+    workspace_name_by_id(&file, id).unwrap_or_default()
 }
 
 /// Phase 66 (66.D): record a passive feed item for a policy decision that
@@ -1230,7 +1332,7 @@ async fn dispatch(
             // from the payload here.
             {
                 let s = settings::load_from_disk().unwrap_or_default();
-                if hook_toast_enabled(&s.notifications, &subkind) {
+                if hook_toast_enabled(&s.notifications, &s.hook_notifications, &subkind) {
                     // v0.4.4: `stop` fires at the END OF EVERY TURN, so a toast
                     // per turn would be noise when the user is already watching
                     // winmux (they see the feed card + sidebar highlight).
@@ -1244,9 +1346,18 @@ async fn dispatch(
                             .and_then(|w| w.is_focused().ok())
                             .unwrap_or(false);
                     if !suppress_stop {
-                        let (tt, tb) =
-                            humanize_notification(&subkind, &item.payload, &s.i18n.language);
-                        show_toast(&tt, &tb);
+                        // beta.3 Fix 2: resolve workspace name for the toast body.
+                        let ws_name =
+                            resolve_workspace_name(state, item.workspace_id.as_deref());
+                        let (tt, tb) = humanize_notification(
+                            &subkind,
+                            &item.payload,
+                            &ws_name,
+                            &s.i18n.language,
+                        );
+                        // beta.3 Fix 1: sound-gated by hook_notifications.
+                        let sound = hook_toast_should_sound(&s.hook_notifications, &subkind);
+                        show_toast_with_sound(&tt, &tb, sound);
                     }
                 }
             }

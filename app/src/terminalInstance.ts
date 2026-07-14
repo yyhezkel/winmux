@@ -626,6 +626,17 @@ export class TerminalInstance {
     g_terminals.add(this);
 
     this.ensureDirObserver();
+
+    // Font-init fix: a fresh pane rendered "compressed" until the user
+    // swapped the terminal font and back (notably with Courier). Root
+    // cause: xterm caches the character-cell size from its FIRST
+    // measurement at `term.open()` above — but at construction the
+    // container is still detached from the DOM and the web font may not
+    // be loaded yet, so the cached cell is wrong and every later `fit()`
+    // (which only divides the container size by that stale cell) inherits
+    // the bad metrics. Schedule a one-shot re-measure once the container
+    // is actually in the DOM and fonts are ready.
+    this.scheduleInitialFontMeasure();
   }
 
   /**
@@ -824,6 +835,65 @@ export class TerminalInstance {
       try {
         this.term.refresh(0, this.term.rows - 1);
       } catch {}
+    }
+  }
+
+  /** One-shot guard for {@link scheduleInitialFontMeasure}. */
+  private fontMeasured = false;
+
+  /**
+   * Force xterm to RE-MEASURE the character cell, then refit + repaint.
+   *
+   * xterm measures the glyph cell once (at `term.open()`) and caches it;
+   * `fit()` never re-measures — it just divides the container size by that
+   * cached cell. So if the first measurement was wrong (container detached,
+   * or the web font not yet loaded) the grid stays "compressed" no matter
+   * how many times it refits. Re-assigning `fontFamily` makes xterm's
+   * CharSizeService measure again — exactly what the manual font-swap
+   * workaround did. We write the family twice (a trailing space is a CSS
+   * no-op but a *different string*, so the option-change fires even if the
+   * value is otherwise unchanged) and finish on the clean value.
+   */
+  remeasureFont(): void {
+    try {
+      const fam = this.term.options.fontFamily ?? "monospace";
+      this.term.options.fontFamily = `${fam} `;
+      this.term.options.fontFamily = fam;
+    } catch (e) {
+      console.warn("remeasureFont: font re-measure failed", e);
+    }
+    this.fitAndResize(true);
+    try {
+      this.term.refresh(0, this.term.rows - 1);
+    } catch {}
+  }
+
+  /**
+   * Font-init fix: as soon as this pane's container is in the DOM and the
+   * web font has loaded, run a single {@link remeasureFont}. Waits for
+   * `document.fonts.ready` (covers web-font load timing) and retries per
+   * animation frame until the container is actually attached (covers the
+   * detached-at-construction case). The `g_terminals` check stops the
+   * retry loop if the pane is disposed before it ever mounts.
+   */
+  private scheduleInitialFontMeasure(): void {
+    const run = () => {
+      if (this.fontMeasured || !g_terminals.has(this)) return;
+      if (!this.container.isConnected) {
+        // PaneView hasn't appended the container to its slot yet.
+        requestAnimationFrame(run);
+        return;
+      }
+      this.fontMeasured = true;
+      this.remeasureFont();
+    };
+    const kick = () => requestAnimationFrame(run);
+    const fonts =
+      typeof document !== "undefined" ? document.fonts : undefined;
+    if (fonts && typeof fonts.ready?.then === "function") {
+      fonts.ready.then(kick).catch(kick);
+    } else {
+      kick();
     }
   }
 

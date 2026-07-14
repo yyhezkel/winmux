@@ -80,23 +80,6 @@ function fileUriToPath(uri: string): string | null {
 const PT_TO_PX = 1.3333;
 export type RtlMode = "auto_per_line" | "bidi_reorder" | "off";
 
-// Font-init diagnostic: minimal typed view into xterm's private measurement
-// services so we can log the computed character-cell metrics without an
-// `any`. Fields are best-effort (undefined if xterm renames internals).
-interface XtermInternals {
-  _core?: {
-    _charSizeService?: {
-      width?: number;
-      height?: number;
-      hasValidSize?: boolean;
-    };
-    _renderService?: {
-      dimensions?: {
-        css?: { cell?: { width?: number; height?: number } };
-      };
-    };
-  };
-}
 let g_fontFamily: string | null = null;
 let g_fontSizePx: number | null = null;
 let g_rtlMode: RtlMode = "auto_per_line";
@@ -143,12 +126,10 @@ export function setTerminalFont(family: string, sizePt: number): void {
   g_fontSizePx = px;
   for (const ti of g_terminals) {
     try {
-      ti.logFontMetrics(`setFont:before family=${family} px=${px}`);
       ti.term.options.fontFamily = family;
       ti.term.options.fontSize = px;
       ti.fitAndResize();
       ti.term.refresh(0, ti.term.rows - 1);
-      ti.logFontMetrics("setFont:after");
     } catch (e) {
       console.warn("setTerminalFont: per-instance update failed", e);
     }
@@ -858,41 +839,6 @@ export class TerminalInstance {
     }
   }
 
-  /**
-   * Font-init diagnostic (Rule #1: metrics only, never PTY content). Dumps
-   * how xterm currently measures the character cell so we can compare a
-   * fresh pane's numbers against the post-font-swap numbers that render
-   * correctly. Goes to the console AND the winmux debug log (diag_log).
-   */
-  logFontMetrics(label: string): void {
-    try {
-      const core = (this.term as unknown as XtermInternals)._core;
-      const charSvc = core?._charSizeService;
-      const cell = core?._renderService?.dimensions?.css?.cell;
-      const fam = String(this.term.options.fontFamily ?? "");
-      const size = this.term.options.fontSize ?? 0;
-      const lh = this.term.options.lineHeight ?? 0;
-      let fontLoaded = "n/a";
-      try {
-        const first = fam.split(",")[0].trim().replace(/^["']|["']$/g, "");
-        fontLoaded = String(document.fonts.check(`${size}px "${first}"`));
-      } catch {}
-      const msg =
-        `[font-metrics] ${label} pane=${this.paneId} ` +
-        `family=${JSON.stringify(fam)} size=${size} lineHeight=${lh} ` +
-        `fontLoaded=${fontLoaded} ` +
-        `charSvc=${charSvc?.width}x${charSvc?.height}(valid=${charSvc?.hasValidSize}) ` +
-        `cssCell=${cell?.width}x${cell?.height} ` +
-        `cols=${this.term.cols} rows=${this.term.rows} ` +
-        `container=${this.container.clientWidth}x${this.container.clientHeight}` +
-        `(connected=${this.container.isConnected})`;
-      console.log(msg);
-      void invoke("diag_log", { level: "info", msg }).catch(() => {});
-    } catch (e) {
-      console.warn("logFontMetrics failed", e);
-    }
-  }
-
   /** One-shot guard for {@link scheduleInitialFontMeasure}. */
   private fontMeasured = false;
 
@@ -936,7 +882,6 @@ export class TerminalInstance {
   }
 
   remeasureFont(): void {
-    this.logFontMetrics("remeasure:before");
     const fam = this.term.options.fontFamily ?? "monospace";
     const size = Number(this.term.options.fontSize ?? 14);
     // xterm de-dupes a no-op fontFamily write (same string → no re-measure),
@@ -968,7 +913,6 @@ export class TerminalInstance {
       try {
         this.term.refresh(0, this.term.rows - 1);
       } catch {}
-      this.logFontMetrics("remeasure:after");
     });
   }
 
@@ -1036,7 +980,6 @@ export class TerminalInstance {
         return;
       }
       this.fontMeasured = true;
-      this.logFontMetrics("mount:connected");
       void this.preloadFontsThenRemeasure();
     };
     const kick = () => requestAnimationFrame(run);

@@ -1314,6 +1314,13 @@ fn enumerate_windows_fonts() -> Option<Vec<String>> {
         .lines()
         .map(|l| l.trim().to_string())
         .filter(|l| !l.is_empty())
+        // Drop legacy .FON bitmap-font registry entries such as
+        // "Courier 10,12,15 (VGA res)" / "MS Sans Serif 8,10,12,14,18,24 (120)".
+        // A real CSS font-family name never contains a comma, and these
+        // bitmap fonts can't render in the webview anyway; leaking them let
+        // the picker store an unusable name whose internal commas then
+        // fragmented the CSS font-family list (compressed panes).
+        .filter(|l| !l.contains(','))
         .collect();
     // Strip variant suffixes like "Bold", "Italic" so the picker shows
     // family names, not every weight.

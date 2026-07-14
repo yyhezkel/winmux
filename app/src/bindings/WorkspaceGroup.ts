@@ -11,4 +11,13 @@ color: string,
  * workspaces.json (before A2) that grows a group entry via a
  * hand-edit still loads.
  */
-is_collapsed: boolean, };
+is_collapsed: boolean,
+/**
+ * beta.3 (ws-dragdrop): 0-based sort key across groups. Absent →
+ * hasn't been ordered by the reorder path yet; the sidebar falls
+ * back to array position. The backend fills in consecutive 0..N-1
+ * on the first `workspace_group_reorder` call so a pre-beta.3
+ * workspaces.json round-trips byte-identical until the user
+ * actually drags a group.
+ */
+sort_order: number | null, };

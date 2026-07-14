@@ -1,4 +1,4 @@
-import { For, Show, createSignal, createMemo } from "solid-js";
+import { For, Show, createSignal, createMemo, onCleanup, onMount } from "solid-js";
 import { collectPanes, findPane, type Workspace, type WorkspaceGroup, type ForwardRow } from "./types";
 import { t } from "./i18n";
 import { TechText } from "./TechText";
@@ -107,6 +107,16 @@ interface Props {
   onGroupToggleCollapse: (id: string, isCollapsed: boolean) => void;
   onGroupDelete: (id: string) => void;
   onWorkspaceSetGroup: (workspaceId: string, groupId: string | null) => void;
+  // beta.3 (ws-dragdrop): direct drag-reorder. `newIndex` is a 0-based
+  // slot within the destination scope (workspaces) or the group list.
+  // The App handler wraps these to call `workspace_reorder` /
+  // `workspace_group_reorder` and reload the workspaces file.
+  onWorkspaceReorder: (
+    workspaceId: string,
+    groupId: string | null,
+    newIndex: number,
+  ) => void;
+  onGroupReorder: (groupId: string, newIndex: number) => void;
 }
 
 export function Sidebar(p: Props) {
@@ -116,67 +126,277 @@ export function Sidebar(p: Props) {
   // coerces `overflow-x` to non-visible too, so an absolutely-positioned
   // menu gets clipped at the (narrow, in icons mode) sidebar edge. We
   // render it `position:fixed` at the cursor instead, anchored here.
-  const [menuPos, setMenuPos] = createSignal<{ x: number; y: number }>({
-    x: 0,
-    y: 0,
-  });
-  // cmux-A A2: local UI state for group interactions. `groupMenuFor` +
-  // `groupMenuPos` mirror the workspace-menu pattern above so the group
-  // context menu also escapes the .sidebar-list overflow clip.
+  const [menuPos, setMenuPos] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
   const [groupMenuFor, setGroupMenuFor] = createSignal<string | null>(null);
-  const [groupMenuPos, setGroupMenuPos] = createSignal<{ x: number; y: number }>({
-    x: 0,
-    y: 0,
-  });
-  // "Move to group…" submenu on a workspace right-click. Null = closed;
-  // set to the workspace_id whose menu is expanded.
+  const [groupMenuPos, setGroupMenuPos] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
   const [moveMenuFor, setMoveMenuFor] = createSignal<string | null>(null);
-  // Inline "+ Group" flow: null = idle; string = the text the user is
-  // typing before hitting Enter (or Esc to cancel).
   const [newGroupName, setNewGroupName] = createSignal<string | null>(null);
-  // Rename inline flow, keyed by group_id (only one at a time).
-  const [renamingGroup, setRenamingGroup] = createSignal<{
-    id: string;
-    name: string;
-  } | null>(null);
-  // Color picker popover keyed by group_id.
+  const [renamingGroup, setRenamingGroup] = createSignal<{ id: string; name: string } | null>(null);
   const [colorPickerFor, setColorPickerFor] = createSignal<string | null>(null);
 
-  // Bucket the workspaces by group. Ungrouped (group_id == null OR the
-  // referenced group_id was deleted) renders in a leading "Ungrouped"
-  // section — always shown, always uncollapsible, so the empty case
-  // still has a home.
+  // beta.3 (ws-dragdrop): within each bucket workspaces sort by
+  // `sort_order` ascending (nulls → end, ties broken by insertion
+  // order). A pre-beta.3 workspaces.json has no sort_order at all —
+  // that path reduces to the previous insertion-order rendering.
   const groupedWorkspaces = createMemo(() => {
     const validGroupIds = new Set(p.groups.map((g) => g.id));
-    const ungrouped: Workspace[] = [];
-    const byGroup = new Map<string, Workspace[]>();
-    for (const w of p.workspaces) {
+    const ungrouped: { w: Workspace; ins: number }[] = [];
+    const byGroup = new Map<string, { w: Workspace; ins: number }[]>();
+    p.workspaces.forEach((w, ins) => {
       const gid = w.group_id;
       if (gid && validGroupIds.has(gid)) {
         const list = byGroup.get(gid) ?? [];
-        list.push(w);
+        list.push({ w, ins });
         byGroup.set(gid, list);
       } else {
-        ungrouped.push(w);
+        ungrouped.push({ w, ins });
       }
-    }
-    return { ungrouped, byGroup };
+    });
+    const cmp = (a: { w: Workspace; ins: number }, b: { w: Workspace; ins: number }) => {
+      const ao = a.w.sort_order ?? Number.MAX_SAFE_INTEGER;
+      const bo = b.w.sort_order ?? Number.MAX_SAFE_INTEGER;
+      if (ao !== bo) return ao - bo;
+      return a.ins - b.ins;
+    };
+    ungrouped.sort(cmp);
+    for (const list of byGroup.values()) list.sort(cmp);
+    return {
+      ungrouped: ungrouped.map((x) => x.w),
+      byGroup: new Map(
+        Array.from(byGroup.entries()).map(([k, v]) => [k, v.map((x) => x.w)]),
+      ),
+    };
   });
 
-  const openMenuAt = (
-    e: MouseEvent,
-    setter: (v: { x: number; y: number }) => void,
-  ) => {
-    // Clamp so the fixed menu stays on-screen (≈160×190px).
+  // beta.3 (ws-dragdrop): render groups in sort_order (nulls → end).
+  const sortedGroups = createMemo(() => {
+    const arr = p.groups.map((g, ins) => ({ g, ins }));
+    arr.sort((a, b) => {
+      const ao = a.g.sort_order ?? Number.MAX_SAFE_INTEGER;
+      const bo = b.g.sort_order ?? Number.MAX_SAFE_INTEGER;
+      if (ao !== bo) return ao - bo;
+      return a.ins - b.ins;
+    });
+    return arr.map((x) => x.g);
+  });
+
+  // beta.3 (ws-dragdrop): pointer-based drag-reorder.
+  //
+  // HTML5 drag-and-drop can't be used here: Tauri's WebView2 OS drop handler
+  // stays enabled so Phase 49-A file drops onto terminal panes keep working,
+  // and on Windows that handler swallows in-page HTML5 drags (the drop event
+  // never fires — a cursor showed but nothing moved). So reorder is driven by
+  // pointer events instead. A small move threshold separates a click
+  // (switch / collapse) from a drag; the drop target is found by hit-testing
+  // the DOM under the cursor. `newIndex` in the reorder callbacks is a 0-based
+  // index within the destination scope; the App handler wraps these to call
+  // `workspace_reorder` / `workspace_group_reorder` and reload the file.
+  type Drop =
+    | { kind: "ws-line"; targetId: string; where: "above" | "below" }
+    | { kind: "group-line"; targetId: string; where: "above" | "below" }
+    | { kind: "into-group"; targetId: string | null }
+    | null;
+  const [dragKind, setDragKind] = createSignal<"ws" | "group" | null>(null);
+  const [dragId, setDragId] = createSignal<string | null>(null);
+  const [drop, setDrop] = createSignal<Drop>(null);
+  const [ghostPos, setGhostPos] = createSignal<{ x: number; y: number } | null>(null);
+
+  // Typed accessors for the drop indicator classes (avoids `as any` casts in
+  // the JSX class strings while keeping the discriminated union narrowed).
+  const dropWsWhere = (id: string): "above" | "below" | null => {
+    const d = drop();
+    return d && d.kind === "ws-line" && d.targetId === id ? d.where : null;
+  };
+  const dropGroupWhere = (id: string): "above" | "below" | null => {
+    const d = drop();
+    return d && d.kind === "group-line" && d.targetId === id ? d.where : null;
+  };
+  const dropIntoGroup = (id: string | null): boolean => {
+    const d = drop();
+    return !!d && d.kind === "into-group" && d.targetId === id;
+  };
+  // Label for the floating ghost that follows the cursor mid-drag.
+  const ghostLabel = (): string => {
+    const id = dragId();
+    if (!id) return "";
+    if (dragKind() === "ws") return p.workspaces.find((w) => w.id === id)?.name ?? "";
+    if (dragKind() === "group") return p.groups.find((g) => g.id === id)?.name ?? "";
+    return "";
+  };
+
+  // Non-reactive scratch state for the in-flight gesture. `pending` holds the
+  // press until the move threshold is crossed; `didDrag` guards the trailing
+  // click so a completed drag never also switches/collapses.
+  const DRAG_THRESHOLD = 5;
+  let pending: { kind: "ws" | "group"; id: string; startX: number; startY: number } | null = null;
+  let didDrag = false;
+
+  const scopeIndexOf = (scope: string | null, wsId: string): number => {
+    const list = scope === null
+      ? groupedWorkspaces().ungrouped
+      : groupedWorkspaces().byGroup.get(scope) ?? [];
+    return list.findIndex((w) => w.id === wsId);
+  };
+  const scopeSize = (scope: string | null): number => {
+    const list = scope === null
+      ? groupedWorkspaces().ungrouped
+      : groupedWorkspaces().byGroup.get(scope) ?? [];
+    return list.length;
+  };
+  const groupIndexOf = (gid: string): number => sortedGroups().findIndex((g) => g.id === gid);
+  const whereByMidpoint = (clientY: number, el: HTMLElement): "above" | "below" => {
+    const r = el.getBoundingClientRect();
+    return clientY < r.top + r.height / 2 ? "above" : "below";
+  };
+
+  // Resolve the cursor position to a drop target using the DOM under it.
+  const updateDropTarget = (x: number, y: number) => {
+    const kind = dragKind();
+    const id = dragId();
+    if (!kind || !id) {
+      setDrop(null);
+      return;
+    }
+    const under = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (!under) {
+      setDrop(null);
+      return;
+    }
+    if (kind === "ws") {
+      const wsEl = under.closest<HTMLElement>("[data-ws-id]");
+      if (wsEl) {
+        const targetId = wsEl.dataset.wsId ?? "";
+        if (targetId === id || targetId === "") {
+          setDrop(null);
+          return;
+        }
+        setDrop({ kind: "ws-line", targetId, where: whereByMidpoint(y, wsEl) });
+        return;
+      }
+      const gEl = under.closest<HTMLElement>("[data-group-id]");
+      if (gEl) {
+        const raw = gEl.dataset.groupId ?? "";
+        setDrop({ kind: "into-group", targetId: raw === "" ? null : raw });
+        return;
+      }
+      setDrop(null);
+    } else {
+      // Dragging a group: only *other* real group headers are valid targets.
+      const gEl = under.closest<HTMLElement>("[data-group-id]");
+      if (gEl) {
+        const raw = gEl.dataset.groupId ?? "";
+        if (raw === "" || raw === id) {
+          setDrop(null);
+          return;
+        }
+        setDrop({ kind: "group-line", targetId: raw, where: whereByMidpoint(y, gEl) });
+        return;
+      }
+      setDrop(null);
+    }
+  };
+
+  const applyDrop = (kind: "ws" | "group", id: string, d: Drop) => {
+    if (!d) return;
+    if (kind === "ws") {
+      if (d.kind === "ws-line") {
+        const destScope = p.workspaces.find((w) => w.id === d.targetId)?.group_id ?? null;
+        const targetIdx = scopeIndexOf(destScope, d.targetId);
+        const srcScope = p.workspaces.find((w) => w.id === id)?.group_id ?? null;
+        const srcIdx = scopeIndexOf(srcScope, id);
+        let idx = d.where === "above" ? targetIdx : targetIdx + 1;
+        if (srcScope === destScope && srcIdx !== -1 && srcIdx < targetIdx) idx -= 1;
+        p.onWorkspaceReorder(id, destScope, Math.max(0, idx));
+      } else if (d.kind === "into-group") {
+        p.onWorkspaceReorder(id, d.targetId, scopeSize(d.targetId));
+      }
+    } else if (d.kind === "group-line") {
+      const targetIdx = groupIndexOf(d.targetId);
+      const draggingIdx = groupIndexOf(id);
+      let idx = d.where === "above" ? targetIdx : targetIdx + 1;
+      if (draggingIdx !== -1 && draggingIdx < targetIdx) idx -= 1;
+      p.onGroupReorder(id, Math.max(0, idx));
+    }
+  };
+
+  const onWinPointerMove = (e: PointerEvent) => {
+    if (!pending) return;
+    if (!didDrag) {
+      if (Math.hypot(e.clientX - pending.startX, e.clientY - pending.startY) < DRAG_THRESHOLD) {
+        return;
+      }
+      didDrag = true;
+      setDragKind(pending.kind);
+      setDragId(pending.id);
+      setDrop(null);
+      document.body.classList.add("winmux-dragging");
+    }
+    setGhostPos({ x: e.clientX, y: e.clientY });
+    updateDropTarget(e.clientX, e.clientY);
+  };
+  const onWinPointerUp = () => {
+    const wasDrag = didDrag;
+    const kind = dragKind();
+    const id = dragId();
+    const d = drop();
+    endPointerGesture();
+    if (wasDrag && kind && id) applyDrop(kind, id, d);
+    // `didDrag` stays true until the next pointerdown resets it, so the click
+    // the browser fires immediately after a drag is swallowed by the guards.
+  };
+  // A cancelled pointer (focus loss, touch interruption) aborts with no reorder.
+  const onWinPointerCancel = () => abortDrag();
+  // Tear down window listeners + transient drag UI. Leaves `didDrag` intact
+  // (the click guard); `pending` is cleared so no stale press lingers.
+  function endPointerGesture() {
+    window.removeEventListener("pointermove", onWinPointerMove);
+    window.removeEventListener("pointerup", onWinPointerUp);
+    window.removeEventListener("pointercancel", onWinPointerCancel);
+    document.body.classList.remove("winmux-dragging");
+    setGhostPos(null);
+    setDragKind(null);
+    setDragId(null);
+    setDrop(null);
+    pending = null;
+  }
+  // Escape / unmount: abort with no reorder and clear the click guard too.
+  const abortDrag = () => {
+    endPointerGesture();
+    didDrag = false;
+  };
+  const startPointerDrag = (kind: "ws" | "group", id: string, e: PointerEvent) => {
+    if (e.button !== 0) return; // left button only; right-click → context menu
+    const el = e.target as HTMLElement;
+    // Never start a drag from an interactive child — those own their clicks.
+    if (el.closest("button, input, .ws-menu, .ws-port-badge, .group-menu, .group-swatch-picker")) {
+      return;
+    }
+    didDrag = false;
+    pending = { kind, id, startX: e.clientX, startY: e.clientY };
+    window.addEventListener("pointermove", onWinPointerMove);
+    window.addEventListener("pointerup", onWinPointerUp);
+    window.addEventListener("pointercancel", onWinPointerCancel);
+  };
+
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && (pending || dragKind() !== null)) abortDrag();
+    };
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => {
+      window.removeEventListener("keydown", onKey);
+      endPointerGesture();
+    });
+  });
+
+  const openMenuAt = (e: MouseEvent, setter: (v: { x: number; y: number }) => void) => {
     setter({
       x: Math.min(e.clientX, window.innerWidth - 200),
       y: Math.min(e.clientY, window.innerHeight - 260),
     });
   };
 
-  const startNewGroup = () => {
-    setNewGroupName("");
-  };
+  const startNewGroup = () => { setNewGroupName(""); };
   const commitNewGroup = () => {
     const name = (newGroupName() ?? "").trim();
     if (name.length > 0) {
@@ -187,8 +407,6 @@ export function Sidebar(p: Props) {
 
   return (
     <div class={`sidebar ${p.mode}`}>
-      {/* Phase 62.C: header stacks vertically — logo (+ wordmark in full
-          mode) on top, the collapse arrow on its own line below. */}
       <div class="sidebar-header">
         <div class="sidebar-brand-row">
         <svg
@@ -239,9 +457,6 @@ export function Sidebar(p: Props) {
           </span>
         </Show>
         </div>
-        {/* Phase 62.B (item I) / 65.P: header toggle flips full ↔ icons
-            — the only two modes. Same as Ctrl+B. Phase 62.C: on its own
-            line below the logo. */}
         <button
           class="sidebar-collapse-btn"
           onClick={() => p.onSetMode(p.mode === "full" ? "icons" : "full")}
@@ -252,12 +467,12 @@ export function Sidebar(p: Props) {
         </button>
       </div>
       <div class="sidebar-list">
-        {/* Ungrouped section — always rendered, never collapsible. If
-            the user has no groups at all, the whole sidebar is this one
-            section and the "Ungrouped" header disappears (only shown
-            once at least one group exists, to avoid noise). */}
         <Show when={p.groups.length > 0}>
-          <div class="group-header" style="cursor: default">
+          <div
+            data-group-id=""
+            class={`group-header ${dropIntoGroup(null) ? "drop-into" : ""}`}
+            style="cursor: default"
+          >
             <span class="group-header-name">{t("sidebar.ungrouped")}</span>
             <span class="group-header-count">({groupedWorkspaces().ungrouped.length})</span>
           </div>
@@ -265,15 +480,24 @@ export function Sidebar(p: Props) {
         <For each={groupedWorkspaces().ungrouped}>
           {(w) => renderWorkspaceItem(w)}
         </For>
-        <For each={p.groups}>
+        <For each={sortedGroups()}>
           {(g) => {
             const members = () => groupedWorkspaces().byGroup.get(g.id) ?? [];
             const collapsed = () => g.is_collapsed;
             return (
               <>
                 <div
-                  class={`group-header ${collapsed() ? "group-collapsed" : ""}`}
-                  onClick={() => p.onGroupToggleCollapse(g.id, !collapsed())}
+                  data-group-id={g.id}
+                  class={`group-header ${collapsed() ? "group-collapsed" : ""} ${
+                    dragKind() === "group" && dragId() === g.id ? "dragging" : ""
+                  } ${dropIntoGroup(g.id) ? "drop-into" : ""} ${
+                    dropGroupWhere(g.id) ? `drop-${dropGroupWhere(g.id)}` : ""
+                  }`}
+                  onPointerDown={(e) => startPointerDrag("group", g.id, e)}
+                  onClick={() => {
+                    if (didDrag) return;
+                    p.onGroupToggleCollapse(g.id, !collapsed());
+                  }}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     if (groupMenuFor() === g.id) {
@@ -320,7 +544,6 @@ export function Sidebar(p: Props) {
                   <span class="group-header-count">({members().length})</span>
                   <span class="group-header-chevron"><IconChevronDown size={12} /></span>
                 </div>
-                {/* Group context menu (fixed-position; keyed by g.id). */}
                 <Show when={groupMenuFor() === g.id}>
                   <div
                     class="group-menu"
@@ -357,7 +580,6 @@ export function Sidebar(p: Props) {
                     </button>
                   </div>
                 </Show>
-                {/* Color picker popover — inline under the header. */}
                 <Show when={colorPickerFor() === g.id}>
                   <div class="group-swatch-picker" onClick={(e) => e.stopPropagation()}>
                     <For each={GROUP_PICKER_COLORS}>
@@ -383,12 +605,6 @@ export function Sidebar(p: Props) {
           }}
         </For>
       </div>
-      {/* Phase 39: Notes + Settings + Ports row, then New workspace,
-          then Provision server.
-          Phase 62.B (item I): each button is an emoji icon + a text
-          label span. In icons mode CSS hides the labels and stacks the
-          row vertically, so these stay reachable as icons (with
-          tooltips) instead of disappearing. */}
       <div class="sidebar-actions-row">
         <button class="ws-action-half" onClick={p.onOpenNotes} title={t("sidebar.notes.tooltip")}>
           <span class="ws-action-emoji"><IconNotes /></span>
@@ -403,16 +619,10 @@ export function Sidebar(p: Props) {
           <span class="ws-action-label">{t("sidebar.ports.label")}</span>
         </button>
       </div>
-      {/* Phase 60 (smoke-test 2a): the Browser + Files row moved to
-          the workspace header next to "+ diff" — they're workspace-
-          scoped tools and Yossi found them misplaced here. */}
       <button class="ws-add" onClick={p.onCreate} title={t("sidebar.new_workspace")}>
         <span class="ws-action-emoji"><IconPlus /></span>
         <span class="ws-action-label">{t("sidebar.new_workspace")}</span>
       </button>
-      {/* cmux-A A2: create a new sidebar group. Inline text input,
-          Enter commits, Esc cancels. Shown as a compact "+" button
-          at the sidebar bottom, respecting icons-mode compact layout. */}
       <Show
         when={newGroupName() === null}
         fallback={
@@ -438,31 +648,46 @@ export function Sidebar(p: Props) {
           {t("sidebar.new_group")}
         </button>
       </Show>
-      {/* Phase 65.R: single entry — "Provision server" opens the wizard
-          whose mode picker covers both "new server" and "connect to an
-          existing server". The standalone 🔗 button was removed. */}
       <button class="ws-provision" onClick={p.onProvision} title={t("sidebar.provision_server_tooltip")}>
         <span class="ws-action-emoji"><IconCloud /></span>
         <span class="ws-action-label">{t("sidebar.provision_server")}</span>
       </button>
+      <Show when={dragKind() !== null && ghostPos() !== null}>
+        <div
+          class="ws-ghost"
+          style={{
+            left: `${ghostPos()!.x + 12}px`,
+            top: `${ghostPos()!.y + 10}px`,
+          }}
+        >
+          {ghostLabel()}
+        </div>
+      </Show>
     </div>
   );
 
-  // Extracted helper so the same JSX renders both in the Ungrouped
-  // section AND under each named group. Kept inside the component so
-  // it can reach the local menu-state signals + the props closure.
   function renderWorkspaceItem(w: Workspace) {
     return (
       <div
+        data-ws-id={w.id}
         class={`ws-item ${p.activeId === w.id ? "active" : ""} ${
           p.waitingWorkspaceIds.has(w.id) ? "has-waiting" : ""
         } ${
           p.hookPulseWorkspaceIds?.has(w.id) ? "hook-pulse" : ""
+        } ${dragKind() === "ws" && dragId() === w.id ? "dragging" : ""} ${
+          dropWsWhere(w.id) ? `drop-${dropWsWhere(w.id)}` : ""
         }`}
         data-has-color={w.color ? "true" : "false"}
         style={w.color ? `--ws-color: ${w.color}` : undefined}
         title={p.mode === "icons" ? w.name : undefined}
-        onClick={() => p.onActivate(w.id)}
+        // beta.3 (ws-dragdrop): pointer-drag reorder. A press that never crosses
+        // the move threshold is a click → switch; a completed drag sets
+        // `didDrag`, which swallows the trailing click here.
+        onPointerDown={(e) => startPointerDrag("ws", w.id, e)}
+        onClick={() => {
+          if (didDrag) return;
+          p.onActivate(w.id);
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
           if (menuFor() === w.id) {
@@ -483,15 +708,10 @@ export function Sidebar(p: Props) {
           <Show when={w.emoji}>{w.emoji} </Show>
           <TechText text={w.name} />
         </span>
-        {/* Phase 49-B: 🌿 chip when this workspace is anchored
-            to a git worktree. Path goes in the tooltip. */}
         <Show when={w.git_worktree}>
           <span class="ws-worktree-chip" title={w.git_worktree!}><IconGitBranch size={13} /></span>
         </Show>
         <WorkspaceBadge w={w} />
-        {/* Phase 36.A: inline port-forward badge. Click opens the
-            browser (1 forward) or surfaces the workspace's Ports
-            panel by activating it (>1). */}
         {(() => {
           const fwds = p.allForwards.filter((f) => f.workspace_id === w.id);
           return (
@@ -524,15 +744,11 @@ export function Sidebar(p: Props) {
               position: "fixed",
               top: `${menuPos().y}px`,
               left: `${menuPos().x}px`,
-              // Neutralize the RTL `.ws-menu { right: 12px }` rule —
-              // we anchor by left at the cursor in both directions.
               right: "auto",
               "z-index": "1000",
             }}
             onClick={(e) => {
               e.stopPropagation();
-              // Don't auto-close when the user is drilling into the
-              // Move-to-group submenu — that would swallow the click.
               if (moveMenuFor() !== w.id) {
                 setMenuFor(null);
                 setMoveMenuFor(null);
@@ -545,14 +761,9 @@ export function Sidebar(p: Props) {
             <button onClick={() => p.onAction(w.id, "edit")}>
               {t("ws.context.edit")}
             </button>
-            {/* Phase 68 (UX): per-workspace add-ons (hooks, Insights,
-                cli, tmux-conf) live on the remote — manage them here. */}
             <button onClick={() => p.onAction(w.id, "addons")}>
               {t("ws.context.addons")}
             </button>
-            {/* cmux-A A2: Move-to-group submenu. Expands inline in the
-                same menu; the outer menu doesn't close on click while
-                the submenu is expanded (see the onClick guard above). */}
             <button
               onClick={() => {
                 setMoveMenuFor(moveMenuFor() === w.id ? null : w.id);

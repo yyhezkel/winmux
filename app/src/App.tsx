@@ -7,6 +7,7 @@ import { Sidebar } from "./Sidebar";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { NotificationCenter, NotifHeaderActions, type NotifItem } from "./NotificationCenter";
 import { LayoutView } from "./LayoutView";
+import { setPaneSwapHandler } from "./paneDrag";
 import { FeedPanel } from "./FeedPanel";
 import { NotesModal } from "./NotesModal";
 import { ProvisioningWizard } from "./ProvisioningWizard";
@@ -1135,6 +1136,38 @@ function App() {
       console.error("split failed", e);
     }
   };
+
+  // beta.3 (pane-dragdrop): swap two panes' positions in the active
+  // workspace's layout tree. Called by paneDrag.ts on pointerup — the
+  // tree is mutated on the Rust side and the returned WorkspacesFile
+  // is spread through updateFile, which reactively re-renders
+  // LayoutView. Terminal instances survive because they're keyed by
+  // pane_id in the g_terminals registry; PaneView's createEffect on
+  // p.pane.pane_id detaches from the old slot and attaches to the new
+  // one without touching the underlying xterm.
+  const swapPanes = async (paneAId: string, paneBId: string) => {
+    const ws = activeWs();
+    if (!ws) return;
+    if (paneAId === paneBId) return;
+    try {
+      const f = await invoke<WorkspacesFile>("workspace_swap_panes", {
+        workspaceId: ws.id,
+        paneAId,
+        paneBId,
+      });
+      updateFile(f);
+    } catch (e) {
+      console.error("workspace_swap_panes failed", e);
+    }
+  };
+
+  // Register the swap handler once. paneDrag.ts is a module-scope
+  // store shared by every PaneView, so it needs the swap callback
+  // installed before the user can initiate a drag.
+  onMount(() => {
+    setPaneSwapHandler((a, b) => swapPanes(a, b));
+    onCleanup(() => setPaneSwapHandler(null));
+  });
 
   const browserNavigate = async (paneId: string, url: string) => {
     const ws = activeWs();
@@ -2300,6 +2333,33 @@ function App() {
                 const f = await invoke<WorkspacesFile>("workspaces_load");
                 updateFile(f);
               } catch (e) { console.error("workspace_set_group failed", e); }
+            })();
+          }}
+          // beta.3 (ws-dragdrop): direct drag reorder. Both commands
+          // return the updated WorkspacesFile so we can drop the extra
+          // `workspaces_load` round-trip that the group-CRUD handlers
+          // above do.
+          onWorkspaceReorder={(workspaceId, groupId, newIndex) => {
+            void (async () => {
+              try {
+                const f = await invoke<WorkspacesFile>("workspace_reorder", {
+                  workspaceId,
+                  groupId,
+                  newIndex,
+                });
+                updateFile(f);
+              } catch (e) { console.error("workspace_reorder failed", e); }
+            })();
+          }}
+          onGroupReorder={(groupId, newIndex) => {
+            void (async () => {
+              try {
+                const f = await invoke<WorkspacesFile>("workspace_group_reorder", {
+                  groupId,
+                  newIndex,
+                });
+                updateFile(f);
+              } catch (e) { console.error("workspace_group_reorder failed", e); }
             })();
           }}
           onActivate={handleSetActive}

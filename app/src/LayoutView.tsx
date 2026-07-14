@@ -1,5 +1,6 @@
-import { Match, Show, Switch } from "solid-js";
+import { Match, Show, Switch, onCleanup, onMount } from "solid-js";
 import { Divider } from "./Divider";
+import { paneDragStore, installPaneDragEscape } from "./paneDrag";
 // Phase 53 (rebased): BrowserPane no longer imported — the Browser
 // surface moved to the workspace-level floating BrowserWindow
 // (sidebar 🌐). The file stays in the repo as historical reference
@@ -99,16 +100,38 @@ interface Props {
 }
 
 export function LayoutView(p: Props) {
+  // beta.3 (pane-dragdrop): install the global Escape handler for the
+  // pane drag store once per workspace mount, and render the floating
+  // ghost. LayoutView is the outermost workspace-scope component so
+  // its lifetime matches the drag lifecycle we care about (a
+  // workspace switch unmounts LayoutView → drag is cancelled).
+  onMount(() => {
+    const off = installPaneDragEscape();
+    onCleanup(off);
+  });
   return (
-    <Show
-      when={p.node.kind === "split"}
-      fallback={<LeafPane all={p} pane={p.node as Extract<LayoutNode, { kind: "pane" }>} />}
-    >
-      <SplitView
-        {...(p.node as Extract<LayoutNode, { kind: "split" }>)}
-        all={p}
-      />
-    </Show>
+    <>
+      <Show
+        when={p.node.kind === "split"}
+        fallback={<LeafPane all={p} pane={p.node as Extract<LayoutNode, { kind: "pane" }>} />}
+      >
+        <SplitView
+          {...(p.node as Extract<LayoutNode, { kind: "split" }>)}
+          all={p}
+        />
+      </Show>
+      <Show when={paneDragStore.dragPaneId() !== null && paneDragStore.ghostPos() !== null}>
+        <div
+          class="pane-ghost"
+          style={{
+            left: `${paneDragStore.ghostPos()!.x + 12}px`,
+            top: `${paneDragStore.ghostPos()!.y + 10}px`,
+          }}
+        >
+          {paneDragStore.dragLabel()}
+        </div>
+      </Show>
+    </>
   );
 }
 

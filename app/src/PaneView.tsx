@@ -3,7 +3,7 @@ import { Portal } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Connection, LayoutNode, TmuxSessionInfo } from "./types";
-import { describeConnection, effectiveIdentity } from "./types";
+import { describeConnection, effectiveIdentity, isRemoteConn, isRemoteEffective } from "./types";
 import type { TerminalInstance } from "./terminalInstance";
 import { t } from "./i18n";
 import { TechText } from "./TechText";
@@ -205,8 +205,7 @@ export function PaneView(p: Props) {
   // connection first (set on wired Terminal panes), then fall back to
   // the workspace's canonical connection so SSH-only menu items
   // (tmux) show up from FM / Browser / Chat panes too.
-  const isSsh = () =>
-    (p.pane.connection?.type ?? p.workspaceConnection?.type) === "ssh";
+  const isSsh = () => isRemoteEffective(p.pane, p.workspaceConnection);
   const isTmux = () => !!p.tmuxSession;
   // Phase 12.B Smart Connect — the "open in directory" text-input fallback
   // (local panes) still uses this small prompt.
@@ -559,7 +558,7 @@ export function PaneView(p: Props) {
   // default. Used to route drops to SFTP (SSH) vs. local-path passthrough.
   const effectiveConn = (): Connection | null =>
     p.pane.connection ?? p.workspaceConnection ?? null;
-  const isSshPane = () => effectiveConn()?.type === "ssh";
+  const isSshPane = () => isRemoteConn(effectiveConn());
 
   // Phase 49-A: turn one dropped file path into a string suitable for
   // pty_write. SSH workspaces uploaded via SFTP; the returned remote

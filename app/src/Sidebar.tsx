@@ -1,5 +1,5 @@
 import { For, Show, createSignal, createMemo, onCleanup, onMount } from "solid-js";
-import { collectPanes, findPane, type Workspace, type WorkspaceGroup, type ForwardRow } from "./types";
+import { collectPanes, findPane, isRemoteConn, type Workspace, type WorkspaceGroup, type ForwardRow } from "./types";
 import { t } from "./i18n";
 import { TechText } from "./TechText";
 import {
@@ -42,7 +42,7 @@ const GROUP_PICKER_COLORS = [
 
 function workspaceBadge(w: Workspace): { label: string; cls: string; title: string } {
   if (!w.layout) {
-    if (w.connection?.type === "ssh") return { label: "S", cls: "ssh", title: "SSH" };
+    if (isRemoteConn(w.connection)) return { label: "S", cls: "ssh", title: "SSH" };
     return { label: "L", cls: "local", title: "Local" };
   }
   const panes = collectPanes(w.layout);
@@ -50,7 +50,7 @@ function workspaceBadge(w: Workspace): { label: string; cls: string; title: stri
   const first = findPane(w.layout, panes[0]);
   if (first?.pane_kind === "browser") return { label: "B", cls: "browser", title: "Browser" };
   if (first?.pane_kind === "filemanager") return { label: "F", cls: "filemanager", title: "File manager" };
-  if (first?.connection?.type === "ssh") return { label: "S", cls: "ssh", title: "SSH" };
+  if (isRemoteConn(first?.connection)) return { label: "S", cls: "ssh", title: "SSH" };
   return { label: "L", cls: "local", title: "Local" };
 }
 

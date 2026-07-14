@@ -842,136 +842,45 @@ export class TerminalInstance {
   /** One-shot guard for {@link scheduleInitialFontMeasure}. */
   private fontMeasured = false;
 
-  /**
-   * Force xterm to RE-MEASURE the character cell, then refit + repaint.
-   *
-   * xterm measures the glyph cell once (at `term.open()`) and caches it;
-   * `fit()` never re-measures — it just divides the container size by that
-   * cached cell. So if the first measurement was wrong (container detached,
-   * or the web font not yet loaded) the grid stays "compressed" no matter
-   * how many times it refits. Re-assigning `fontFamily` makes xterm's
-   * CharSizeService measure again — exactly what the manual font-swap
-   * workaround did. We write the family twice (a trailing space is a CSS
-   * no-op but a *different string*, so the option-change fires even if the
-   * value is otherwise unchanged) and finish on the clean value.
-   */
-  /**
-   * The first family in the current `fontFamily` list that the browser can
-   * actually render (via `document.fonts.check`), skipping CSS generics and
-   * junk tokens from a malformed name (`Courier 10,12,15 (120)` splits into
-   * `Courier 10` / `12` / `15 (120)`, none of which are real faces). This is
-   * the face that will actually paint, so bouncing THROUGH it primes exactly
-   * the right measurement.
-   */
-  private firstRenderableFamily(size: number): string | null {
-    const list = String(this.term.options.fontFamily ?? "");
-    for (const raw of list.split(",")) {
-      const f = raw.trim().replace(/^["']|["']$/g, "");
-      if (!f) continue;
-      if (
-        /^(monospace|serif|sans-serif|ui-monospace|system-ui|cursive|fantasy)$/i.test(
-          f,
-        )
-      )
-        continue;
-      try {
-        if (document.fonts.check(`${size}px "${f}"`)) return f;
-      } catch {}
-    }
-    return null;
-  }
-
   remeasureFont(): void {
-    const fam = this.term.options.fontFamily ?? "monospace";
-    const size = Number(this.term.options.fontSize ?? 14);
-    // xterm de-dupes a no-op fontFamily write (same string → no re-measure),
-    // so we must bounce through a DIFFERENT family and restore. The manual
-    // font-swap that renders correctly bounces through the REAL face
-    // ("Cascadia Mono"), which primes that face so the restored list keeps
-    // measuring it. A neutral "monospace" sentinel instead let the restore
-    // fall to a later fallback (Consolas → 10.996px, the "weird letter
-    // gaps"). So bounce through the first *renderable* family in the list.
-    const bounce = this.firstRenderableFamily(size) ?? "monospace";
+    // Reproduce exactly what re-picking the font in Settings does — force
+    // xterm to re-measure the character cell, then refit + repaint. xterm
+    // caches the cell from its first measurement at term.open() (while the
+    // pane is still detached and/or the web font isn't loaded yet), and
+    // fit() never re-measures — it just divides the container by that stale
+    // cell — so a fresh pane renders wrong until something nudges it.
+    //
+    // Nudge fontSize (a real value change → guaranteed re-measure) and
+    // restore it, WITHOUT touching fontFamily, so the measurement re-runs on
+    // the user's actual family list and can't resolve to a different
+    // fallback than the font they chose.
     try {
-      this.term.options.fontFamily = bounce;
-      // Measure the primed face this tick (mirrors setTerminalFont, which
-      // sets family+size+fit+refresh together — that synchronous cycle is
-      // what actually lands the correct measurement).
-      this.fitAndResize(true);
+      const px = Number(this.term.options.fontSize ?? 14);
+      this.term.options.fontSize = px + 1;
+      this.term.options.fontSize = px;
+    } catch (e) {
+      console.warn("remeasureFont: fontSize nudge failed", e);
+    }
+    this.fitAndResize(true);
+    try {
       this.term.refresh(0, this.term.rows - 1);
-    } catch (e) {
-      console.warn("remeasureFont: bounce set failed", e);
-    }
-    requestAnimationFrame(() => {
-      if (!g_terminals.has(this)) return;
-      try {
-        this.term.options.fontFamily = fam;
-      } catch (e) {
-        console.warn("remeasureFont: restore failed", e);
-      }
-      this.fitAndResize(true);
-      try {
-        this.term.refresh(0, this.term.rows - 1);
-      } catch {}
-    });
+    } catch {}
   }
 
   /**
-   * Explicitly load every candidate font family in the current
-   * `fontFamily` list (via the CSS Font Loading API), then re-measure.
-   *
-   * Root cause of the "improved but still slightly off" pane: at mount
-   * `document.fonts.ready` can resolve before the intended face (e.g.
-   * "Cascadia Mono") has actually been requested, so the re-measure lands
-   * on a later fallback (Consolas → 10.996px) instead of the real font
-   * (Cascadia → 11.719px). Forcing each candidate to load first pins the
-   * measurement to the same face the manual font-swap produced. Junk
-   * tokens from a malformed family name (`Courier 10,12,15 (120)` splits
-   * on its commas) simply fail to load and are ignored.
-   */
-  private async preloadFontsThenRemeasure(): Promise<void> {
-    try {
-      const size = Number(this.term.options.fontSize ?? 14);
-      const list = String(this.term.options.fontFamily ?? "");
-      const families = list
-        .split(",")
-        .map((f) => f.trim().replace(/^["']|["']$/g, ""))
-        .filter(
-          (f) =>
-            f.length > 0 &&
-            // drop CSS generic keywords — they always "resolve" and would
-            // short-circuit the wait without loading the real face.
-            !/^(monospace|serif|sans-serif|ui-monospace|system-ui|cursive|fantasy)$/i.test(
-              f,
-            ) &&
-            // a real font-face name is letters/spaces/digits/.-; anything
-            // with other chars (e.g. the malformed "15 (120)") can't load.
-            /^[\w .-]+$/.test(f),
-        );
-      await Promise.all(
-        families.map((f) =>
-          document.fonts.load(`${size}px "${f}"`).catch(() => undefined),
-        ),
-      );
-      if (typeof document.fonts.ready?.then === "function") {
-        await document.fonts.ready.catch(() => undefined);
-      }
-    } catch (e) {
-      console.warn("preloadFontsThenRemeasure: font preload failed", e);
-    }
-    if (!g_terminals.has(this)) return;
-    this.remeasureFont();
-  }
-
-  /**
-   * Font-init fix: as soon as this pane's container is in the DOM and the
-   * web font has loaded, run a single {@link remeasureFont}. Waits for
-   * `document.fonts.ready` (covers web-font load timing) and retries per
-   * animation frame until the container is actually attached (covers the
-   * detached-at-construction case). The `g_terminals` check stops the
-   * retry loop if the pane is disposed before it ever mounts.
+   * Font-init fix: once this pane's container is in the DOM, re-measure the
+   * font (see {@link remeasureFont}). Runs once when connected, then a few
+   * more times over ~1s to beat the web-font load race — the intended face
+   * may still be loading at first paint, and re-measuring after it lands
+   * pins the correct cell size (the same thing re-picking the font in
+   * Settings does). Extra passes are cheap and idempotent; the
+   * `g_terminals` check stops them if the pane is disposed meanwhile.
    */
   private scheduleInitialFontMeasure(): void {
+    const remeasure = () => {
+      if (!g_terminals.has(this) || !this.container.isConnected) return;
+      this.remeasureFont();
+    };
     const run = () => {
       if (this.fontMeasured || !g_terminals.has(this)) return;
       if (!this.container.isConnected) {
@@ -980,7 +889,12 @@ export class TerminalInstance {
         return;
       }
       this.fontMeasured = true;
-      void this.preloadFontsThenRemeasure();
+      remeasure();
+      // Re-run after the web font has had time to load — the first pass can
+      // measure a fallback if the intended face isn't ready at first paint.
+      for (const delay of [150, 400, 900]) {
+        window.setTimeout(remeasure, delay);
+      }
     };
     const kick = () => requestAnimationFrame(run);
     const fonts =

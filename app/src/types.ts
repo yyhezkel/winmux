@@ -180,3 +180,85 @@ export function describeConnection(c: Connection): string {
   if (c.type === "local") return c.shell ? `local · ${c.shell}` : "local";
   return `ssh ${c.user}@${c.host}:${c.port}`;
 }
+
+
+// beta.3-localhost — Unified SSH gate.
+//
+// The connection discriminator lives on the ts-rs-generated `Connection`
+// binding (`{ type: "local" | "ssh" }`). Before this refactor, ~10 sites
+// across App.tsx, Sidebar.tsx, FileManagerWindow.tsx and PaneView.tsx
+// repeated `c?.type === "ssh"` inline, with subtle semantic drift
+// (workspace-only vs. layout-walk vs. pane-with-fallback). These
+// predicates collapse the pattern to three sharp questions:
+//
+//   isRemoteConn(c)        → is *this* connection SSH?
+//   isRemoteWorkspace(w)   → workspace's declared connection is SSH?
+//   hasSftp(w)             → SFTP-capable? (workspace *or* any pane)
+//   hasServer(w)           → has a control-plane server? (today == remote)
+//   isRemoteEffective(...) → pane's own conn OR workspace's fallback
+//
+// `hasServer` splits from `isRemote` deliberately: LOCAL-HOST plan #2
+// wires a native local server, at which point `hasServer(local)` flips
+// to true without churning every callsite. Keep the seam.
+export function isRemoteConn(
+  c: Connection | null | undefined,
+): c is Extract<Connection, { type: "ssh" }> {
+  return !!c && c.type === "ssh";
+}
+
+export function isLocalConn(
+  c: Connection | null | undefined,
+): boolean {
+  // null / undefined connections are treated as local (matches historical
+  // FE behavior — a workspace with no connection field is a local shell).
+  return !c || c.type === "local";
+}
+
+export function isRemoteWorkspace(w: { connection: Connection | null }): boolean {
+  return isRemoteConn(w.connection);
+}
+
+export function isLocalWorkspace(w: { connection: Connection | null }): boolean {
+  return isLocalConn(w.connection);
+}
+
+// SFTP is available when the workspace declares SSH OR any pane in the
+// layout is on an SSH connection (used by FileManagerPane to decide
+// whether to render the remote column). Kept as a single predicate so
+// call sites don't re-inline the layout walk.
+export function hasSftp(
+  w: { connection: Connection | null; layout: LayoutNode | null },
+): boolean {
+  if (isRemoteConn(w.connection)) return true;
+  if (!w.layout) return false;
+  const walk = (n: LayoutNode): boolean => {
+    if (n.kind === "pane") return isRemoteConn(n.connection);
+    return walk(n.first) || walk(n.second);
+  };
+  return walk(w.layout);
+}
+
+// beta.3-lh-insights: native local Insights daemon shipped. Every workspace
+// now has a control-plane server — remote via SSH → `winmux-server`, local
+// via in-process sysinfo + bollard. So `hasServer` collapses to `true`, but
+// we keep the predicate (rather than deleting every call site) in case a
+// future workspace kind ("read-only", "sandbox") lands without a server.
+export function hasServer(_w: { connection: Connection | null }): boolean {
+  return true;
+}
+
+// Pane's effective connection: own > workspace fallback. Used by PaneView
+// where the pane may not carry a connection of its own (FM/Browser/Chat)
+// but still sits inside an SSH workspace and needs SSH-only menu items.
+export function isRemoteEffective(
+  pane: { connection?: Connection | null },
+  workspaceConn: Connection | null | undefined,
+): boolean {
+  return isRemoteConn(pane.connection ?? workspaceConn);
+}
+
+// Exhaustiveness guard — if a future Connection variant is added the
+// TypeScript compiler flags every switch that forgot to handle it.
+export function assertNever(x: never, msg = "unreachable"): never {
+  throw new Error(`${msg}: ${JSON.stringify(x)}`);
+}

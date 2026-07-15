@@ -11,6 +11,10 @@ mod connect_wizard;
 mod dev;
 mod diff_pane;
 mod file_manager;
+// beta.3-lh-insights: native local Insights (sysinfo + bollard) for the
+// Monitor panel on Local workspaces. Commands mirror the remote daemon's
+// JSON shape so `insights_fetch` can route local vs. SSH transparently.
+mod insights_local;
 mod local_wizard;
 mod notes;
 mod osc_notify;
@@ -6355,6 +6359,15 @@ pub fn run() {
             addons::insights_fetch,
             addons::insights_docker_action,
             addons::insights_hygiene_kill,
+            // beta.3-lh-insights: native local Insights commands. The panel
+            // primarily goes through `insights_fetch` (which routes local↔SSH
+            // internally), but we expose these too for direct callers.
+            insights_local::insights_local_current,
+            insights_local::insights_local_docker,
+            insights_local::insights_local_processes,
+            insights_local::insights_local_hygiene,
+            insights_local::insights_local_logs,
+            insights_local::insights_local_docker_action,
             // Phase 70: mobile pairing (nginx + Cloudflare + Let's Encrypt).
             pairing::mobile_pairing_init,
             pairing::mobile_pairing_status,

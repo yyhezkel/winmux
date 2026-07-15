@@ -59,6 +59,9 @@ import {
   describeConnection,
   effectiveIdentity,
   findPane,
+  hasSftp,
+  isRemoteConn,
+  isRemoteWorkspace,
   pruneLayout,
   type Connection,
   type EnvVar,
@@ -137,7 +140,7 @@ function App() {
   const [connectingWs, setConnectingWs] = createSignal<string | null>(null);
   const armWorkspaceConnection = async (): Promise<void> => {
     const ws = activeWs();
-    if (!ws || ws.connection?.type !== "ssh") return;
+    if (!ws || !isRemoteWorkspace(ws)) return;
     setConnectingWs(ws.id);
     try {
       await invoke("workspace_ensure_connected", { workspaceId: ws.id });
@@ -904,7 +907,7 @@ function App() {
     if (ws.id === lastAutoConnectWs) return;
     lastAutoConnectWs = ws.id;
     if (s.auto_connect_on_workspace_select === false) return;
-    if (ws.connection?.type !== "ssh") return;
+    if (!isRemoteWorkspace(ws)) return;
     void invoke("workspace_ensure_connected", { workspaceId: ws.id }).catch((e) =>
       console.warn("workspace_ensure_connected failed", e),
     );
@@ -957,7 +960,7 @@ function App() {
     const key = `${ws.id}:${ws.auto_port_forward ? 1 : 0}`;
     if (key === lastPortsEnsuredWs) return;
     lastPortsEnsuredWs = key;
-    if (ws.connection?.type !== "ssh") return;
+    if (!isRemoteWorkspace(ws)) return;
     if (!ws.auto_port_forward) return;
     ensurePortsSnapshot(ws.id);
   });
@@ -1386,7 +1389,7 @@ function App() {
       const pane = findPaneInActiveWs(paneId);
       if (
         pane &&
-        pane.connection.type === "ssh" &&
+        isRemoteConn(pane.connection) &&
         msg.includes("authentication failed")
       ) {
         setPendingPwFor(paneId);
@@ -2619,22 +2622,14 @@ function App() {
                       return l ? collectPanes(l).length : 0;
                     })()}
                     workspaceIsSsh={
-                      // Phase 16: walk the active workspace's layout looking for
-                      // any pane with an SSH connection. We pre-compute this
-                      // here so FileManagerPane (which lives deeper in the
-                      // tree and has no connection of its own) can render the
-                      // remote column even before the user opens a terminal.
+                      // beta.3-localhost: was an inline layout walk (Phase 16).
+                      // Collapsed to hasSftp() — same semantics, single site of
+                      // truth. LayoutView keeps the prop for signature stability
+                      // even though the local that consumed it is gone (see
+                      // LayoutView.tsx LeafPane comment).
                       (() => {
                         const ws = activeWs();
-                        if (!ws) return false;
-                        if (ws.connection?.type === "ssh") return true;
-                        const walk = (n: LayoutNode): boolean => {
-                          if (n.kind === "pane") {
-                            return n.connection?.type === "ssh";
-                          }
-                          return walk(n.first) || walk(n.second);
-                        };
-                        return ws.layout ? walk(ws.layout) : false;
+                        return ws ? hasSftp(ws) : false;
                       })()
                     }
                     pendingPasswordFor={pendingPwFor()}
@@ -2753,7 +2748,7 @@ function App() {
           return ws ? (
             <FileManagerPane
               workspaceId={ws.id}
-              hasSsh={ws.connection?.type === "ssh"}
+              hasSsh={isRemoteWorkspace(ws)}
               hasActiveSession={liveWorkspaceIds().has(ws.id)}
             />
           ) : (

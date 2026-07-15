@@ -3,7 +3,7 @@ import {
   createSignal,
   Show,
 } from "solid-js";
-import type { Workspace } from "./types";
+import { isRemoteWorkspace, type Workspace } from "./types";
 import { FileManagerPane } from "./FileManagerPane";
 import { t } from "./i18n";
 import { IconFolder, IconClose } from "./icons";
@@ -68,9 +68,11 @@ function saveGeometry(workspaceId: string, g: Geometry): void {
   }
 }
 
+// beta.3-localhost: local wrapper kept to preserve the isSshWorkspace()
+// call-site name inside this file; the actual predicate now lives in
+// types.ts (isRemoteWorkspace).
 function isSshWorkspace(w: Workspace | null): boolean {
-  if (!w) return false;
-  return w.connection?.type === "ssh";
+  return w ? isRemoteWorkspace(w) : false;
 }
 
 export function FileManagerWindow(p: Props) {

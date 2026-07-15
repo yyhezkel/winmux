@@ -4,6 +4,8 @@
   "osc.download.started": "Загрузка {name}…",
   "osc.download.done": "Загружено в {path}",
   "osc.download.failed": "Не удалось загрузить: {msg}",
+  "filelink.relative.copied": "Относительный путь скопирован — он отсчитывается от каталога панели: {path}",
+  "filelink.relative.copyfail": "Не удалось скопировать путь: {path}",
   "sidebar.collapse.tooltip": "Свернуть боковую панель",
   "sidebar.expand.tooltip": "Развернуть боковую панель",
   "sidebar.resize.tooltip": "Потяните, чтобы изменить ширину панели",
@@ -878,4 +880,3 @@
   "reconnect.success": "Переподключено к {host}",
   "reconnect.failed": "Не удалось переподключиться к {host}. Кликните панель, чтобы повторить."
 }
-

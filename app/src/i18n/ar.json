@@ -4,6 +4,8 @@
   "osc.download.started": "جارٍ تنزيل {name}…",
   "osc.download.done": "تم التنزيل إلى {path}",
   "osc.download.failed": "فشل التنزيل: {msg}",
+  "filelink.relative.copied": "تم نسخ المسار النسبي — وهو نسبي لمجلد اللوحة: {path}",
+  "filelink.relative.copyfail": "تعذر نسخ المسار: {path}",
   "sidebar.collapse.tooltip": "طيّ الشريط الجانبي",
   "sidebar.expand.tooltip": "توسيع الشريط الجانبي",
   "sidebar.resize.tooltip": "اسحب لتغيير عرض الشريط الجانبي",
@@ -878,4 +880,3 @@
   "reconnect.success": "تمت إعادة الاتصال بـ {host}",
   "reconnect.failed": "تعذّرت إعادة الاتصال بـ {host}. انقر على اللوحة للمحاولة مجددًا."
 }
-

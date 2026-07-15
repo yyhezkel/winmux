@@ -2361,6 +2361,28 @@ function App() {
     };
     window.addEventListener("winmux:osc-file-link", handleOscFileLink);
 
+    // Phase 64 (J, Track B): a plain-text `[file]` link with a RELATIVE
+    // path was clicked. We can't resolve it against the pane's remote cwd
+    // (no OSC 7 tracking yet), so copy the path to the clipboard and tell
+    // the user it's relative to the pane's directory.
+    const handleFileLinkRelative = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { path: string } | null;
+      if (!detail?.path) return;
+      void navigator.clipboard.writeText(detail.path).then(
+        () =>
+          flashSummaryToast(
+            "ok",
+            t("filelink.relative.copied", { path: detail.path }),
+          ),
+        () =>
+          flashSummaryToast(
+            "err",
+            t("filelink.relative.copyfail", { path: detail.path }),
+          ),
+      );
+    };
+    window.addEventListener("winmux:file-link-relative", handleFileLinkRelative);
+
     onCleanup(() => {
       for (const u of unlistens) u();
       window.removeEventListener("keydown", handleKey);
@@ -2368,6 +2390,10 @@ function App() {
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("winmux:pane-maximize", handlePaneMaximize);
       window.removeEventListener("winmux:osc-file-link", handleOscFileLink);
+      window.removeEventListener(
+        "winmux:file-link-relative",
+        handleFileLinkRelative,
+      );
       for (const [pid] of paneToSession) {
         invoke("pane_disconnect", { paneId: pid }).catch(() => {});
       }

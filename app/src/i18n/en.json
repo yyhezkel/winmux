@@ -4,6 +4,8 @@
   "osc.download.started": "Downloading {name}…",
   "osc.download.done": "Downloaded to {path}",
   "osc.download.failed": "Download failed: {msg}",
+  "filelink.relative.copied": "Relative path copied — it resolves against the pane's directory: {path}",
+  "filelink.relative.copyfail": "Couldn't copy the path: {path}",
   "sidebar.collapse.tooltip": "Collapse sidebar",
   "sidebar.expand.tooltip": "Expand sidebar",
   "sidebar.resize.tooltip": "Drag to resize the sidebar",
@@ -878,4 +880,3 @@
   "reconnect.success": "Reconnected to {host}",
   "reconnect.failed": "Couldn't reconnect to {host}. Click the pane to retry."
 }
-

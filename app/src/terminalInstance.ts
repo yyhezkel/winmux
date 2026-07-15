@@ -1,4 +1,4 @@
-import { Terminal, type IDisposable } from "@xterm/xterm";
+import { Terminal, type IDisposable, type ILink } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
@@ -55,6 +55,15 @@ function fileUriToPath(uri: string): string | null {
   }
   return rest;
 }
+
+// Phase 64 (J, Track B): Claude Code prints produced files as PLAIN TEXT —
+// `[file] <path> (<size>)` — with no OSC 8 wrapping (confirmed live
+// 2026-07-15: the OSC 8 transport works for Claude's *other* links, but
+// `[file]` never arrives as one). This regex drives a custom xterm link
+// provider that makes the `[file] <path> (<size>)` run clickable. The path
+// is the first whitespace-free token after the tag; the trailing size paren
+// is optional so the match survives format drift.
+const FILE_LINK_RE = /\[file\]\s+(\S+)(?:\s+\(([^()]{1,32})\))?/g;
 
 // Phase 9.A live font apply + Phase 15.A per-line auto-direction.
 //
@@ -382,6 +391,12 @@ export class TerminalInstance {
    * per-row dir attribute observer); the renderer choice is sticky. */
   rtlModeAtConstruct: RtlMode;
   private dataDisposable: IDisposable | null = null;
+  // Phase 64 (J, Track B): the plain-text `[file]` link provider handle +
+  // a one-shot "it matched" diagnostic flag (metadata only, Rule #1) so a
+  // live test can distinguish "regex never matched the real format" from
+  // "click path is broken".
+  private fileLinkProvider: IDisposable | null = null;
+  private fileLinkMatchLogged = false;
   private ro: ResizeObserver | null = null;
   private dirObserver: MutationObserver | null = null;
   // v0.4.4 (RTL Approach C): rAF handle + per-row text cache for the
@@ -520,6 +535,61 @@ export class TerminalInstance {
     // how it reaches the system clipboard). xterm.js ignores OSC 52 without
     // this addon — which is exactly why "copy didn't work" in fullscreen.
     this.term.loadAddon(new ClipboardAddon(undefined, g_oscClipboardProvider));
+    // Phase 64 (J, Track B): make Claude's plain-text `[file] <path> (<size>)`
+    // lines clickable. Absolute paths reuse the existing OSC 8 file-link
+    // download path (Save-As dialog via App); relative paths can't be
+    // resolved — winmux has no per-pane remote cwd (OSC 7 tracking is the
+    // future prerequisite) — so the click copies the path and a toast says
+    // it's relative to the pane's directory.
+    this.fileLinkProvider = this.term.registerLinkProvider({
+      provideLinks: (y, callback) => {
+        const line = this.term.buffer.active.getLine(y - 1);
+        if (!line) return callback(undefined);
+        const text = line.translateToString(true);
+        let links: ILink[] | undefined;
+        FILE_LINK_RE.lastIndex = 0;
+        for (let m = FILE_LINK_RE.exec(text); m; m = FILE_LINK_RE.exec(text)) {
+          const path = m[1];
+          if (!this.fileLinkMatchLogged) {
+            this.fileLinkMatchLogged = true;
+            void invoke("diag_log", {
+              level: "info",
+              msg: `[file] link provider matched in pane ${this.paneId}`,
+            }).catch(() => {});
+          }
+          (links ??= []).push({
+            // xterm buffer ranges are 1-based with an inclusive end cell.
+            range: {
+              start: { x: m.index + 1, y },
+              end: { x: m.index + m[0].length, y },
+            },
+            text: m[0],
+            activate: () => {
+              if (path.startsWith("/")) {
+                window.dispatchEvent(
+                  new CustomEvent("winmux:osc-file-link", {
+                    detail: { workspaceId: this.workspaceId, path },
+                  }),
+                );
+              } else {
+                window.dispatchEvent(
+                  new CustomEvent("winmux:file-link-relative", {
+                    detail: { path },
+                  }),
+                );
+              }
+            },
+            hover: () => {
+              this.container.title = path;
+            },
+            leave: () => {
+              this.container.removeAttribute("title");
+            },
+          });
+        }
+        callback(links);
+      },
+    });
     this.term.open(this.container);
 
     // Phase 16: custom key handler. When the user presses plain
@@ -1209,6 +1279,8 @@ export class TerminalInstance {
     }
     this.ro?.disconnect();
     this.ro = null;
+    this.fileLinkProvider?.dispose();
+    this.fileLinkProvider = null;
     this.dirObserver?.disconnect();
     this.dirObserver = null;
     // v0.4.4-beta.4 (RTL mouse fix): tear down the capture-phase listener

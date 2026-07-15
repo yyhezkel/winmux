@@ -4,6 +4,8 @@
   "osc.download.started": "מוריד את {name}…",
   "osc.download.done": "הורד אל {path}",
   "osc.download.failed": "ההורדה נכשלה: {msg}",
+  "filelink.relative.copied": "נתיב יחסי הועתק — הוא יחסי לתיקייה של ה-pane: {path}",
+  "filelink.relative.copyfail": "העתקת הנתיב נכשלה: {path}",
   "sidebar.collapse.tooltip": "כיווץ הסרגל",
   "sidebar.expand.tooltip": "הרחבת הסרגל",
   "sidebar.resize.tooltip": "גרור לשינוי רוחב הסרגל",
@@ -878,4 +880,3 @@
   "reconnect.success": "מחובר מחדש ל-{host}",
   "reconnect.failed": "לא הצלחתי להתחבר מחדש ל-{host}. לחץ על הפאנל לניסיון נוסף."
 }
-

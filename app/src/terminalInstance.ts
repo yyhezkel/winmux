@@ -140,10 +140,13 @@ export function setTerminalFont(family: string, sizePt: number): void {
   g_fontSizePx = px;
   for (const ti of g_terminals) {
     try {
+      ti.logFontSwap("before");
       ti.term.options.fontFamily = family;
       ti.term.options.fontSize = px;
       ti.fitAndResize();
       ti.term.refresh(0, ti.term.rows - 1);
+      ti.logFontSwap("afterSet");
+      requestAnimationFrame(() => ti.logFontSwap("settled"));
     } catch (e) {
       console.warn("setTerminalFont: per-instance update failed", e);
     }
@@ -988,6 +991,18 @@ export class TerminalInstance {
     NonNullable<XtermInternals["_core"]>["_charSizeService"]
   > | undefined {
     return (this.term as unknown as XtermInternals)._core?._charSizeService;
+  }
+
+  /** Diagnostic: log this pane's measured cell + applied font (Rule #1:
+   *  metrics only). Public so the module-level setTerminalFont can trace the
+   *  manual font-swap path. */
+  logFontSwap(label: string): void {
+    const cs = this.cs();
+    const fam = String(this.term.options.fontFamily ?? "").slice(0, 40);
+    void invoke("diag_log", {
+      level: "info",
+      msg: `[font-swap] ${label} pane=${this.paneId} charSvc=${cs?.width}x${cs?.height} size=${this.term.options.fontSize} fam=${JSON.stringify(fam)}`,
+    }).catch(() => {});
   }
 
   /**

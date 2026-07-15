@@ -1,0 +1,14 @@
+PROGRESS LOG — append-only. Newest entries at bottom. Rotate as PROGRESS_OLD_<date>.txt when this file gets unwieldy.
+
+Entry format:
+
+==================================================================
+[YYYY-MM-DD HH:MM TZ] session=<id-or-tag>
+TASK: <one-line summary>
+FILES:
+  M <path>
+  A <path>
+  D <path>
+RESULT: <verified-live | compiles-untested | reverted | partial>
+NOTES: <optional — anything a future session would want to grep for>
+==================================================================

@@ -11,6 +11,14 @@ This file is read at the start of every Claude session working on winmux. Keep i
 - `docs/COMPETITIVE-SCAN.md` — survey of 8 winmux projects, ideas inventory, Secrets Vault design
 - `docs/IDEAS-RANKING.md` — decision table for the ideas inventory (MUST / SHOULD / COULD)
 
+## Session workflow (memory arch)
+
+- **PROGRESS.txt** — append after every significant change (timestamp, task, files, result). NEVER overwrite. Too big → rename `PROGRESS_OLD_<date>.txt`, start fresh.
+- **FOLLOWUPS.md / BACKLOG.md** — read both at session start. Open P0/P1 in FOLLOWUPS → surface before new work. Out-of-scope bug found in passing → one line to FOLLOWUPS (P0-P3, file:line, repro). Out-of-scope idea / mock-stub debt → BACKLOG. Never silently leave broken state.
+- **Past-work lookup order** — before re-investigating: 1) `PROGRESS.txt` + `PROGRESS_OLD_*` 2) `git log --all --oneline --grep=<keyword>` 3) memory search 4) `docs/*.md` + this file.
+- **"Verified" = real run, not compile.** Build/type-check pass = syntax only. Say "compiles, untested" until run live.
+- **Sync this file with code.** New port/service/endpoint/schema/deploy step → update the matching doc in the same commit.
+
 ## Decisions & open threads
 
 When an idea or design question comes up:

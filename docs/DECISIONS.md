@@ -62,6 +62,15 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 - **Effort:** M
 - **State:** Open — deferred to v0.5.x.
 
+
+---
+
+## Decided
+
+### 2026-07-15 — Phase 64 J — CLOSED: [file] links live-verified (Track B shipped)
+- **Yossi live test (2026-07-15): WORKS.** Hover underline + tooltip, click → Save-As download / relative-path copy toast, all confirmed in the debug build. Thread open since 2026-06-18 — closed. Original entry (with the full Track A/B history) preserved below.
+- Same test round also confirmed: theme_mode switcher (Design Pass 01), 66.F custom policy lists (gate card fires on a custom pattern), 66.G notification→pane jump. The Welcome screen is conditional-state UI (only shows with zero workspaces / an empty workspace) — nothing to see on a populated install; left as shipped.
+
 ### 2026-06-18 — Phase 64 (J follow-up): Claude prints `[file]` as PLAIN TEXT, not OSC 8
 - **Finding (Yossi, live Claude test):** the `OSC8 hyperlink sequence detected` diagnostic NEVER fired, and `[file] <name> (<size>)` shows as plain text with no escape sequences. So the Phase 62.B/C `linkHandler` (correct for OSC 8) has nothing to bind — Claude isn't emitting OSC 8 in winmux (TERM/capability/env, or SSH/tmux stripping). The diagnostic dlog stays in as the litmus test.
 - **Two-track plan (for the dedicated J round — NOT implemented blind, both need live-Claude iteration):**
@@ -72,10 +81,6 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 - **RESOLVED data point (2026-07-15, Yossi live test): → Track B.** debug.log shows `OSC8 hyperlink sequence detected` fired 60× (recent, multiple panes) — so OSC 8 *transport* works and the linkHandler/`fileUriToPath` path is sound — but Yossi confirmed the `[file]` text has NO hover tooltip (not a link; a click only grabs selection, and zero `osc-file-link` activations ever hit the log). The detections are Claude's *other* links (https). Conclusion: Claude does not emit OSC 8 for `[file]` even with the injected env → Track A is dead.
 - **Track B v1 scope (agreed):** xterm `registerLinkProvider` on the visible `[file] <name> (<size>)` pattern (validate the exact live format first); click → absolute path → existing `winmux:osc-file-link` download path; relative path → manual-path toast fallback (per-pane cwd via OSC 7 stays a separate prerequisite for full relative support). **Build gate:** `terminalInstance.ts` is currently being modified by the live font session — implement only after it lands to avoid a collision.
 - **Track B v1 IMPLEMENTED (2026-07-15, same day — the font session landed and freed the file).** `FILE_LINK_RE` + `registerLinkProvider` in `terminalInstance.ts` (tolerant match: `[file] <token>` with optional `(<size>)`; size paren capped at 32 chars): absolute path (`/…`) → dispatches the existing `winmux:osc-file-link` Save-As download; relative path → new `winmux:file-link-relative` event → App copies the path to the clipboard + toast explaining it's relative to the pane's directory (i18n ×4, keys `filelink.relative.*`; parity 880). Hover shows the path as a tooltip; provider disposed in `dispose()`. One-shot `diag_log` "[file] link provider matched in pane …" (metadata only, Rule #1) so a live test separates "regex missed the real format" from "click path broken". tsc green. **Known v1 limits:** single-row matches only (a path that wraps across rows won't link); buffer-x mapping assumes no wide chars before the match on the line (true for Claude's ASCII `[file]` lines). **NEEDS YOSSI LIVE TEST:** produce a file in Claude → the `[file]` run should underline on hover; click → Save-As (absolute) or copied-path toast (relative). If the underline covers one char too many/few, the range end convention needs a ±1 — say so and it's a one-line fix.
-
----
-
-## Decided
 
 ### 2026-07-15 — design-pass-01 SALVAGED + Phase 66 round-2 leftovers BUILT (66.F / 66.G)
 - **design-pass-01 salvage — DONE (same day it was logged as backlog; Yossi moved it up).** Cherry-picked onto main: design docs + SVGs (`7fbc7fe`), RTL logical-property CSS (`b3c2965`), Welcome screen for the empty-workspace state incl. sidebar empty-CTA card (`cfd50e8`), `tokens.css` + `theme_mode` dark/light/system axis in Settings (`56bd57d`). Conflicts resolved as unions against the Lucide/groups-era code; ts-rs bindings regenerated; tsc + cargo green. The palette commit (`5413ef9`) was skipped — main absorbed a fuzzy palette separately. **The branch is now fully salvaged or superseded — deletable whenever.** `67-mobile` stays frozen per Yossi (archive ref; do not build on it).

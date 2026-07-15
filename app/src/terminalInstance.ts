@@ -970,6 +970,9 @@ export class TerminalInstance {
 
   /** One-shot guard for {@link scheduleInitialFontMeasure}. */
   private fontMeasured = false;
+  /** Detaches the `document.fonts` "loadingdone" listener installed by
+   *  {@link scheduleInitialFontMeasure}; null once detached. */
+  private fontsLoadingDoneTeardown: (() => void) | null = null;
 
   remeasureFont(): void {
     // Reproduce exactly what re-picking the font in Settings does — force
@@ -998,18 +1001,55 @@ export class TerminalInstance {
 
   /**
    * Font-init fix: once this pane's container is in the DOM, re-measure the
-   * font (see {@link remeasureFont}). Runs once when connected, then a few
-   * more times over ~1s to beat the web-font load race — the intended face
-   * may still be loading at first paint, and re-measuring after it lands
-   * pins the correct cell size (the same thing re-picking the font in
-   * Settings does). Extra passes are cheap and idempotent; the
-   * `g_terminals` check stops them if the pane is disposed meanwhile.
+   * font (see {@link remeasureFont}) so the stale first measurement xterm
+   * cached at `term.open()` (detached container / web font not loaded) gets
+   * corrected.
+   *
+   * The measure is driven by *actual font-load completion*, not by fixed
+   * timeouts — a heavier startup (Insights + RTL + netfree in the unified
+   * build) loads the terminal face LATER than a lighter one, so a
+   * `[150,400,900]ms` window silently missed the load and the pane stayed
+   * compressed. Instead we (1) measure immediately, (2) explicitly
+   * `document.fonts.load()` the real candidate faces and re-measure once
+   * they resolve — `document.fonts.ready` alone is not enough because the
+   * face isn't *pending* until something requests it — and (3) listen for
+   * any later `loadingdone` and re-measure then too. All passes are cheap
+   * and idempotent; the `g_terminals`/`isConnected` checks stop them if the
+   * pane is disposed meanwhile.
    */
   private scheduleInitialFontMeasure(): void {
     const remeasure = () => {
       if (!g_terminals.has(this) || !this.container.isConnected) return;
       this.remeasureFont();
     };
+    const fonts =
+      typeof document !== "undefined" ? document.fonts : undefined;
+
+    // Force-load every real candidate face in the family list, then
+    // re-measure. Skips CSS generics (they always "resolve" without loading
+    // a real face) and malformed comma-split junk (e.g. `Courier 10` /
+    // `15 (120)` from a picker-stored `Courier 10,12,15 (120)`).
+    const loadFacesThenRemeasure = () => {
+      if (!fonts || typeof fonts.load !== "function") return;
+      const size = Number(this.term.options.fontSize ?? 14);
+      const families = String(this.term.options.fontFamily ?? "")
+        .split(",")
+        .map((f) => f.trim().replace(/^["']|["']$/g, ""))
+        .filter(
+          (f) =>
+            f.length > 0 &&
+            !/^(monospace|serif|sans-serif|ui-monospace|system-ui|cursive|fantasy)$/i.test(
+              f,
+            ) &&
+            /^[\w .-]+$/.test(f),
+        );
+      Promise.allSettled(
+        families.map((f) => fonts.load(`${size}px "${f}"`)),
+      )
+        .then(remeasure)
+        .catch(() => {});
+    };
+
     const run = () => {
       if (this.fontMeasured || !g_terminals.has(this)) return;
       if (!this.container.isConnected) {
@@ -1018,21 +1058,26 @@ export class TerminalInstance {
         return;
       }
       this.fontMeasured = true;
-      remeasure();
-      // Re-run after the web font has had time to load - the first pass can
-      // measure a fallback if the intended face isn't ready at first paint.
-      for (const delay of [150, 400, 900]) {
-        window.setTimeout(remeasure, delay);
+      remeasure(); // immediate — covers a system font / already-loaded face
+      loadFacesThenRemeasure(); // force-load the real face → re-measure
+      if (fonts && typeof fonts.ready?.then === "function") {
+        fonts.ready.then(remeasure).catch(() => {}); // belt-and-suspenders
+      }
+      // A face may finish loading AFTER the passes above (slow link, heavy
+      // startup). Re-measure on any later font load, until a ceiling.
+      if (fonts && typeof fonts.addEventListener === "function") {
+        const onLoadingDone = () => remeasure();
+        fonts.addEventListener("loadingdone", onLoadingDone);
+        this.fontsLoadingDoneTeardown = () => {
+          try {
+            fonts.removeEventListener("loadingdone", onLoadingDone);
+          } catch {}
+          this.fontsLoadingDoneTeardown = null;
+        };
+        window.setTimeout(() => this.fontsLoadingDoneTeardown?.(), 5000);
       }
     };
-    const kick = () => requestAnimationFrame(run);
-    const fonts =
-      typeof document !== "undefined" ? document.fonts : undefined;
-    if (fonts && typeof fonts.ready?.then === "function") {
-      fonts.ready.then(kick).catch(kick);
-    } else {
-      kick();
-    }
+    requestAnimationFrame(run);
   }
 
   writeData(data: string) {
@@ -1109,6 +1154,9 @@ export class TerminalInstance {
     this.ro = null;
     this.dirObserver?.disconnect();
     this.dirObserver = null;
+    // Detach the font "loadingdone" listener so a freed pane doesn't keep
+    // re-measuring on later font loads.
+    this.fontsLoadingDoneTeardown?.();
     // v0.4.4-beta.4 (RTL mouse fix): tear down the capture-phase listener
     // so a disposed pane doesn't keep intercepting document/element mouse
     // events for the rest of the app's lifetime.

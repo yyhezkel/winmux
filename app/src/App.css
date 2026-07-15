@@ -883,11 +883,11 @@ body {
    reads even on a coloured pane. Uncoloured active panes also take an
    accent border. */
 .pane.active {
-  box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.5),
-    inset 0 0 0 1px rgba(122, 162, 247, 0.15);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--w-accent) 50%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--w-accent) 15%, transparent);
 }
 .pane.active:not([data-has-color="true"]) {
-  border-color: rgba(122, 162, 247, 0.55);
+  border-color: color-mix(in srgb, var(--w-accent) 55%, transparent);
 }
 /* Phase 49-A: visible highlight while an OS drag hovers a pane. */
 .pane.drop-target {

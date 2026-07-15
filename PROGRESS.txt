@@ -108,3 +108,30 @@ RESULT: compiles, UNTESTED live. tsc clean; vite build OK; dist confirms
   needs a Windows visual pass across Settings / File Manager / Browser /
   Notifications / Command Palette in each of the 8 presets.
 ------------------------------------------------------------------
+------------------------------------------------------------------
+2026-07-16 · Redesign themes — Windows build + LIVE smoke test (pass 4)
+TASK: the Windows pass the Linux sessions couldn't do: full build + live
+  visual verification of the 8 redesign presets, plus one fix found live.
+FILES:
+  M app/src/App.css (.pane.active ring: hardcoded rgba(122,162,247,…)
+      Tokyo-Night literals → color-mix over var(--w-accent), so the
+      active-pane accent ring follows every theme incl. the redesign 8)
+RESULT: verified-live (tauri dev on Windows). tsc clean, vite build OK,
+  cargo check --workspace green (2 pre-existing warnings). All 8 presets
+  applied + persisted from Settings → Theme; verified per direction:
+  fonts (serif/sans swap; Hebrew falls back per-glyph as designed),
+  light/dark grounds, accents, Modernist 2px modal frame, Broadsheet
+  double-rule masthead, Classical gold hairline, Industry corner marks
+  (pane + modal), Command Palette themed (checked under Classical Dark),
+  RTL layout intact throughout. Restored user's Nord preset after test.
+NOTES:
+  - Blue frame around the pane grid under every theme = per-workspace
+    color (--ws-color, Phase 62.B) on this install's workspaces — a
+    feature, not a theme leak. Diagnosed live before "fixing".
+  - Env gotchas hit + solved: stale dev-profile rlib of winmux-policy
+    (pre-66.F) broke `tauri dev` while `cargo check` passed — fixed by
+    cargo clean -p; leftover vite held port 1420 — killed.
+  - NOT yet checked live: waiting-ring recolour (needs an agent pending
+    approval), File Manager / Browser window / Notification Center
+    chrome per preset — worth a pass when those surfaces are in use.
+------------------------------------------------------------------

@@ -1018,30 +1018,45 @@ export class TerminalInstance {
 
   /**
    * Re-measure the cell by REPLICATING the manual Settings font-swap — the
-   * only thing proven to measure correctly. Data: a swap makes charSvc go
-   * 9.44x11 → 12.0x23 (the malformed `Courier 10,12,15 (120)` resolves to the
-   * real, scalable Courier New), while a direct CharSizeService.measure()
-   * leaves it stuck at 9.44x11. So we do what the swap does: apply a DIFFERENT
-   * (clean) family, then restore the settings family on the next frame — two
-   * genuine option changes via the same path setTerminalFont uses, which
-   * forces the browser to re-resolve the family to the scalable face.
+   * only thing proven to un-stick a bad measurement. Proven from the debug
+   * log: a fresh pane on the bitmap font `Courier 10,12,15 (120)` measures the
+   * cell "cold" at 9.44x11 (half-height → compressed). Re-applying the SAME
+   * family, or calling CharSizeService.measure() directly, leaves it at
+   * 9.44x11. But applying a DIFFERENT scalable family first and THEN restoring
+   * the user's family lands on the correct 12.0x23 and stays there — the
+   * intermediate scalable application forces the browser to re-resolve the
+   * cached cell. The final family is always the user's own setting
+   * (`g_fontFamily`); the intermediate is a throwaway unsticker, so whatever
+   * the user's family resolves to is unchanged from the manual swap-back.
+   *
+   * Timing matters: the working manual swap had the intermediate font actually
+   * painted before the swap-back, so we restore the real family after a DOUBLE
+   * requestAnimationFrame (one full paint of the intermediate), not the next
+   * frame. The self-verify loop in scheduleInitialFontMeasure retries if a
+   * single pass doesn't stick.
    */
   remeasureFont(): void {
     const real =
       g_fontFamily ?? String(this.term.options.fontFamily ?? "monospace");
     const px = g_fontSizePx ?? Number(this.term.options.fontSize ?? 14);
-    const clean =
-      '"Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace';
-    const intermediate = real === clean ? "monospace" : clean;
+    // Always-present Windows system scalable fonts → resolve synchronously,
+    // no web-font load race. Only needs to differ from `real` to trigger the
+    // re-resolution.
+    const unsticker = '"Consolas", "Courier New", monospace';
+    const intermediate = real === unsticker ? "monospace" : unsticker;
     this.applyFontOnce(intermediate, px);
     requestAnimationFrame(() => {
       if (!g_terminals.has(this)) return;
-      this.applyFontOnce(real, px);
-      const cs = this.cs();
-      void invoke("diag_log", {
-        level: "info",
-        msg: `[font-fix] pane=${this.paneId} afterSwap charSvc=${cs?.width}x${cs?.height} size=${this.term.options.fontSize}`,
-      }).catch(() => {});
+      // Second frame: the intermediate has now painted at least once.
+      requestAnimationFrame(() => {
+        if (!g_terminals.has(this)) return;
+        this.applyFontOnce(real, px);
+        const cs = this.cs();
+        void invoke("diag_log", {
+          level: "info",
+          msg: `[font-fix] pane=${this.paneId} afterSwap charSvc=${cs?.width}x${cs?.height} size=${this.term.options.fontSize}`,
+        }).catch(() => {});
+      });
     });
   }
 

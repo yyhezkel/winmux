@@ -73,10 +73,6 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 - **Effort:** M
 - **State:** Open — deferred to v0.5.x.
 
-### 2026-06-26 — (II) RTL caret — still PARKED (needs 1 runtime data point)
-Tried to ground a fix: xterm's lib is minified AND its DOM renderer tags every row `dir="auto"` (not explicit `rtl`), so **CSS cannot target only resolved-RTL rows** — a `[dir="auto"]` rule would break LTR too. A correct fix needs a JS render-hook that reads each row's *computed* direction, which I can't validate without seeing the live caret. So: when Yossi batch-tests, open devtools on the caret in a Hebrew line and send the `.xterm-cursor*` element + its computed `left`/`transform` + the row HTML → then it's a quick, safe fix. Not shipping a blind guess (it'd likely move the caret to a *different* wrong spot or break LTR).
-- **Update (2026-07-15):** the v0.4.4-beta.1 Approach C work (`521e116`) aligned the caret arrow-mirroring to `lineDirection()` — the standing candidate fix. Still needs ONE live check: caret position on a Hebrew line in beta.1+. If correct → close; if not → the devtools data point above still applies.
-
 ### 2026-06-18 — Phase 64 (J follow-up): Claude prints `[file]` as PLAIN TEXT, not OSC 8
 - **Finding (Yossi, live Claude test):** the `OSC8 hyperlink sequence detected` diagnostic NEVER fired, and `[file] <name> (<size>)` shows as plain text with no escape sequences. So the Phase 62.B/C `linkHandler` (correct for OSC 8) has nothing to bind — Claude isn't emitting OSC 8 in winmux (TERM/capability/env, or SSH/tmux stripping). The diagnostic dlog stays in as the litmus test.
 - **Two-track plan (for the dedicated J round — NOT implemented blind, both need live-Claude iteration):**
@@ -90,6 +86,10 @@ Tried to ground a fix: xterm's lib is minified AND its DOM renderer tags every r
 ---
 
 ## Decided
+
+### 2026-07-15 — (II) RTL caret — CLOSED, fixed by Approach C (thread open since 2026-06-26)
+- **Context:** the caret sat one cell off on RTL lines; parked for a month because xterm's minified DOM renderer + `dir="auto"` rows made any blind CSS fix likely to break LTR, and a live data point was never captured.
+- **Resolution:** the v0.4.4-beta.1 per-line direction work — Approach C (`521e116`), which computes an explicit per-row `dir` via `lineDirection()` and aligned the caret arrow-mirroring to the same rule — fixed it as a side effect. **Yossi confirmed live (2026-07-15): caret sits correctly on Hebrew lines in beta.1+.** No further action; the devtools-inspection plan is moot.
 
 ### 2026-07-15 — Netfree TLS fix: rustls + `native-certs`, NOT native-tls (revises f00fa1f)
 - **Context:** `f00fa1f` (beta.3-netfree) switched ureq to `default-features = false, features = ["native-tls"]` so the updater trusts the Windows Certificate Store (Netfree root). A parallel session hit a build error, and the investigation found the deeper problem too.

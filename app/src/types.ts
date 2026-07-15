@@ -238,11 +238,13 @@ export function hasSftp(
   return walk(w.layout);
 }
 
-// Placeholder for the future local-server split: when the native local
-// backend lands (LOCAL-HOST #2), this becomes `isRemote || hasNativeServer`.
-// Today it collapses to `isRemote` — same predicate, different meaning.
-export function hasServer(w: { connection: Connection | null }): boolean {
-  return isRemoteWorkspace(w);
+// beta.3-lh-insights: native local Insights daemon shipped. Every workspace
+// now has a control-plane server — remote via SSH → `winmux-server`, local
+// via in-process sysinfo + bollard. So `hasServer` collapses to `true`, but
+// we keep the predicate (rather than deleting every call site) in case a
+// future workspace kind ("read-only", "sandbox") lands without a server.
+export function hasServer(_w: { connection: Connection | null }): boolean {
+  return true;
 }
 
 // Pane's effective connection: own > workspace fallback. Used by PaneView

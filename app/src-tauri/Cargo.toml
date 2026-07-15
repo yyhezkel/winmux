@@ -91,6 +91,16 @@ winmux-addons = { path = "crates/winmux-addons", features = ["ts"] }
 # everyone produces; AES + Bzip2 + Zstd are turned off to keep the
 # binary lean — agents we package don't routinely emit those.
 zip = { version = "2", default-features = false, features = ["deflate", "time"] }
+# beta.3-lh-insights: native local Insights for Local workspaces (Windows-first).
+# sysinfo covers CPU/mem/disks/net/processes cross-platform without WMI plumbing.
+# bollard 0.17 auto-pulls hyper-named-pipe under `[target.'cfg(windows)']`,
+# so Windows Docker Desktop's `\\.\pipe\docker_engine` transport is available
+# without an extra feature flag. If Docker isn't running we return an empty
+# containers list rather than erroring.
+sysinfo = "0.32"
+bollard = { version = "0.17", default-features = false }
+# Direct dep for `StreamExt` on bollard's stats stream.
+futures-util = "0.3"
 
 [dev-dependencies]
 # Phase 50 (#2.4): integration test for diff_pane::fetch_diff against a

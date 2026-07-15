@@ -47,6 +47,26 @@ pub(crate) fn pick_handle(state: &AppState, workspace_id: &str) -> Option<Arc<Ss
     None
 }
 
+/// beta.3-lh-insights: is this workspace a Local one (no SSH)? Looked up
+/// against workspaces.json rather than the session map — a workspace stays
+/// "local" whether or not its terminal pane is connected right now.
+/// Returns `true` when the connection is missing OR of variant `Local`.
+pub(crate) fn is_local_workspace(state: &AppState, workspace_id: &str) -> bool {
+    let file = match state.workspaces.lock() {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    for w in &file.workspaces {
+        if w.id == workspace_id {
+            return matches!(
+                w.connection,
+                None | Some(winmux_types::Connection::Local { .. })
+            );
+        }
+    }
+    false
+}
+
 /// Run a command on the remote and capture stdout+stderr (best-effort, timed).
 pub(crate) async fn exec(handle: &SshHandle<SshClient>, cmd: &str, timeout_secs: u64) -> Result<String, String> {
     let mut ch = handle
@@ -790,6 +810,17 @@ pub(crate) async fn insights_fetch(
     if !safe_api_path(&path) {
         return Err("invalid insights path".into());
     }
+    // beta.3-lh-insights: Local workspaces have no `winmux-server` daemon on the
+    // other end — route to the in-process native snapshot so the panel still
+    // works. Frontend keeps calling `insights_fetch` with the same paths.
+    if is_local_workspace(&state, &workspace_id) {
+        let body = crate::insights_local::route_path(&path).await?;
+        crate::dlog_tag(
+            "MONITOR",
+            &format!("local fetch path={path} body_len={}", body.len()),
+        );
+        return Ok(body);
+    }
     let handle = pick_handle(&state, &workspace_id)
         .ok_or("no active SSH session for this workspace")?;
     let home = remote_home(&handle).await;
@@ -841,6 +872,11 @@ pub(crate) async fn insights_docker_action(
     if container_id.is_empty() || !container_id.bytes().all(|b| b.is_ascii_alphanumeric()) {
         return Err("invalid container id".into());
     }
+    // beta.3-lh-insights: same routing as insights_fetch — local workspaces
+    // drive Docker Desktop via bollard directly, no SSH.
+    if is_local_workspace(&state, &workspace_id) {
+        return crate::insights_local::docker_action(&container_id, &action).await;
+    }
     let handle = pick_handle(&state, &workspace_id)
         .ok_or("no active SSH session for this workspace")?;
     let home = remote_home(&handle).await;
@@ -865,6 +901,12 @@ pub(crate) async fn insights_hygiene_kill(
 ) -> Result<String, String> {
     if pids.is_empty() || pids.len() > 200 || pids.iter().any(|&p| p <= 0) {
         return Err("invalid pid list".into());
+    }
+    // beta.3-lh-insights: hygiene on local is a no-op — the Linux daemon's
+    // duplicate-port-watcher / orphan-claude classifier has no equivalent on
+    // Windows because there's no long-lived server process to leak.
+    if is_local_workspace(&state, &workspace_id) {
+        return Ok(r#"{"killed":[]}"#.to_string());
     }
     let list = pids
         .iter()

@@ -152,16 +152,139 @@
    Shared redesign chrome (all 8 presets).
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* Heading font on the app's heading-ish elements. */
+/* Heading font on the app's heading-ish elements — extended to every
+   dialog/window/panel title so the "mockless" screens (Settings, File
+   Manager, Browser, Notifications, Feed/Help/Hygiene/Insights, Create
+   Workspace, Notes, SSH-key offer, Provisioning, Ports, Command Palette)
+   pick up each direction's identity through the SAME shared chrome
+   primitives every one of those screens is built from. */
 [data-theme-family="redesign"] .sidebar-brand,
 [data-theme-family="redesign"] .pane-title,
 [data-theme-family="redesign"] .group-header-name,
-[data-theme-family="redesign"] .sidebar-section-title {
+[data-theme-family="redesign"] .sidebar-section-title,
+[data-theme-family="redesign"] .modal h3,
+[data-theme-family="redesign"] .fm-window-title,
+[data-theme-family="redesign"] .browser-window-title,
+[data-theme-family="redesign"] .side-drawer-title,
+[data-theme-family="redesign"] .notif-head-title,
+[data-theme-family="redesign"] .panel-chrome-title {
   font-family: var(--wmx-font-heading);
 }
 
 /* Marks are hidden unless a direction opts in (only Industry does). */
 .pane-marks { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Mockless screens — the design bundle only ever mocked the main screen.
+   Rather than restyle each dialog/window individually, this hits the
+   handful of SHARED chrome primitives every other screen is assembled
+   from, so one rule block reaches all of them:
+
+     .modal            → Settings, Create Workspace, Notes, SSH-key offer,
+                          Provisioning Wizard, Ports, File Editor, host/
+                          Claude/model pickers, smart-prompt, Connect
+                          Existing flow, Command Palette (sits on the same
+                          backdrop)
+     .fm-window         → File Manager, Addons window
+     .browser-window     → Browser window
+     .side-drawer /
+     .panel-chrome-head  → Notification Center, and the Feed / Help /
+                          Hygiene / Insights panels in float+fullscreen mode
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Give the fixed dialog/window surfaces a positioning context so the
+   Industry corner marks below can anchor to them. */
+[data-theme-family="redesign"] .modal,
+[data-theme-family="redesign"] .command-palette {
+  position: relative;
+}
+
+/* ── Industry: blueprint corner marks (CSS-only — no per-screen markup
+   needed) on the two most legible diagonal corners of every dialog/window/
+   drawer, echoing the pane's four-corner treatment. ── */
+[data-theme-preset^="industry"] .modal::before,
+[data-theme-preset^="industry"] .command-palette::before,
+[data-theme-preset^="industry"] .fm-window::before,
+[data-theme-preset^="industry"] .browser-window::before,
+[data-theme-preset^="industry"] .side-drawer::before {
+  content: "";
+  position: absolute;
+  top: 6px; inset-inline-start: 6px;
+  width: 11px; height: 11px;
+  z-index: 5;
+  opacity: 0.7;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--w-border-hi), var(--w-border-hi)) center / 100% 1.5px no-repeat,
+    linear-gradient(var(--w-border-hi), var(--w-border-hi)) center / 1.5px 100% no-repeat;
+}
+[data-theme-preset^="industry"] .modal::after,
+[data-theme-preset^="industry"] .command-palette::after,
+[data-theme-preset^="industry"] .fm-window::after,
+[data-theme-preset^="industry"] .browser-window::after {
+  content: "";
+  position: absolute;
+  bottom: 6px; inset-inline-end: 6px;
+  width: 11px; height: 11px;
+  z-index: 5;
+  opacity: 0.7;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--w-border-hi), var(--w-border-hi)) center / 100% 1.5px no-repeat,
+    linear-gradient(var(--w-border-hi), var(--w-border-hi)) center / 1.5px 100% no-repeat;
+}
+/* The side-drawer is edge-docked (full viewport height) — a bottom mark
+   would sit off past the fold, so it only gets the top-start mark. */
+
+/* ── Broadsheet: masthead double rule under every dialog/window/drawer
+   heading, matching the sidebar brand treatment. ── */
+[data-theme-preset^="broadsheet"] .modal h3 {
+  border-bottom: 3px double var(--w-text);
+  padding-bottom: 8px;
+}
+[data-theme-preset^="broadsheet"] .fm-window-header,
+[data-theme-preset^="broadsheet"] .browser-window-header,
+[data-theme-preset^="broadsheet"] .side-drawer-head,
+[data-theme-preset^="broadsheet"] .notif-head,
+[data-theme-preset^="broadsheet"] .panel-chrome-head {
+  border-bottom: 3px double var(--w-border-hi);
+}
+
+/* ── Modernist: heavy 2px frame + uppercase, tracked titles — the same
+   grammar as the pane, applied to every dialog/window/drawer. ── */
+[data-theme-preset^="modernist"] .modal,
+[data-theme-preset^="modernist"] .command-palette,
+[data-theme-preset^="modernist"] .fm-window,
+[data-theme-preset^="modernist"] .browser-window {
+  border-width: 2px;
+}
+[data-theme-preset^="modernist"] .side-drawer { border-inline-start-width: 2px; }
+[data-theme-preset^="modernist"] .fm-window-header,
+[data-theme-preset^="modernist"] .browser-window-header { border-bottom-width: 2px; }
+[data-theme-preset^="modernist"] .modal h3,
+[data-theme-preset^="modernist"] .fm-window-title,
+[data-theme-preset^="modernist"] .browser-window-title,
+[data-theme-preset^="modernist"] .side-drawer-title,
+[data-theme-preset^="modernist"] .notif-head-title,
+[data-theme-preset^="modernist"] .panel-chrome-title {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 800;
+}
+
+/* ── Classical: gold hairline under every dialog/window/drawer heading —
+   the quiet, literary counterpart to Broadsheet's double rule. ── */
+[data-theme-preset^="classical"] .modal h3 {
+  border-bottom: 1px solid var(--wmx-wait-ring);
+  padding-bottom: 8px;
+}
+[data-theme-preset^="classical"] .fm-window-header,
+[data-theme-preset^="classical"] .browser-window-header,
+[data-theme-preset^="classical"] .side-drawer-head,
+[data-theme-preset^="classical"] .notif-head,
+[data-theme-preset^="classical"] .panel-chrome-head {
+  border-bottom-color: var(--wmx-wait-ring);
+}
 
 /* The signature "agent waiting for approval" pane ring, recoloured to each
    direction's signature colour (overrides the app's default amber). Opacity/

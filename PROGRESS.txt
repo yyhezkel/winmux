@@ -83,3 +83,28 @@ RESULT: compiles, UNTESTED live. tsc clean; vite build OK; dist confirms 8
   presets, prefix + dark selectors, .pane-marks, no font !important. Rust still
   a pure data addition (not cargo-checkable here — no GTK). Needs Windows smoke test.
 ------------------------------------------------------------------
+
+------------------------------------------------------------------
+2026-07-15 · Redesign themes — pass 3 (mockless screens)
+TASK: the design bundle only ever mocked the main screen. Extended each
+  direction's chrome to every OTHER screen (Settings, Create Workspace,
+  Notes, SSH-key offer, Provisioning Wizard, Ports, File Editor, host/
+  Claude/model pickers, Command Palette, File Manager, Addons window,
+  Browser window, Notification Center, Feed/Help/Hygiene/Insights panels)
+  by targeting the handful of SHARED chrome primitives those screens are
+  built from (.modal, .fm-window, .browser-window, .side-drawer,
+  .panel-chrome-head, .command-palette) rather than touching each
+  component file — same leverage principle as the token-driven main pass.
+FILES:
+  M app/src/themes-redesign.css (+~110 lines: heading-font selector list
+      extended to modal/window/drawer/panel titles; Industry CSS-only
+      corner marks via ::before/::after on .modal/.command-palette/
+      .fm-window/.browser-window/.side-drawer; Broadsheet double-rule
+      headers; Modernist 2px frames + uppercase tracked titles; Classical
+      gold hairline headers)
+RESULT: compiles, UNTESTED live. tsc clean; vite build OK; dist confirms
+  all new selectors present. No component markup touched (pure CSS
+  targeting existing shared classes) — zero behavioural risk, but still
+  needs a Windows visual pass across Settings / File Manager / Browser /
+  Notifications / Command Palette in each of the 8 presets.
+------------------------------------------------------------------

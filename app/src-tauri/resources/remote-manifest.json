@@ -1,14 +1,14 @@
 {
     "x86_64-linux":  {
                          "path":  "winmux-linux-x64",
-                         "sha256":  "74ac75a065ed9aaaa566d9778845745f54c4be2204113cbfee68bd1474d47729",
-                         "size":  2418352,
-                         "built_at":  "2026-07-06T15:31:57Z"
+                         "sha256":  "c2f6c7a5e3c774c54e10b7c406d1deea5967a403ca758590c762695040674b71",
+                         "size":  2420880,
+                         "built_at":  "2026-07-15T06:18:32Z"
                      },
     "tmux-conf":  {
                       "path":  "winmux-tmux.conf",
                       "sha256":  "50383838b04affa487e86b4d1eeb2092414c4a5ae27e96c5c7a659847ef432c7",
                       "size":  5543,
-                      "built_at":  "2026-07-07T22:01:35Z"
+                      "built_at":  "2026-07-15T06:18:32Z"
                   }
 }

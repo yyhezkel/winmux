@@ -1005,37 +1005,44 @@ export class TerminalInstance {
     }).catch(() => {});
   }
 
-  /**
-   * Force xterm to RE-MEASURE the character cell by calling its own
-   * `CharSizeService.measure()` directly, then refit + repaint.
-   *
-   * This is the reliable mechanism. The old fontSize nudge (px+1 → px) is a
-   * no-op — xterm coalesces the two synchronous writes so measure() never
-   * runs, and the cell stayed stuck at the wrong 9.44x11 (compressed).
-   * Calling measure() directly re-runs xterm's OWN DOM measurement with the
-   * *current* fontFamily (no swap, no fallback risk) — so once the web font
-   * has loaded it pins the correct cell, exactly what a manual Settings swap
-   * does internally.
-   */
-  remeasureFont(): void {
-    const cs0 = this.cs();
-    const bw = cs0?.width;
-    const bh = cs0?.height;
-    const hasMeasure = typeof cs0?.measure === "function";
-    try {
-      cs0?.measure?.();
-    } catch (e) {
-      console.warn("remeasureFont: charSize measure failed", e);
-    }
-    this.fitAndResize(true);
+  /** Apply a font family + size to THIS terminal exactly the way
+   *  setTerminalFont does per-instance (option set + fit + refresh). */
+  private applyFontOnce(family: string, px: number): void {
+    this.term.options.fontFamily = family;
+    this.term.options.fontSize = px;
+    this.fitAndResize();
     try {
       this.term.refresh(0, this.term.rows - 1);
     } catch {}
-    const cs1 = this.cs();
-    void invoke("diag_log", {
-      level: "info",
-      msg: `[font-fix] pane=${this.paneId} csFound=${!!cs0} hasMeasure=${hasMeasure} before=${bw}x${bh} after=${cs1?.width}x${cs1?.height} fam=${JSON.stringify(String(this.term.options.fontFamily ?? "").slice(0, 40))}`,
-    }).catch(() => {});
+  }
+
+  /**
+   * Re-measure the cell by REPLICATING the manual Settings font-swap — the
+   * only thing proven to measure correctly. Data: a swap makes charSvc go
+   * 9.44x11 → 12.0x23 (the malformed `Courier 10,12,15 (120)` resolves to the
+   * real, scalable Courier New), while a direct CharSizeService.measure()
+   * leaves it stuck at 9.44x11. So we do what the swap does: apply a DIFFERENT
+   * (clean) family, then restore the settings family on the next frame — two
+   * genuine option changes via the same path setTerminalFont uses, which
+   * forces the browser to re-resolve the family to the scalable face.
+   */
+  remeasureFont(): void {
+    const real =
+      g_fontFamily ?? String(this.term.options.fontFamily ?? "monospace");
+    const px = g_fontSizePx ?? Number(this.term.options.fontSize ?? 14);
+    const clean =
+      '"Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace';
+    const intermediate = real === clean ? "monospace" : clean;
+    this.applyFontOnce(intermediate, px);
+    requestAnimationFrame(() => {
+      if (!g_terminals.has(this)) return;
+      this.applyFontOnce(real, px);
+      const cs = this.cs();
+      void invoke("diag_log", {
+        level: "info",
+        msg: `[font-fix] pane=${this.paneId} afterSwap charSvc=${cs?.width}x${cs?.height} size=${this.term.options.fontSize}`,
+      }).catch(() => {});
+    });
   }
 
   /** True if the cell isn't measured yet, or is "compressed" — height well

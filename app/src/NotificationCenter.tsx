@@ -22,6 +22,10 @@ export interface NotifItem {
   title: string;
   body: string;
   workspace_id: string | null;
+  /** 66.G: originating pane (when known) so a click lands on the exact
+   *  pane, not just the workspace. Optional — older backend
+   *  `notification:new` payloads simply omit it. */
+  pane_id?: string | null;
   timestamp_ms: number;
   kind: string; // agent | notification | error | build | mention
 }
@@ -30,7 +34,9 @@ interface Props {
   items: NotifItem[];
   readIds: Set<number>;
   onClose: () => void;
-  onJump: (workspaceId: string) => void;
+  /** 66.G: workspaceId may be null when only the pane is known (OSC
+   *  notifications) — the App side resolves the workspace from the pane. */
+  onJump: (workspaceId: string | null, paneId?: string | null) => void;
   onMarkRead: (id: number) => void;
 }
 
@@ -85,8 +91,8 @@ export function NotificationCenter(p: Props) {
 
   const click = (n: NotifItem) => {
     p.onMarkRead(n.id);
-    if (n.workspace_id) {
-      p.onJump(n.workspace_id);
+    if (n.workspace_id || n.pane_id) {
+      p.onJump(n.workspace_id, n.pane_id ?? null);
       p.onClose();
     }
   };
@@ -128,7 +134,7 @@ export function NotificationCenter(p: Props) {
           <For each={filtered()}>
             {(n) => (
               <div
-                class={`notif-item ${p.readIds.has(n.id) ? "read" : "unread"} ${n.workspace_id ? "jumpable" : ""}`}
+                class={`notif-item ${p.readIds.has(n.id) ? "read" : "unread"} ${n.workspace_id || n.pane_id ? "jumpable" : ""}`}
                 onClick={() => click(n)}
               >
                 <span class="notif-item-icon" aria-hidden="true">{iconFor(n.kind)({ size: 15 })}</span>

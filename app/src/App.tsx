@@ -218,6 +218,9 @@ function App() {
       title: f.title || f.summary || "",
       body: f.title ? f.summary : "",
       workspace_id: f.workspace_id ?? null,
+      // 66.G: keep the originating pane so a Notification Center click can
+      // land on the exact pane, not just the workspace.
+      pane_id: f.pane_id ?? null,
       timestamp_ms: f.created_ms,
       kind,
     };
@@ -2124,6 +2127,9 @@ function App() {
             title: hasTitle ? title : body,
             body: hasTitle ? body : "",
             workspace_id: null,
+            // 66.G: OSC notifications know their pane; the jump handler
+            // resolves the workspace from it (workspace_id stays null).
+            pane_id: e.payload.pane_id ?? null,
             timestamp_ms: Date.now(),
             kind: "notification",
           });
@@ -2908,7 +2914,25 @@ function App() {
             items={notifications()}
             readIds={notifRead()}
             onClose={() => closePanel("notifications")}
-            onJump={(wsId) => void handleSetActive(wsId)}
+            // 66.G: jump to the exact pane. When only the pane is known
+            // (OSC path), resolve its workspace by scanning the layouts.
+            onJump={(wsId, paneId) => {
+              const targetWs =
+                wsId ??
+                (paneId
+                  ? file().workspaces.find(
+                      (w) => w.layout && collectPanes(w.layout).includes(paneId),
+                    )?.id ?? null
+                  : null);
+              if (!targetWs) return;
+              void handleSetActive(targetWs).then(() => {
+                if (!paneId) return;
+                const ws = file().workspaces.find((w) => w.id === targetWs);
+                if (ws?.layout && collectPanes(ws.layout).includes(paneId)) {
+                  setActivePaneId(paneId);
+                }
+              });
+            }}
             onMarkRead={markNotifRead}
           />
         )}

@@ -31,17 +31,6 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 - **Folded in (2026-07-15):** the 2026-05-27 “MCP server in browser” deferral — same underlying question (is the external MCP project alive?). One decision closes both.
 - **State:** Open — needs Yossi’s call. Yossi (2026-07-15): a cardinal decision, deliberately deferred until the cleanup round is done.
 
-### 2026-07-15 — design-pass-01 salvage: cherry-pick tokens + Welcome (backlog)
-- **Context:** branch `design-pass-01` (5 commits, 2026-07-02) holds real unmerged work: `tokens.css` (`--wmx-*` design tokens + dark/light axis), a Welcome screen for the empty-workspace state, RTL logical-property CSS fixes, and `docs/DESIGN-PASS-01.md` + 5 SVG mockups. The fuzzy Command Palette from the same pass WAS absorbed into main separately.
-- **Decision (Yossi 2026-07-15):** keep the branch; salvage via cherry-pick (tokens.css + Welcome + RTL CSS) the next time design work is touched. `67-mobile` also stays as a frozen archive ref (superseded by Phase 77’s SDK contract — nothing on main references `winmux-protocol`; do not build on it).
-- **State:** Open — backlog; no work scheduled.
-
-### 2026-07-15 — Phase 66 round-2 leftovers (66.F / 66.G)
-- **Context:** deferred when round 2 shipped only the Settings toggles (2026-06-26); never picked up.
-- **Items:** **66.F** policy editor UI (view/edit the block/gate lists — still built-in only); **66.G** notification-click → focus app + pane.
-- **Dropped (Yossi 2026-07-15):** **66.E** (swap `notify-rust` → `tauri-plugin-notification`) — toasts work in practice; revisit only if toast delivery actually breaks on a real machine.
-- **State:** Open — none scheduled.
-
 ### 2026-07-15 — Log follow-ups — PARKED until the logging overhaul is verified, then close
 - **Yossi (2026-07-15):** the logging process is being rebuilt right now; these stay parked until it’s finished and proven working, and are then slated for deletion/closure rather than being built as-is.
 - **`dlog_tag` sweep** — 152 untagged `dlog(` sites vs 20 tagged; tag `[SSH]` `[BOOTSTRAP]` `[TUNNEL]` `[RPC]` (deferred from Phase 73). Re-evaluate against the new logging process — may become moot.
@@ -87,6 +76,12 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 ---
 
 ## Decided
+
+### 2026-07-15 — design-pass-01 SALVAGED + Phase 66 round-2 leftovers BUILT (66.F / 66.G)
+- **design-pass-01 salvage — DONE (same day it was logged as backlog; Yossi moved it up).** Cherry-picked onto main: design docs + SVGs (`7fbc7fe`), RTL logical-property CSS (`b3c2965`), Welcome screen for the empty-workspace state incl. sidebar empty-CTA card (`cfd50e8`), `tokens.css` + `theme_mode` dark/light/system axis in Settings (`56bd57d`). Conflicts resolved as unions against the Lucide/groups-era code; ts-rs bindings regenerated; tsc + cargo green. The palette commit (`5413ef9`) was skipped — main absorbed a fuzzy palette separately. **The branch is now fully salvaged or superseded — deletable whenever.** `67-mobile` stays frozen per Yossi (archive ref; do not build on it).
+- **66.F — user-editable policy lists — DONE (`1f445e4`).** `winmux_policy::evaluate_with()` merges `Settings.hooks.custom_block` / `custom_gate` into the built-ins (same normalized-substring semantics, block beats gate; 13 crate tests green). Settings→Hooks: two one-pattern-per-line textareas (i18n ×4, parity 902). **Scope note:** desktop-side enforcement only — the CLI static fallback (desktop unreachable) keeps the built-ins; shipping custom lists to the remote is a possible follow-up if it ever matters.
+- **66.G — notification-click → focus — DONE (`636766e`).** Discovery: workspace-level jump already existed (v0.4.3 fivefer `onJump`). Added the pane level: `NotifItem.pane_id` (from FeedItem / the OSC event) → click activates the workspace AND focuses the originating pane if it still exists; OSC notifications became jumpable too (workspace resolved by scanning layouts for the pane). **System-toast click stays out:** `notify-rust` exposes no activation callback on Windows — real toast activation needs AUMID + a COM activator (logged prerequisite, only if ever wanted).
+- **66.E remains dropped** (2026-07-15 triage): toasts work in practice; revisit only on a real delivery failure.
 
 ### 2026-07-15 — (II) RTL caret — CLOSED, fixed by Approach C (thread open since 2026-06-26)
 - **Context:** the caret sat one cell off on RTL lines; parked for a month because xterm's minified DOM renderer + `dir="auto"` rows made any blind CSS fix likely to break LTR, and a live data point was never captured.

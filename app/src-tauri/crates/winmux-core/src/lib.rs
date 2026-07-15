@@ -9,13 +9,14 @@
 //! rather than as one ~5,000-LOC move, so intermediate states stay
 //! green and the build is never left broken between commits.
 
-// beta.3 (netfree): shared HTTP retry helper for the updater path.
-// See http.rs — GET-only, jittered exponential backoff on transport errors.
-pub mod http;
 //!
 //! Things explicitly NOT in this crate (yet): SshClient + russh
 //! handler impl, Session/SshSession types, ForwardEntry, AppState +
 //! CoreState. Those land in subsequent 51.B sub-commits.
+
+// beta.3 (netfree): shared HTTP retry helper for the updater path.
+// See http.rs — GET-only, jittered exponential backoff on transport errors.
+pub mod http;
 
 use std::collections::HashMap;
 use std::io::Write;

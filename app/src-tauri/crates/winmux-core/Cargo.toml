@@ -23,3 +23,7 @@ tokio = { version = "1", features = ["sync", "rt", "macros"] }
 portable-pty = "0.8"
 # Phase 51.C: pipe_name resolution for the Named Pipe RPC endpoint.
 whoami = "1"
+# beta.3 (netfree): get_with_retry lives here (http.rs). native-tls so the
+# updater trusts the Windows Certificate Store (Netfree root cert). Must
+# match the app crate's ureq feature set to keep one resolved version.
+ureq = { version = "2", default-features = false, features = ["native-tls", "json"] }

@@ -23,3 +23,7 @@ tokio = { version = "1", features = ["sync", "rt", "macros"] }
 portable-pty = "0.8"
 # Phase 51.C: pipe_name resolution for the Named Pipe RPC endpoint.
 whoami = "1"
+# beta.3 (netfree): get_with_retry in http.rs needs the ureq types.
+# Types only here — TLS features are enabled by the app crate
+# (cargo feature unification merges them in workspace builds).
+ureq = { version = "2", default-features = false }

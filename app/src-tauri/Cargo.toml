@@ -68,10 +68,14 @@ base64 = "0.22"
 # but that path ignores the Windows Certificate Store — so users behind
 # Netfree (Israeli ISP MITM filter, custom root cert in Windows store)
 # couldn't reach GitHub / manifest.json / NSIS at all.
-# beta.3: back to native-tls (SChannel). Netfree users install their root
-# once and everything Just Works. Trade-off: reintroduces the AV-interception
-# risk for a much smaller user segment than Netfree.
-ureq = { version = "2", default-features = false, features = ["native-tls", "json"] }
+# beta.3: rustls + `native-certs` — rustls stays (no SChannel, so the
+# AV-interception fix holds), but the trust roots come from the Windows
+# Certificate Store instead of the compiled-in webpki list. Any content
+# filter (Netfree, Etrog, Rimon, ...) whose installer drops its root into
+# the store Just Works — no per-vendor logic, no fallback path.
+# Note: the store is snapshotted once per process (Lazy static inside
+# ureq) — a root installed while the app is running needs an app restart.
+ureq = { version = "2", features = ["native-certs", "json"] }
 # Phase 35 (#1.5): generate TypeScript type bindings from Rust structs.
 # `cargo test` regenerates app/src/bindings/*.ts; the frontend imports
 # from there instead of hand-mirroring the data model.

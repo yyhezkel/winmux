@@ -25,6 +25,14 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
+### 2026-07-15 — Redesign directions: ship as themes, not a chosen single look
+- **Context:** Claude Design handoff exported the WINMUX main screen in four visual directions (Industry / Broadsheet / Modernist / Classical). The design chat ended before Yossi picked one. Asked; Yossi: "why not all of them as themes?" + connect the real repo + main screen then extrapolate.
+- **Options:** (A) pick one direction and restyle; (B) all four as selectable theme presets on the existing engine; (C) static mock screen.
+- **Decision:** (B). Added 4 light-ground presets to `list_presets()`; per-theme fonts/radius/border/heading/waiting-ring in `app/src/themes-redesign.css` keyed on `[data-theme-preset]`; `applyTheme` stamps `data-theme-preset`/`data-theme-family`. Token-driven so it reaches every screen.
+- **Open sub-questions (need Yossi):** (1) derive DARK variants of each direction, or keep light-ground only? (2) how far to push per-screen structural chrome (registration marks, mastheads) vs. the token-level pass already in. (3) keep the fonts as a hard per-theme override of the user's UI-font setting, or make it a soft default?
+- **Outcome / Commit:** implemented on branch `redesign/winmux-directions`; compiles (tsc + vite), Rust parses; not yet smoke-tested on Windows.
+
+
 ### 2026-07-15 — Secrets Vault: revive or archive (stalled since 2026-05-28)
 - **Context:** ranked MUST / ⭐⭐⭐⭐⭐ in `docs/IDEAS-RANKING.md` (#3.2); full research in `docs/SECRETS-VAULT-RESEARCH.md` + branch `origin/research/secrets-vault`. Deferred 2026-05-28 “waiting on the external MCP integration” and never resurfaced — the single biggest forgotten roadmap item.
 - **Options:** (A) revive — define the winmux egress hooks + the integration contract with the external MCP; (B) archive — the external MCP project owns secrets end-to-end and winmux drops the feature.

@@ -83,6 +83,7 @@ import {
 import "@xterm/xterm/css/xterm.css";
 import "./App.css";
 import "./tokens.css"; // Design Pass 01 (#2): --wmx-* tokens + dark/light mode (must load after App.css)
+import "./themes-redesign.css"; // Claude Design handoff: 4 direction themes (must load after tokens.css)
 
 type PaneStatus = { msg: string; err: boolean };
 

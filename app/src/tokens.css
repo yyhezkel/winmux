@@ -69,7 +69,7 @@
    overrides applyTheme's inline --w-* on <html>; the whole app reads
    these vars, so no per-component rules are needed. Terminal (xterm)
    keeps its own colours — this themes the chrome. ── */
-[data-theme-mode="light"] {
+[data-theme-mode="light"]:not([data-theme-family="redesign"]) {
   --w-bg: #eef1f6 !important;
   --w-surface: #ffffff !important;
   --w-surface-hi: #e7ecf3 !important;

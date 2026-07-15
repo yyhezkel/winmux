@@ -1,0 +1,202 @@
+/* ─────────────────────────────────────────────────────────────────────
+   winmux — redesign directions (Claude Design handoff, 2026-07-15)
+
+   Four visual directions — Industry / Broadsheet / Modernist / Classical —
+   shipped as selectable THEMES on the existing preset engine, each in a
+   LIGHT and a DARK variant (8 presets total). The Rust preset
+   (settings.rs → list_presets) carries each variant's chrome palette,
+   written inline as --w-* by applyTheme(); this layer adds what a colour
+   preset can't express, shared across a direction's light+dark pair via
+   [data-theme-preset^="…"] prefix selectors:
+
+     • self-hosted display fonts (offline, no CDN — privacy),
+     • per-direction UI + heading font (applied SOFTLY — see applyTheme:
+       only when the user hasn't chosen a custom UI font),
+     • per-direction corner radius / border grammar,
+     • the signature WAITING RING colour (the pane frame that pulses while
+       an agent waits for a blocking permission decision), and
+     • structural chrome: Industry registration marks, Broadsheet double
+       rule, Modernist 2px rules + caps, Classical gold hairlines / dashed
+       waiting frame.
+
+   Loaded AFTER tokens.css (App.tsx) so it wins the cascade. Keyed on
+   [data-theme-preset] / [data-theme-family="redesign"], both stamped on
+   <html> by applyTheme(). Token-driven, so it reaches every screen.
+   ───────────────────────────────────────────────────────────────────── */
+
+/* ── self-hosted fonts (latin woff2 subset; Hebrew/Arabic glyphs fall back
+   per-glyph to the system UI stack — correct, these display faces carry no
+   Hebrew glyphs). ── */
+@font-face { font-family: 'Barlow'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/barlow-400.woff2') format('woff2'); }
+@font-face { font-family: 'Barlow'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/barlow-500.woff2') format('woff2'); }
+@font-face { font-family: 'Barlow'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/barlow-700.woff2') format('woff2'); }
+@font-face { font-family: 'Barlow Condensed'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/barlow-condensed-400.woff2') format('woff2'); }
+@font-face { font-family: 'Barlow Condensed'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/barlow-condensed-600.woff2') format('woff2'); }
+@font-face { font-family: 'Source Serif 4'; font-style: italic; font-weight: 400; font-display: swap; src: url('/fonts/source-serif-4-400-italic.woff2') format('woff2'); }
+@font-face { font-family: 'Source Serif 4'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/source-serif-4-400.woff2') format('woff2'); }
+@font-face { font-family: 'Source Serif 4'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/source-serif-4-600.woff2') format('woff2'); }
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/archivo-400.woff2') format('woff2'); }
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/archivo-600.woff2') format('woff2'); }
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 800; font-display: swap; src: url('/fonts/archivo-800.woff2') format('woff2'); }
+@font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/cormorant-garamond-400.woff2') format('woff2'); }
+@font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/cormorant-garamond-600.woff2') format('woff2'); }
+@font-face { font-family: 'Lora'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/lora-400.woff2') format('woff2'); }
+@font-face { font-family: 'Lora'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/lora-600.woff2') format('woff2'); }
+
+:root {
+  --wmx-fallback: system-ui, "Segoe UI", "Noto Sans Hebrew", "Arial Hebrew", sans-serif;
+  --wmx-fallback-serif: Georgia, "Times New Roman", "Noto Serif Hebrew", "David Libre", serif;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   1 · INDUSTRY — technical blueprint: steel, square, hairline + reg. marks.
+   Barlow Condensed headings over Barlow. (^= covers industry + industry-dark)
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-theme-preset^="industry"] {
+  --w-font-ui: 'Barlow', var(--wmx-fallback);
+  --wmx-font-heading: 'Barlow Condensed', 'Barlow', var(--wmx-fallback);
+  --w-r-sm: 0; --w-r-md: 0; --w-r-lg: 0;
+  --wmx-radius-sm: 0; --wmx-radius-md: 0; --wmx-radius-lg: 0; --wmx-radius-xl: 0;
+  --wmx-wait-ring: #5980a6;
+  --wmx-wait-glow-lo: rgba(89, 128, 166, 0.30);
+  --wmx-wait-glow-hi: rgba(89, 128, 166, 0.62);
+}
+[data-theme-preset="industry-dark"] { --wmx-wait-ring: #6f9fce;
+  --wmx-wait-glow-lo: rgba(111, 159, 206, 0.30); --wmx-wait-glow-hi: rgba(111, 159, 206, 0.62); }
+/* Blueprint registration marks — inset just inside each pane corner (the
+   pane clips overflow, so marks live inside). Shown only for Industry. */
+[data-theme-preset^="industry"] .pane-marks { display: block; }
+[data-theme-preset^="industry"] .pane-mark {
+  position: absolute; width: 11px; height: 11px; z-index: 4; opacity: 0.75;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--w-border-hi), var(--w-border-hi)) center / 100% 1.5px no-repeat,
+    linear-gradient(var(--w-border-hi), var(--w-border-hi)) center / 1.5px 100% no-repeat;
+}
+[data-theme-preset^="industry"] .pane-mark.tl { top: 3px; inset-inline-start: 3px; }
+[data-theme-preset^="industry"] .pane-mark.tr { top: 3px; inset-inline-end: 3px; }
+[data-theme-preset^="industry"] .pane-mark.bl { bottom: 3px; inset-inline-start: 3px; }
+[data-theme-preset^="industry"] .pane-mark.br { bottom: 3px; inset-inline-end: 3px; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   2 · BROADSHEET — newspaper serif: cyan interaction, MAGENTA waiting.
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-theme-preset^="broadsheet"] {
+  --w-font-ui: 'Source Serif 4', var(--wmx-fallback-serif);
+  --wmx-font-heading: 'Source Serif 4', var(--wmx-fallback-serif);
+  --w-r-sm: 2px; --w-r-md: 2px; --w-r-lg: 3px;
+  --wmx-wait-ring: #d6006c;
+  --wmx-wait-glow-lo: rgba(214, 0, 108, 0.28);
+  --wmx-wait-glow-hi: rgba(214, 0, 108, 0.60);
+}
+[data-theme-preset="broadsheet-dark"] { --wmx-wait-ring: #ff2f86;
+  --wmx-wait-glow-lo: rgba(255, 47, 134, 0.30); --wmx-wait-glow-hi: rgba(255, 47, 134, 0.60); }
+/* Masthead double rule under the sidebar brand + a hairline under pane heads. */
+[data-theme-preset^="broadsheet"] .sidebar-brand-row {
+  border-bottom: 3px double var(--w-text);
+  padding-bottom: 6px;
+}
+[data-theme-preset^="broadsheet"] .pane-header { border-bottom: 1px solid var(--w-border-hi); }
+[data-theme-preset^="broadsheet"] .pane-title { font-weight: 600; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   3 · MODERNIST — Archivo, heavy rules, one red, square, caps headings.
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-theme-preset^="modernist"] {
+  --w-font-ui: 'Archivo', var(--wmx-fallback);
+  --wmx-font-heading: 'Archivo', var(--wmx-fallback);
+  --w-r-sm: 0; --w-r-md: 0; --w-r-lg: 0;
+  --wmx-radius-sm: 0; --wmx-radius-md: 0; --wmx-radius-lg: 0; --wmx-radius-xl: 0;
+  --wmx-wait-ring: #ec3013;
+  --wmx-wait-glow-lo: rgba(236, 48, 19, 0.30);
+  --wmx-wait-glow-hi: rgba(236, 48, 19, 0.62);
+}
+[data-theme-preset="modernist-dark"] { --wmx-wait-ring: #ff563c;
+  --wmx-wait-glow-lo: rgba(255, 86, 60, 0.30); --wmx-wait-glow-hi: rgba(255, 86, 60, 0.62); }
+/* Hard 2px frames + uppercase tracked headings (the direction's signature). */
+[data-theme-preset^="modernist"] .pane { border-width: 2px; }
+[data-theme-preset^="modernist"] .pane-header { border-bottom-width: 2px; }
+[data-theme-preset^="modernist"] .card,
+[data-theme-preset^="modernist"] .feed-card,
+[data-theme-preset^="modernist"] .modal { border-width: 2px; }
+[data-theme-preset^="modernist"] .pane-title,
+[data-theme-preset^="modernist"] .group-header-name,
+[data-theme-preset^="modernist"] .sidebar-section-title {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 800;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   4 · CLASSICAL — literary: Lora / Cormorant, gold hairlines, dashed frame.
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-theme-preset^="classical"] {
+  --w-font-ui: 'Lora', var(--wmx-fallback-serif);
+  --wmx-font-heading: 'Cormorant Garamond', 'Lora', var(--wmx-fallback-serif);
+  --w-r-sm: 4px; --w-r-md: 4px; --w-r-lg: 6px;
+  --wmx-wait-ring: #b68235;
+  --wmx-wait-glow-lo: rgba(182, 130, 53, 0.26);
+  --wmx-wait-glow-hi: rgba(182, 130, 53, 0.52);
+}
+[data-theme-preset="classical-dark"] { --wmx-wait-ring: #cd9a45;
+  --wmx-wait-glow-lo: rgba(205, 154, 69, 0.28); --wmx-wait-glow-hi: rgba(205, 154, 69, 0.54); }
+[data-theme-preset^="classical"] .group-header-name,
+[data-theme-preset^="classical"] .sidebar-brand { font-weight: 600; }
+/* Classical waiting pane keeps a dashed gold frame in addition to the glow. */
+[data-theme-preset^="classical"] .pane.waiting {
+  outline: 1.5px dashed var(--wmx-wait-ring);
+  outline-offset: 3px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Shared redesign chrome (all 8 presets).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Heading font on the app's heading-ish elements. */
+[data-theme-family="redesign"] .sidebar-brand,
+[data-theme-family="redesign"] .pane-title,
+[data-theme-family="redesign"] .group-header-name,
+[data-theme-family="redesign"] .sidebar-section-title {
+  font-family: var(--wmx-font-heading);
+}
+
+/* Marks are hidden unless a direction opts in (only Industry does). */
+.pane-marks { display: none; }
+
+/* The signature "agent waiting for approval" pane ring, recoloured to each
+   direction's signature colour (overrides the app's default amber). Opacity/
+   spread pulse via box-shadow (compositor-friendly). Loaded after App.css so
+   it wins .pane.waiting and .pane.waiting.pane-pulse (≥ specificity + later). */
+[data-theme-family="redesign"] .pane.waiting,
+[data-theme-family="redesign"] .pane.waiting.pane-pulse {
+  animation: wmx-wait-pulse 1.4s ease-in-out infinite;
+}
+[data-theme-family="redesign"] .pane.waiting.pane-pulse::after { display: none; }
+
+@keyframes wmx-wait-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px var(--wmx-wait-ring),
+      0 0 10px 2px var(--wmx-wait-glow-lo);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px var(--wmx-wait-ring),
+      0 0 18px 6px var(--wmx-wait-glow-hi);
+  }
+}
+
+/* The blocking permission card's approve action inherits the direction's
+   accent already (token-driven); nudge the reject to read as a quiet
+   secondary in every direction. */
+[data-theme-family="redesign"] .feed-deny {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme-family="redesign"] .pane.waiting,
+  [data-theme-family="redesign"] .pane.waiting.pane-pulse {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--wmx-wait-ring);
+  }
+}

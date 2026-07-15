@@ -27,3 +27,59 @@ NOTES: local WIP stash "wip: terminal/textDirection changes during sync-commit"
   kept in stash@{0} — appears to be a stale copy of font/RTL work already
   committed remotely (7956c30, a20f375). Safe to drop after Yossi confirms.
 ==================================================================
+
+==================================================================
+2026-07-15 · Redesign directions as themes (Claude Design handoff)
+TASK: implement the WINMUX redesign export — 4 visual directions
+  (Industry / Broadsheet / Modernist / Classical) shipped as selectable
+  THEMES on the existing preset engine, not a one-off screen. Signature
+  detail (pane frame pulses while an agent waits for approval) recoloured
+  per direction.
+FILES:
+  A app/public/fonts/*.woff2 (15 self-hosted latin subsets)
+  A app/src/themes-redesign.css (fonts, per-theme radius/border/heading,
+      structural nods, per-theme waiting-ring colour)
+  M app/src-tauri/src/settings.rs (list_presets(): +4 light-ground presets)
+  M app/src/settings.ts (applyTheme stamps data-theme-preset +
+      data-theme-family="redesign")
+  M app/src/tokens.css (light-mode !important override now :not redesign)
+  M app/src/App.tsx (import themes-redesign.css after tokens.css)
+RESULT: compiles, UNTESTED live. tsc --noEmit clean; vite build OK (fonts
+  + all 4 [data-theme-preset] rules + @font-face present in dist). Rust is
+  a pure data addition (mirrors existing PresetEntry structs), parses via
+  rustfmt; full `cargo check` not runnable here (Linux box lacks GTK/gdk-3.0,
+  Windows Tauri target) — needs a Windows build+smoke test.
+NOTES:
+  - Presets appear automatically in Settings → Theme (picker is data-driven
+    from settings_get_presets; no frontend list to edit).
+  - These are LIGHT-GROUND themes; they opt out of tokens.css daylight
+    override so their palette wins regardless of dark/light mode toggle.
+  - Fonts are latin-subset; Hebrew/Arabic UI text falls back per-glyph to
+    the system stack (correct — display faces carry no Hebrew).
+  - NEXT (pending Yossi's nod): finer per-screen chrome (Industry 4-corner
+    registration marks via markup, Broadsheet masthead, Modernist tab rules,
+    Classical dashed frames on modals), and derived dark variants if wanted.
+==================================================================
+
+------------------------------------------------------------------
+2026-07-15 · Redesign themes — pass 2 (Yossi's calls)
+DECISIONS APPLIED:
+  • Dark variants: YES — added industry/broadsheet/modernist/classical-dark
+    presets (8 redesign presets total). CSS shares per-direction fonts/radius/
+    chrome across the light+dark pair via [data-theme-preset^=] prefixes.
+  • Per-screen chrome: PUSHED — Modernist 2px frames + uppercase headings on
+    card/modal/feed-card/pane; Broadsheet double-rule masthead; Classical
+    dashed gold waiting frame; Industry 4-corner registration marks (new
+    .pane-marks markup in PaneView, shown only under [data-theme-preset^=industry]).
+  • Font override: SOFT — applyTheme now only supplies the direction font when
+    the user's UI font is still the default "system-ui"; a custom UI font wins.
+    Removed the !important from the per-theme --w-font-ui rules.
+FILES (added to pass 1):
+  M app/src-tauri/src/settings.rs (+4 dark presets)
+  M app/src/settings.ts (soft-font gate; -dark base detection)
+  M app/src/themes-redesign.css (prefix refactor, dark rings, per-screen chrome)
+  M app/src/PaneView.tsx (blueprint .pane-marks corner elements)
+RESULT: compiles, UNTESTED live. tsc clean; vite build OK; dist confirms 8
+  presets, prefix + dark selectors, .pane-marks, no font !important. Rust still
+  a pure data addition (not cargo-checkable here — no GTK). Needs Windows smoke test.
+------------------------------------------------------------------

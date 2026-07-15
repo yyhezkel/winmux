@@ -790,6 +790,15 @@ export function PaneView(p: Props) {
         );
       }}
     >
+      {/* Redesign / Industry direction: blueprint registration marks at the
+          four pane corners. Rendered always (cheap, empty), shown only under
+          [data-theme-preset^="industry"] via themes-redesign.css. */}
+      <div class="pane-marks" aria-hidden="true">
+        <i class="pane-mark tl" />
+        <i class="pane-mark tr" />
+        <i class="pane-mark bl" />
+        <i class="pane-mark br" />
+      </div>
       <Show when={dropMsg()}>
         <div class="pane-drop-toast">{dropMsg()}</div>
       </Show>

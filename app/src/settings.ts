@@ -412,7 +412,20 @@ export function applyTheme(s: Settings): void {
   r.setProperty("--w-text-faint", mix(t.text_secondary, t.background, 0.4));
   r.setProperty("--w-accent-hi", mix(t.accent, "#ffffff", 0.18));
 
-  r.setProperty("--w-font-ui", quoteFamily(s.font.ui_family));
+  // Redesign directions carry their own display font (Barlow / Source Serif /
+  // Archivo / Lora), but SOFTLY: only when the user hasn't picked a custom UI
+  // font. If ui_family is still the default ("system-ui"), we clear the inline
+  // var so themes-redesign.css can supply the direction's font; otherwise the
+  // user's explicit choice is written inline and wins over the theme.
+  const REDESIGN_PRESETS = ["industry", "broadsheet", "modernist", "classical"];
+  const presetBase = t.preset.replace(/-dark$/, "");
+  const isRedesign = REDESIGN_PRESETS.includes(presetBase);
+  const uiFontIsDefault = s.font.ui_family === "system-ui";
+  if (isRedesign && uiFontIsDefault) {
+    r.removeProperty("--w-font-ui");
+  } else {
+    r.setProperty("--w-font-ui", quoteFamily(s.font.ui_family));
+  }
   r.setProperty("--w-font-mono", quoteFamily(s.font.terminal_family));
   // Phase 9.A live size apply. App.css now bases :root font-size on this
   // var, and the --w-fs-* size vars are in em — so changing this single pt
@@ -435,6 +448,14 @@ export function applyTheme(s: Settings): void {
   // and write data-theme-mode on <html>; tokens.css keys the Light chrome
   // palette off it. Independent of the colour preset.
   document.documentElement.dataset.themeMode = resolveThemeMode(s.theme_mode);
+
+  // Redesign directions (Claude Design handoff): stamp the active preset id on
+  // <html> so themes-redesign.css can key per-theme fonts + structural chrome
+  // (registration marks, double rules, gold hairlines) and the waiting-ring
+  // colour off it. Also lets tokens.css opt these light-ground presets out of
+  // the daylight override so their inline --w-* palette always wins.
+  document.documentElement.dataset.themePreset = t.preset;
+  document.documentElement.dataset.themeFamily = isRedesign ? "redesign" : "";
 
   // Phase font-bug-fix v2 (stretch): if a web font URL is configured,
   // inject a single <link rel="stylesheet"> tag so that font becomes

@@ -81,6 +81,19 @@ function fileUriToPath(uri: string): string | null {
 const PT_TO_PX = 1.3333;
 export type RtlMode = "auto_per_line" | "bidi_reorder" | "off";
 
+// Minimal typed view into xterm's private CharSizeService so we can call its
+// own measure() directly and read the measured cell — without an `any`.
+interface XtermInternals {
+  _core?: {
+    _charSizeService?: {
+      width?: number;
+      height?: number;
+      hasValidSize?: boolean;
+      measure?: () => void;
+    };
+  };
+}
+
 let g_fontFamily: string | null = null;
 let g_fontSizePx: number | null = null;
 let g_rtlMode: RtlMode = "auto_per_line";
@@ -971,29 +984,51 @@ export class TerminalInstance {
   /** One-shot guard for {@link scheduleInitialFontMeasure}. */
   private fontMeasured = false;
 
+  private cs(): NonNullable<
+    NonNullable<XtermInternals["_core"]>["_charSizeService"]
+  > | undefined {
+    return (this.term as unknown as XtermInternals)._core?._charSizeService;
+  }
+
+  /**
+   * Force xterm to RE-MEASURE the character cell by calling its own
+   * `CharSizeService.measure()` directly, then refit + repaint.
+   *
+   * This is the reliable mechanism. The old fontSize nudge (px+1 → px) is a
+   * no-op — xterm coalesces the two synchronous writes so measure() never
+   * runs, and the cell stayed stuck at the wrong 9.44x11 (compressed).
+   * Calling measure() directly re-runs xterm's OWN DOM measurement with the
+   * *current* fontFamily (no swap, no fallback risk) — so once the web font
+   * has loaded it pins the correct cell, exactly what a manual Settings swap
+   * does internally.
+   */
   remeasureFont(): void {
-    // Reproduce exactly what re-picking the font in Settings does — force
-    // xterm to re-measure the character cell, then refit + repaint. xterm
-    // caches the cell from its first measurement at term.open() (while the
-    // pane is still detached and/or the web font isn't loaded yet), and
-    // fit() never re-measures — it just divides the container by that stale
-    // cell — so a fresh pane renders wrong until something nudges it.
-    //
-    // Nudge fontSize (a real value change → guaranteed re-measure) and
-    // restore it, WITHOUT touching fontFamily, so the measurement re-runs on
-    // the user's actual family list and can't resolve to a different
-    // fallback than the font they chose.
+    const before = this.cs()?.height;
     try {
-      const px = Number(this.term.options.fontSize ?? 14);
-      this.term.options.fontSize = px + 1;
-      this.term.options.fontSize = px;
+      this.cs()?.measure?.();
     } catch (e) {
-      console.warn("remeasureFont: fontSize nudge failed", e);
+      console.warn("remeasureFont: charSize measure failed", e);
     }
     this.fitAndResize(true);
     try {
       this.term.refresh(0, this.term.rows - 1);
     } catch {}
+    const after = this.cs()?.height;
+    if (before !== after) {
+      void invoke("diag_log", {
+        level: "info",
+        msg: `[font-fix] pane=${this.paneId} charCell ${this.cs()?.width}x${after} (was h=${before})`,
+      }).catch(() => {});
+    }
+  }
+
+  /** True if the cell isn't measured yet, or is "compressed" — height well
+   *  under the font size (the bug). A correct cell is ≈ `fontSize * 1.15+`. */
+  private cellNeedsRemeasure(): boolean {
+    const h = this.cs()?.height;
+    if (typeof h !== "number") return true;
+    const size = Number(this.term.options.fontSize ?? 14);
+    return h < size * 0.9;
   }
 
   /**
@@ -1006,10 +1041,48 @@ export class TerminalInstance {
    * `g_terminals` check stops them if the pane is disposed meanwhile.
    */
   private scheduleInitialFontMeasure(): void {
-    const remeasure = () => {
-      if (!g_terminals.has(this) || !this.container.isConnected) return;
-      this.remeasureFont();
+    const fonts =
+      typeof document !== "undefined" ? document.fonts : undefined;
+
+    // Force the real candidate faces to actually LOAD — document.fonts.ready
+    // alone doesn't, since a face isn't "pending" until requested. Skips CSS
+    // generics and malformed comma-split junk. Resolving means the intended
+    // face is loaded, so the next measure() lands on it.
+    const loadFaces = (): Promise<unknown> => {
+      if (!fonts || typeof fonts.load !== "function") return Promise.resolve();
+      const size = Number(this.term.options.fontSize ?? 14);
+      const families = String(this.term.options.fontFamily ?? "")
+        .split(",")
+        .map((f) => f.trim().replace(/^["']|["']$/g, ""))
+        .filter(
+          (f) =>
+            f.length > 0 &&
+            !/^(monospace|serif|sans-serif|ui-monospace|system-ui|cursive|fantasy)$/i.test(
+              f,
+            ) &&
+            /^[\w .-]+$/.test(f),
+        );
+      return Promise.allSettled(
+        families.map((f) => fonts.load(`${size}px "${f}"`)),
+      );
     };
+
+    // Self-verifying loop: call xterm's own measure() until the cell is no
+    // longer compressed, or a ceiling. Because measure() actually re-measures
+    // and we CHECK the result (cellNeedsRemeasure via charSvc), this can't
+    // silently no-op and it naturally waits out the font-load race. Stops the
+    // instant the cell is correct.
+    let attempts = 0;
+    const MAX_ATTEMPTS = 15; // ~3s at 200ms
+    const step = () => {
+      if (!g_terminals.has(this) || !this.container.isConnected) return;
+      if (!this.cellNeedsRemeasure()) return; // correct → done
+      if (attempts >= MAX_ATTEMPTS) return;
+      attempts += 1;
+      this.remeasureFont();
+      window.setTimeout(step, 200);
+    };
+
     const run = () => {
       if (this.fontMeasured || !g_terminals.has(this)) return;
       if (!this.container.isConnected) {
@@ -1018,21 +1091,12 @@ export class TerminalInstance {
         return;
       }
       this.fontMeasured = true;
-      remeasure();
-      // Re-run after the web font has had time to load - the first pass can
-      // measure a fallback if the intended face isn't ready at first paint.
-      for (const delay of [150, 400, 900]) {
-        window.setTimeout(remeasure, delay);
-      }
+      step();
+      void loadFaces().finally(() => {
+        if (g_terminals.has(this) && this.cellNeedsRemeasure()) step();
+      });
     };
-    const kick = () => requestAnimationFrame(run);
-    const fonts =
-      typeof document !== "undefined" ? document.fonts : undefined;
-    if (fonts && typeof fonts.ready?.then === "function") {
-      fonts.ready.then(kick).catch(kick);
-    } else {
-      kick();
-    }
+    requestAnimationFrame(run);
   }
 
   writeData(data: string) {

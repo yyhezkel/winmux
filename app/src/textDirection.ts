@@ -188,3 +188,30 @@ export function detectRowDirections(rows: string[]): ("ltr" | "rtl")[] {
 
   return result as ("ltr" | "rtl")[];
 }
+
+// -- TUI-owned BiDi (Claude Code visual-order output) -------------------------
+//
+// Claude Code (>= 2.1.74, verified live on 2.1.210) writes RTL text to the
+// PTY pre-reordered into VISUAL order — it assumes a terminal with no bidi
+// support (Windows Terminal). Rendering such rows with dir="rtl" applies the
+// browser's bidi algorithm ON TOP of Claude's reorder: Hebrew letters
+// double-reverse back to looking correct, but neutrals (?, ., brackets)
+// resolve against the RTL paragraph and land at the wrong end — a trailing
+// "?" typed into Claude's input box shows up at the line START. There is no
+// claude-side opt-out (WT_SESSION / TERM_PROGRAM=WezTerm/mintty all still
+// reorder; upstream closed the Apple-Terminal double-reorder as not-planned).
+//
+// Fix: while a self-bidi TUI holds a pane's foreground, render every row LTR
+// (exactly what Windows Terminal shows). Detection is terminal-title based:
+//   - Claude sets the title to "claude" on startup (process.title="claude")
+//     and variants like "claude · resume"; mid-session auto topic titles /
+//     "/rename" can be ANY text, so unrelated titles must NOT clear the state.
+//   - On clean exit Claude resets the title to "" (process.title="") — that
+//     is the off signal. Shells set path-like titles, never empty ones.
+// The machine is deliberately conservative: ON only on a title containing
+// "claude", OFF only on an empty title, hold otherwise.
+export function nextTuiOwnsBidi(prev: boolean, title: string): boolean {
+  if (/claude/i.test(title)) return true;
+  if (title.trim() === "") return false;
+  return prev;
+}

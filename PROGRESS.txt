@@ -27,3 +27,23 @@ NOTES: local WIP stash "wip: terminal/textDirection changes during sync-commit"
   kept in stash@{0} — appears to be a stale copy of font/RTL work already
   committed remotely (7956c30, a20f375). Safe to drop after Yossi confirms.
 ==================================================================
+
+==================================================================
+[2026-07-15 17:40 IDT] session=rtl-claude-visual-order (worktree)
+TASK: suppress per-row dir=rtl while Claude Code is foreground in a pane
+FILES:
+  M app/src/textDirection.ts (nextTuiOwnsBidi state machine)
+  M app/src/terminalInstance.ts (tuiOwnsBidi: title listener + 3 gates)
+  M app/src/textDirection.test.ts (10 new cases, 47/47 green)
+  M docs/RTL-TEST.md (TUI-owned BiDi section + smoke test)
+RESULT: compiles-untested (tsc clean, unit tests green; no Rust toolchain
+  on this machine so the app itself was NOT run — needs live smoke per
+  docs/RTL-TEST.md before merge)
+NOTES: root cause proven with a ConPTY probe typing into claude.exe
+  2.1.210 — Claude writes RTL pre-reordered to VISUAL order; our dir=rtl
+  double-bidi'd it so neutrals (trailing "?") landed at line start.
+  No claude-side opt-out exists (WT_SESSION/TERM_PROGRAM don't matter).
+  Detection = terminal title (claude sets "claude" on start, "" on exit).
+  Remote panes: tmux doesn't forward titles (no set-titles in bundled
+  conf) — followup in FOLLOWUPS.md.
+==================================================================

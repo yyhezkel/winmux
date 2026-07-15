@@ -8,6 +8,7 @@ import {
   detectDirection,
   detectRowDirections,
   classifyRow,
+  nextTuiOwnsBidi,
 } from "./textDirection.ts";
 
 const LTR = "ltr";
@@ -158,4 +159,57 @@ test("bonus: empty rows array", () => {
 // Extra sanity: single Hebrew standalone line still works.
 test("bonus: single standalone Hebrew line -> RTL", () => {
   assert.deepEqual(detectRowDirections(["שלום עולם"]), ["rtl"]);
+});
+
+// -- nextTuiOwnsBidi (Claude visual-order RTL) tests --------------------------
+// The title-driven state machine: ON on a "claude" title, OFF on an empty
+// title, hold on anything else (shell paths, Claude's auto topic titles).
+
+test("tuiOwnsBidi: 'claude' startup title turns on", () => {
+  assert.equal(nextTuiOwnsBidi(false, "claude"), true);
+});
+
+test("tuiOwnsBidi: 'claude · resume' variant turns on", () => {
+  assert.equal(nextTuiOwnsBidi(false, "claude · resume"), true);
+});
+
+test("tuiOwnsBidi: case-insensitive match", () => {
+  assert.equal(nextTuiOwnsBidi(false, "Claude Code"), true);
+});
+
+test("tuiOwnsBidi: empty title (claude exit cleanup) turns off", () => {
+  assert.equal(nextTuiOwnsBidi(true, ""), false);
+});
+
+test("tuiOwnsBidi: whitespace-only title also turns off", () => {
+  assert.equal(nextTuiOwnsBidi(true, "   "), false);
+});
+
+test("tuiOwnsBidi: auto topic title mid-session holds ON", () => {
+  assert.equal(nextTuiOwnsBidi(true, "fixing the RTL bug"), true);
+});
+
+test("tuiOwnsBidi: Hebrew topic title mid-session holds ON", () => {
+  assert.equal(nextTuiOwnsBidi(true, "תיקון באג RTL"), true);
+});
+
+test("tuiOwnsBidi: shell path title while off stays off", () => {
+  assert.equal(
+    nextTuiOwnsBidi(false, "C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe"),
+    false,
+  );
+});
+
+test("tuiOwnsBidi: unrelated title while off stays off", () => {
+  assert.equal(nextTuiOwnsBidi(false, "vim - notes.md"), false);
+});
+
+test("tuiOwnsBidi: full lifecycle start -> topic -> exit", () => {
+  let s = false;
+  s = nextTuiOwnsBidi(s, "claude");            // startup
+  assert.equal(s, true);
+  s = nextTuiOwnsBidi(s, "צ׳אט על באגים");      // auto topic rename
+  assert.equal(s, true);
+  s = nextTuiOwnsBidi(s, "");                  // clean exit
+  assert.equal(s, false);
 });

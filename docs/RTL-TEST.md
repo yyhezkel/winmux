@@ -1,5 +1,36 @@
 # RTL per-line direction — test matrix (v0.4.4, Approach C)
 
+## TUI-owned BiDi (Claude Code visual-order output) — 2026-07-15
+
+Claude Code (>= 2.1.74, verified on 2.1.210 via a live ConPTY probe) writes
+RTL text to the PTY **pre-reordered into visual order** — typing
+`מה קורה בסדר?` into its input box emits `?רדסב הרוק המ`. Our per-row
+`dir="rtl"` then bidi's it a *second* time: letters double-reverse back to
+looking correct, but neutrals (`?`, `.`, brackets, the `>` prompt) resolve
+against the RTL paragraph and land at the wrong end of the line.
+
+Fix (`nextTuiOwnsBidi` in `textDirection.ts` + `tuiOwnsBidi` in
+`terminalInstance.ts`): while Claude holds a pane's foreground, that pane's
+rows render plain LTR (what Windows Terminal shows), arrow-mirroring stands
+down, and the legacy `bidi_reorder` write pipeline is bypassed. Detection is
+terminal-title driven — ON on a title containing "claude" (set at startup),
+OFF on an empty title (Claude's exit cleanup), hold on anything else
+(Claude's auto topic titles can be any text).
+
+Smoke test:
+1. Local pane → run `claude` → type `מה קורה בסדר?` → the `?` sits at the
+   line **end** (left of the Hebrew), letters read correctly, `>` prompt is
+   not mirrored to `‹`.
+2. Exit Claude (double Ctrl+C) → `echo "שרת רץ על port 4200"` in the shell →
+   the line is right-aligned RTL again (state released).
+3. `debug.log` shows `tui-owns-bidi on/off pane=…` transitions (metadata
+   only — titles are never logged).
+
+Known limits: remote panes need the bundled tmux config to forward titles
+(`set-titles`) — not wired yet, see FOLLOWUPS. Claude scrollback rendered
+*after* Claude exits flips back to per-line RTL (state is temporal, rows
+carry no provenance).
+
 winmux gives every **visible** terminal row an explicit `dir` computed from its
 text by `detectDirection()` (`app/src/textDirection.ts`), replacing xterm.js's
 `dir="auto"` ("first strong directional character wins"), which mis-rendered a

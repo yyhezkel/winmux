@@ -81,6 +81,15 @@ function fileUriToPath(uri: string): string | null {
 const PT_TO_PX = 1.3333;
 export type RtlMode = "auto_per_line" | "bidi_reorder" | "off";
 
+// Font-init diagnostic: minimal typed view into xterm's private measurement
+// services so we can log the computed character-cell metrics without an `any`.
+interface XtermInternals {
+  _core?: {
+    _charSizeService?: { width?: number; height?: number; hasValidSize?: boolean };
+    _renderService?: { dimensions?: { css?: { cell?: { width?: number; height?: number } } } };
+  };
+}
+
 let g_fontFamily: string | null = null;
 let g_fontSizePx: number | null = null;
 let g_rtlMode: RtlMode = "auto_per_line";
@@ -970,9 +979,37 @@ export class TerminalInstance {
 
   /** One-shot guard for {@link scheduleInitialFontMeasure}. */
   private fontMeasured = false;
-  /** Detaches the `document.fonts` "loadingdone" listener installed by
-   *  {@link scheduleInitialFontMeasure}; null once detached. */
-  private fontsLoadingDoneTeardown: (() => void) | null = null;
+  /** Diagnostic: how many times remeasureFont has run for this pane. */
+  private remeasureCount = 0;
+
+  /**
+   * Font-init diagnostic (Rule #1: metrics only, never PTY content). Dumps
+   * how xterm currently measures the character cell → console + debug.log.
+   */
+  logFontMetrics(label: string): void {
+    try {
+      const core = (this.term as unknown as XtermInternals)._core;
+      const cs = core?._charSizeService;
+      const cell = core?._renderService?.dimensions?.css?.cell;
+      const fam = String(this.term.options.fontFamily ?? "");
+      const size = this.term.options.fontSize ?? 0;
+      let loaded = "n/a";
+      try {
+        const first = fam.split(",")[0].trim().replace(/^["']|["']$/g, "");
+        loaded = String(document.fonts.check(`${size}px "${first}"`));
+      } catch {}
+      const msg =
+        `[font-metrics] ${label} pane=${this.paneId} n=${this.remeasureCount} ` +
+        `size=${size} fontLoaded=${loaded} ` +
+        `charSvc=${cs?.width}x${cs?.height}(valid=${cs?.hasValidSize}) ` +
+        `cssCell=${cell?.width}x${cell?.height} cols=${this.term.cols} rows=${this.term.rows} ` +
+        `container=${this.container.clientWidth}x${this.container.clientHeight}(conn=${this.container.isConnected})`;
+      console.log(msg);
+      void invoke("diag_log", { level: "info", msg }).catch(() => {});
+    } catch (e) {
+      console.warn("logFontMetrics failed", e);
+    }
+  }
 
   remeasureFont(): void {
     // Reproduce exactly what re-picking the font in Settings does — force
@@ -986,6 +1023,8 @@ export class TerminalInstance {
     // restore it, WITHOUT touching fontFamily, so the measurement re-runs on
     // the user's actual family list and can't resolve to a different
     // fallback than the font they chose.
+    this.remeasureCount += 1;
+    this.logFontMetrics("remeasure:before");
     try {
       const px = Number(this.term.options.fontSize ?? 14);
       this.term.options.fontSize = px + 1;
@@ -997,6 +1036,7 @@ export class TerminalInstance {
     try {
       this.term.refresh(0, this.term.rows - 1);
     } catch {}
+    this.logFontMetrics("remeasure:after");
   }
 
   /**
@@ -1012,10 +1052,12 @@ export class TerminalInstance {
    * compressed. Instead we (1) measure immediately, (2) explicitly
    * `document.fonts.load()` the real candidate faces and re-measure once
    * they resolve — `document.fonts.ready` alone is not enough because the
-   * face isn't *pending* until something requests it — and (3) listen for
-   * any later `loadingdone` and re-measure then too. All passes are cheap
-   * and idempotent; the `g_terminals`/`isConnected` checks stop them if the
-   * pane is disposed meanwhile.
+   * face isn't *pending* until something requests it — plus a `ready` pass
+   * and one bounded fallback. All passes are cheap and idempotent; the
+   * `g_terminals`/`isConnected` checks stop them if the pane is disposed
+   * meanwhile. (A persistent `document.fonts` "loadingdone" listener was
+   * tried and reverted — it fired a re-measure, and thus a pty_resize, on
+   * every font load in the app, storming tmux and churning the view.)
    */
   private scheduleInitialFontMeasure(): void {
     const remeasure = () => {
@@ -1058,24 +1100,17 @@ export class TerminalInstance {
         return;
       }
       this.fontMeasured = true;
+      this.logFontMetrics("mount:connected");
       remeasure(); // immediate — covers a system font / already-loaded face
-      loadFacesThenRemeasure(); // force-load the real face → re-measure
+      loadFacesThenRemeasure(); // force-load the real face → re-measure once resolved
       if (fonts && typeof fonts.ready?.then === "function") {
         fonts.ready.then(remeasure).catch(() => {}); // belt-and-suspenders
       }
-      // A face may finish loading AFTER the passes above (slow link, heavy
-      // startup). Re-measure on any later font load, until a ceiling.
-      if (fonts && typeof fonts.addEventListener === "function") {
-        const onLoadingDone = () => remeasure();
-        fonts.addEventListener("loadingdone", onLoadingDone);
-        this.fontsLoadingDoneTeardown = () => {
-          try {
-            fonts.removeEventListener("loadingdone", onLoadingDone);
-          } catch {}
-          this.fontsLoadingDoneTeardown = null;
-        };
-        window.setTimeout(() => this.fontsLoadingDoneTeardown?.(), 5000);
-      }
+      // One bounded fallback in case the face loads just after the passes
+      // above. NOT a persistent `loadingdone` listener — that fired on every
+      // font load in the app (icons, UI), so every pane re-measured (each a
+      // pty_resize) → a resize storm that corrupted tmux / churned the view.
+      window.setTimeout(remeasure, 500);
     };
     requestAnimationFrame(run);
   }
@@ -1154,9 +1189,6 @@ export class TerminalInstance {
     this.ro = null;
     this.dirObserver?.disconnect();
     this.dirObserver = null;
-    // Detach the font "loadingdone" listener so a freed pane doesn't keep
-    // re-measuring on later font loads.
-    this.fontsLoadingDoneTeardown?.();
     // v0.4.4-beta.4 (RTL mouse fix): tear down the capture-phase listener
     // so a disposed pane doesn't keep intercepting document/element mouse
     // events for the rest of the app's lifetime.

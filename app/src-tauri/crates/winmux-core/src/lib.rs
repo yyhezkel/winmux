@@ -8,7 +8,6 @@
 //! 51.B is being landed in incremental sub-commits (51.B1, 51.B2, …)
 //! rather than as one ~5,000-LOC move, so intermediate states stay
 //! green and the build is never left broken between commits.
-
 //!
 //! Things explicitly NOT in this crate (yet): SshClient + russh
 //! handler impl, Session/SshSession types, ForwardEntry, AppState +

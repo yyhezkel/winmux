@@ -1219,10 +1219,12 @@ async fn dispatch(
             // command. The same evaluator runs in the remote CLI as a
             // static fallback when this desktop is unreachable (66.D.1).
             if blocking && subkind == "pre-tool-use" {
-                let policy_on = settings::load_from_disk()
-                    .map(|s| s.hooks.policy_enabled)
-                    .unwrap_or(true);
-                if policy_on {
+                // Phase 66.F: read the whole hooks block so the user's
+                // custom block/gate patterns ride along with the master
+                // switch. Desktop-side enforcement only — the CLI's static
+                // fallback (desktop unreachable) keeps the built-ins.
+                let hooks_cfg = settings::load_from_disk().unwrap_or_default().hooks;
+                if hooks_cfg.policy_enabled {
                     let tool_name = payload
                         .get("tool_name")
                         .and_then(|v| v.as_str())
@@ -1231,7 +1233,12 @@ async fn dispatch(
                         .get("tool_input")
                         .and_then(|ti| ti.get("command"))
                         .and_then(|c| c.as_str());
-                    let verdict = winmux_policy::evaluate(tool_name, bash_cmd);
+                    let verdict = winmux_policy::evaluate_with(
+                        tool_name,
+                        bash_cmd,
+                        &hooks_cfg.custom_block,
+                        &hooks_cfg.custom_gate,
+                    );
                     crate::dlog(&format!(
                         "feed.push: policy tool={} decision={:?} matched={:?} req_id={}",
                         tool_name, verdict.decision, verdict.matched, req_id

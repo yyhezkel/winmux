@@ -335,6 +335,19 @@ pub(crate) struct Hooks {
     /// remotely. Older settings.json loads with auto-install ON.
     #[serde(default = "default_true")]
     pub auto_install: bool,
+    /// Phase 66.F: user-defined BLOCK patterns, one per entry, merged into
+    /// the built-in list by the desktop policy engine (rpc_server
+    /// feed.push). Same matching semantics as the built-ins: lowercased,
+    /// whitespace-collapsed substring match against the whole command and
+    /// each chained segment. Desktop-side enforcement only — the CLI's
+    /// static fallback keeps the built-ins. `#[serde(default)]` so older
+    /// settings.json loads with empty lists.
+    #[serde(default)]
+    pub custom_block: Vec<String>,
+    /// Phase 66.F: user-defined GATE patterns (see `custom_block`). Block
+    /// beats gate when a command matches both.
+    #[serde(default)]
+    pub custom_gate: Vec<String>,
 }
 
 fn default_matcher_mode() -> String {
@@ -887,6 +900,8 @@ impl Default for Hooks {
             matcher_mode: default_matcher_mode(),
             policy_enabled: true,
             auto_install: true,
+            custom_block: Vec::new(),
+            custom_gate: Vec::new(),
         }
     }
 }

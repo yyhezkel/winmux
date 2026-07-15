@@ -304,6 +304,20 @@ fn normalize(s: &str) -> String {
 /// chained segment) so a destructive fragment anywhere in a chain denies
 /// the entire call. Gate patterns are checked next. Anything else is Auto.
 pub fn evaluate(tool_name: &str, bash_command: Option<&str>) -> Verdict {
+    evaluate_with(tool_name, bash_command, &[], &[])
+}
+
+/// Phase 66.F: `evaluate` with user-defined patterns merged in. Custom
+/// patterns use the exact same semantics as the built-ins — normalized
+/// (lowercase, collapsed whitespace) substring match against the whole
+/// command and each chained segment; block beats gate. Blank entries are
+/// skipped. The built-in lists ALWAYS apply — custom lists only add.
+pub fn evaluate_with(
+    tool_name: &str,
+    bash_command: Option<&str>,
+    custom_block: &[String],
+    custom_gate: &[String],
+) -> Verdict {
     if is_always_auto_tool(tool_name) {
         return Verdict::auto(format!("{tool_name} is a low-risk tool"));
     }
@@ -315,7 +329,7 @@ pub fn evaluate(tool_name: &str, bash_command: Option<&str>) -> Verdict {
     }
 
     match tool_name {
-        "Bash" => evaluate_bash(bash_command.unwrap_or("")),
+        "Bash" => evaluate_bash(bash_command.unwrap_or(""), custom_block, custom_gate),
         // File mutations are core to the agent doing useful work. Allow by
         // default (the desktop can be configured to gate these in a later
         // phase; for now auto so the agent flows).
@@ -328,18 +342,32 @@ pub fn evaluate(tool_name: &str, bash_command: Option<&str>) -> Verdict {
     }
 }
 
-fn evaluate_bash(command: &str) -> Verdict {
+/// Merge a built-in pattern list with user-defined extras: built-ins are
+/// already in normalized form; customs get `normalize()`d so they match
+/// with the same semantics the user sees documented. Blanks drop out.
+fn merged_patterns(builtin: &[&str], custom: &[String]) -> Vec<String> {
+    builtin
+        .iter()
+        .map(|p| (*p).to_string())
+        .chain(custom.iter().map(|p| normalize(p)))
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+fn evaluate_bash(command: &str, custom_block: &[String], custom_gate: &[String]) -> Verdict {
+    let block_pats = merged_patterns(BLOCK_PATTERNS, custom_block);
+    let gate_pats = merged_patterns(GATE_PATTERNS, custom_gate);
     let whole = normalize(command);
     // Fork-bomb and other patterns can be obscured by the splitter (it
     // splits on the very operators the bomb uses), so scan the whole,
     // whitespace-stripped command for BLOCK patterns first.
     let whole_nospace: String = whole.chars().filter(|c| !c.is_whitespace()).collect();
-    for pat in BLOCK_PATTERNS {
+    for pat in &block_pats {
         let pat_nospace: String = pat.chars().filter(|c| !c.is_whitespace()).collect();
-        if whole.contains(pat) || whole_nospace.contains(&pat_nospace) {
+        if whole.contains(pat.as_str()) || whole_nospace.contains(&pat_nospace) {
             return Verdict::block(
                 format!("blocked: command contains `{pat}`"),
-                pat.to_string(),
+                pat.clone(),
             );
         }
     }
@@ -348,38 +376,79 @@ fn evaluate_bash(command: &str) -> Verdict {
     // Block check per-segment (defense in depth — a chained `… && rm -rf /`).
     for seg in &segments {
         let nseg = normalize(seg);
-        for pat in BLOCK_PATTERNS {
-            if nseg.contains(pat) {
+        for pat in &block_pats {
+            if nseg.contains(pat.as_str()) {
                 return Verdict::block(
                     format!("blocked: `{}` contains `{pat}`", truncate(seg, 60)),
-                    pat.to_string(),
+                    pat.clone(),
                 );
             }
         }
     }
 
     // Gate check (whole + per-segment).
-    for pat in GATE_PATTERNS {
-        if whole.contains(pat) {
+    for pat in &gate_pats {
+        if whole.contains(pat.as_str()) {
             return Verdict::gate(
                 format!("needs approval: command contains `{pat}`"),
-                pat.to_string(),
+                pat.clone(),
             );
         }
     }
     for seg in &segments {
         let nseg = normalize(seg);
-        for pat in GATE_PATTERNS {
-            if nseg.contains(pat) {
+        for pat in &gate_pats {
+            if nseg.contains(pat.as_str()) {
                 return Verdict::gate(
                     format!("needs approval: `{}` contains `{pat}`", truncate(seg, 60)),
-                    pat.to_string(),
+                    pat.clone(),
                 );
             }
         }
     }
 
     Verdict::auto("Bash command matched no risky pattern")
+}
+
+#[cfg(test)]
+mod custom_pattern_tests {
+    use super::*;
+
+    #[test]
+    fn custom_gate_pattern_gates() {
+        let v = evaluate_with("Bash", Some("terraform apply"), &[], &["terraform apply".into()]);
+        assert_eq!(v.decision, Decision::Gate);
+    }
+
+    #[test]
+    fn custom_block_beats_custom_gate() {
+        let v = evaluate_with(
+            "Bash",
+            Some("echo hi && npm publish"),
+            &["npm publish".into()],
+            &["npm publish".into()],
+        );
+        assert_eq!(v.decision, Decision::Block);
+    }
+
+    #[test]
+    fn custom_pattern_is_normalized() {
+        // Mixed case + extra whitespace in BOTH the pattern and the command.
+        let v = evaluate_with("Bash", Some("GIT  Push   --Force-With-Lease"), &[], &["git push  --force-with-lease".into()]);
+        assert_eq!(v.decision, Decision::Gate);
+    }
+
+    #[test]
+    fn blank_custom_entries_are_ignored() {
+        let v = evaluate_with("Bash", Some("ls -la"), &["   ".into()], &["".into()]);
+        assert_eq!(v.decision, Decision::Auto);
+    }
+
+    #[test]
+    fn builtins_still_apply_with_customs() {
+        let v = evaluate_with("Bash", Some("rm -rf /"), &[], &["terraform".into()]);
+        assert_eq!(v.decision, Decision::Block);
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {

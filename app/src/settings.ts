@@ -86,6 +86,13 @@ export interface HooksSettings {
   /** Phase 66 (66.B): auto-run `winmux setup-hooks` on the remote during
    *  bootstrap so a fresh server starts surfacing cards. Default true. */
   auto_install?: boolean;
+  /** Phase 66.F: user-defined BLOCK patterns (one per entry), merged into
+   *  the built-in list by the desktop policy engine. Substring match,
+   *  case/whitespace-insensitive, per chained segment. Desktop-side only. */
+  custom_block?: string[];
+  /** Phase 66.F: user-defined GATE patterns (see custom_block). Block
+   *  beats gate. */
+  custom_gate?: string[];
 }
 
 // beta.3: canonical Claude Code hook types. Wire strings are kebab-case

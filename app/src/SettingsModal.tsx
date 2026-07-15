@@ -764,6 +764,48 @@ export function SettingsModal(p: Props) {
                   <p class="settings-hint" style="margin-top:-4px;margin-inline-start:24px">
                     {t("settings.hooks.auto_install.hint")}
                   </p>
+                  {/* Phase 66.F: user-editable policy lists. One pattern per
+                      line; blanks dropped on blur. Enforced desktop-side by
+                      the feed.push engine (the CLI static fallback keeps the
+                      built-ins). dir=ltr — patterns are shell text. */}
+                  <label class="modal-textarea-label">
+                    <span>{t("settings.hooks.custom_block")}</span>
+                    <textarea
+                      rows="4"
+                      dir="ltr"
+                      placeholder={"npm publish\nterraform destroy"}
+                      value={(p.settings.hooks.custom_block ?? []).join("\n")}
+                      onChange={(e) =>
+                        update("hooks", {
+                          ...p.settings.hooks,
+                          custom_block: e.currentTarget.value
+                            .split("\n")
+                            .map((s) => s.trim())
+                            .filter((s) => s.length > 0),
+                        })
+                      }
+                    />
+                  </label>
+                  <p class="settings-hint">{t("settings.hooks.custom_block.hint")}</p>
+                  <label class="modal-textarea-label">
+                    <span>{t("settings.hooks.custom_gate")}</span>
+                    <textarea
+                      rows="4"
+                      dir="ltr"
+                      placeholder={"kubectl delete\ngit rebase"}
+                      value={(p.settings.hooks.custom_gate ?? []).join("\n")}
+                      onChange={(e) =>
+                        update("hooks", {
+                          ...p.settings.hooks,
+                          custom_gate: e.currentTarget.value
+                            .split("\n")
+                            .map((s) => s.trim())
+                            .filter((s) => s.length > 0),
+                        })
+                      }
+                    />
+                  </label>
+                  <p class="settings-hint">{t("settings.hooks.custom_gate.hint")}</p>
                   <label>
                     <span>{t("settings.hooks.policy_preset")}</span>
                     <select

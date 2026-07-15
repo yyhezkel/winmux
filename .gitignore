@@ -54,8 +54,7 @@ fix-git.ps1
 setup-line-endings-and-commit.bat
 status.txt
 
-# Local-only session notes. BACKLOG/FOLLOWUPS/PROGRESS are tracked (synced
-# across machines per Yossi, 2026-07-15). Root-anchored so docs/INSTALL_AGENTS.md
-# stays tracked.
+# Session notes (BACKLOG/FOLLOWUPS/PROGRESS/PROGRESS_OLD_*) are tracked —
+# synced across machines per Yossi, 2026-07-15. Only AGENTS.md stays local.
+# Root-anchored so docs/INSTALL_AGENTS.md stays tracked.
 /AGENTS.md
-/PROGRESS_OLD_*.txt

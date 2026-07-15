@@ -871,5 +871,11 @@
   "sidebar.delete_group": "מחק קבוצה",
   "sidebar.change_color": "שנה צבע",
   "sidebar.move_to_group": "העבר לקבוצה",
-  "sidebar.move_out_of_group": "הוצא מהקבוצה"
+  "sidebar.move_out_of_group": "הוצא מהקבוצה",
+  "reconnect.title": "החיבור ל-{host} נותק",
+  "reconnect.attempt": "מנסה להתחבר מחדש… (ניסיון {n}/{max})",
+  "reconnect.cancel": "בטל",
+  "reconnect.success": "מחובר מחדש ל-{host}",
+  "reconnect.failed": "לא הצלחתי להתחבר מחדש ל-{host}. לחץ על הפאנל לניסיון נוסף."
 }
+

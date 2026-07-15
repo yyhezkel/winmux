@@ -469,6 +469,73 @@ function App() {
     setSummaryToast({ kind, text });
     summaryToastTimer = window.setTimeout(() => setSummaryToast(null), 4500);
   };
+
+  // beta.3 (netfree, Track 1b): reconnect toast + backoff-retry driver.
+  //
+  // When the backend emits `ssh:disconnected` (transport dropped, not a
+  // clean Eof/Close), we own a small state machine here that:
+  //   1) shows a persistent toast — "מנסה להתחבר מחדש… (N/5)"
+  //   2) sleeps with backoff (1s → 3s → 8s → 15s → 30s, ±20% jitter)
+  //   3) invokes the existing `pane_connect` command for each attempt
+  //      (auth params come from the pane's stored connection — no
+  //      credentials cached client-side, which is the whole reason the
+  //      retry loop lives here and not in the backend io-task)
+  //   4) cancel button aborts the timer + invokes `ssh_cancel_reconnect`
+  //   5) on success, replaces the toast with a green "מחובר מחדש"
+  //   6) after all attempts fail, shows the "click pane to retry" error
+  //
+  // tmux side: server-side tmux session survives; a successful reconnect
+  // just runs `tmux attach -t <name>` again via the persistent flag, so
+  // the user's scrollback + running processes come back intact.
+  type ReconnectToast = {
+    paneId: string;
+    host: string;
+    workspaceId: string;
+    attempt: number;
+    max: number;
+  };
+  const [reconnectToast, setReconnectToast] = createSignal<ReconnectToast | null>(null);
+  // Timer + cancel handle — held outside the signal so cancel() can clear
+  // them without racing the state update.
+  let reconnectTimer: number | null = null;
+  let reconnectCancelled = false;
+  // 1s → 3s → 8s → 15s → 30s. 5 attempts total per spec.
+  const RECONNECT_BACKOFFS_MS = [1_000, 3_000, 8_000, 15_000, 30_000];
+  const RECONNECT_MAX = RECONNECT_BACKOFFS_MS.length;
+  const reconnectJitter = (ms: number) => {
+    // ±20% — spreads out concurrent retries so a filter that just came
+    // back up doesn't get pounded by every client at the same instant.
+    const jitter = ms * 0.2 * (Math.random() * 2 - 1);
+    return Math.max(0, Math.round(ms + jitter));
+  };
+  const clearReconnectTimer = () => {
+    if (reconnectTimer !== null) {
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+  const cancelReconnect = () => {
+    reconnectCancelled = true;
+    clearReconnectTimer();
+    const t0 = reconnectToast();
+    setReconnectToast(null);
+    if (t0) {
+      // Best-effort — a "no such pane" is fine (session may already be gone).
+      invoke("ssh_cancel_reconnect", { paneId: t0.paneId }).catch(() => {});
+    }
+  };
+  type SshDisconnectedEvent = {
+    workspace_id: string;
+    pane_id: string;
+    host: string;
+    user: string;
+    port: number;
+    key_path: string | null;
+    tmux_session_name: string | null;
+    persistent: boolean;
+    reason: string;
+  };
+
   // Phase 18: hooks-outdated banner actions.
   const triggerHooksUpdate = async () => {
     const b = hooksBanner();
@@ -1397,6 +1464,63 @@ function App() {
     }
   };
 
+  // beta.3 (netfree, Track 1b): reconnect driver — defined AFTER
+  // connectPane so the closure captures a valid binding at runtime.
+  const startReconnect = (ev: SshDisconnectedEvent) => {
+    // If a reconnect is already running for a different pane, cancel it —
+    // one toast at a time (rare to see two SSH drops in the same second,
+    // but not impossible on a full network outage).
+    if (reconnectToast()) cancelReconnect();
+    reconnectCancelled = false;
+    const state: ReconnectToast = {
+      paneId: ev.pane_id,
+      host: ev.host,
+      workspaceId: ev.workspace_id,
+      attempt: 0,
+      max: RECONNECT_MAX,
+    };
+    setReconnectToast(state);
+    const attemptOnce = async () => {
+      if (reconnectCancelled) return;
+      const cur = reconnectToast();
+      if (!cur) return;
+      const nextAttempt = cur.attempt + 1;
+      setReconnectToast({ ...cur, attempt: nextAttempt });
+      try {
+        // Reuse the existing pane_connect path — it does the full
+        // handshake (host key check, auth via stored key / cached agent)
+        // and, for persistent panes, re-runs `tmux new-session -A -s <name>`
+        // which attaches to the still-alive server-side session.
+        await connectPane(ev.pane_id, {
+          persistent: ev.persistent,
+          tmuxSession: ev.tmux_session_name ?? undefined,
+        });
+        // Success — replace with a short-lived "reconnected" toast.
+        setReconnectToast(null);
+        flashSummaryToast("ok", t("reconnect.success", { host: ev.host }));
+      } catch (e) {
+        // Attempt failed — schedule the next one, unless we're out of attempts.
+        if (reconnectCancelled) return;
+        if (nextAttempt >= RECONNECT_MAX) {
+          setReconnectToast(null);
+          flashSummaryToast("err", t("reconnect.failed", { host: ev.host }));
+          // Best-effort clear of the server flag so a future drop can
+          // re-emit cleanly.
+          invoke("ssh_cancel_reconnect", { paneId: ev.pane_id }).catch(() => {});
+          return;
+        }
+        const delay = reconnectJitter(RECONNECT_BACKOFFS_MS[nextAttempt]);
+        reconnectTimer = window.setTimeout(attemptOnce, delay);
+      }
+    };
+    // First attempt runs after the first backoff (1s) — gives the network
+    // a beat to recover before we spam it.
+    reconnectTimer = window.setTimeout(
+      attemptOnce,
+      reconnectJitter(RECONNECT_BACKOFFS_MS[0]),
+    );
+  };
+
   const disconnectPane = async (paneId: string) => {
     try {
       await invoke("pane_disconnect", { paneId });
@@ -1883,6 +2007,18 @@ function App() {
         ti?.detach();
         bump();
         void refreshPersistence();
+      })
+    );
+    // beta.3 (netfree, Track 1b): SSH transport dropped. Backend emitted
+    // `ssh:disconnected` with the pane's connection identity so we can
+    // drive the auto-reconnect toast + backoff loop. pty:exit fires
+    // alongside — the `[disconnected]` terminal notice still shows.
+    unlistens.push(
+      await listen<SshDisconnectedEvent>("ssh:disconnected", (e) => {
+        // Guard: only handle transport drops; a clean Eof/Close doesn't
+        // emit this event (backend filters), but defense in depth.
+        if (e.payload.reason !== "transport-dropped") return;
+        startReconnect(e.payload);
       })
     );
     // Unshipped-fivefer (#4): a pop-out window closed — re-attach the origin
@@ -3062,6 +3198,35 @@ function App() {
         >
           <span class="summary-toast-icon">{summaryToast()!.kind === "ok" ? "✓" : "⚠"}</span>
           <span class="summary-toast-text">{summaryToast()!.text}</span>
+        </div>
+      </Show>
+
+      {/* beta.3 (netfree, Track 1b): reconnect toast — persistent (does
+          NOT auto-dismiss), shows attempt counter + a cancel button.
+          Rendered next to summary-toast so both can coexist visually. */}
+      <Show when={reconnectToast()}>
+        <div class="reconnect-toast" role="status">
+          <div class="reconnect-toast-body">
+            <span class="reconnect-toast-spinner" aria-hidden="true">⟳</span>
+            <div class="reconnect-toast-text">
+              <div class="reconnect-toast-title">
+                {t("reconnect.title", { host: reconnectToast()!.host })}
+              </div>
+              <div class="reconnect-toast-attempt">
+                {t("reconnect.attempt", {
+                  n: String(Math.max(1, reconnectToast()!.attempt)),
+                  max: String(reconnectToast()!.max),
+                })}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="reconnect-toast-cancel"
+            onClick={cancelReconnect}
+          >
+            {t("reconnect.cancel")}
+          </button>
         </div>
       </Show>
 

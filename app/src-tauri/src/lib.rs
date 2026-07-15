@@ -1670,6 +1670,29 @@ async fn ssh_key_offer_dismiss(
     Ok(())
 }
 
+// beta.3 (netfree, Track 1b): let the frontend cancel the reconnect toast.
+// Frontend drives the retry loop in JS (backoff + attempt counter), but
+// this command flips the server-side `reconnecting` flag on the *last*
+// SshSession that matched the given pane so any subsequent reconnect-emit
+// paths know the user opted out. Best-effort — pane may already be gone.
+#[tauri::command]
+async fn ssh_cancel_reconnect(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<(), String> {
+    let sessions = state.core.sessions.lock().map_err(|e| e.to_string())?;
+    // The pane→session map lookup can race with cleanup — treat "no session
+    // found" as success (nothing to cancel). Rule #1: no pane content logged.
+    let pane_sessions = state.core.pane_sessions.lock().map_err(|e| e.to_string())?;
+    if let Some(sid) = pane_sessions.get(&pane_id) {
+        if let Some(Session::Ssh(ssh)) = sessions.get(sid) {
+            ssh.reconnecting.store(false, std::sync::atomic::Ordering::Relaxed);
+            dlog(&format!("ssh_cancel_reconnect: pane={pane_id} flag cleared"));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn ssh_key_generate_and_install(
     state: State<'_, AppState>,
@@ -2400,6 +2423,25 @@ async fn spawn_ssh(
     let port_watchers_for_task = state.core.port_watchers.clone();
     let port_watcher_tasks_for_task = state.core.port_watcher_tasks.clone();
     let bidi_for_task = state.bidi_filters.clone();
+    // beta.3 (netfree, Track 1b): capture the connection metadata so the
+    // io-loop can emit a structured `ssh:disconnected` event on transport
+    // drop. The frontend uses the payload to drive an auto-reconnect toast
+    // (backoff loop lives in App.tsx, not here — keeps the server side
+    // small and stops us from having to store credentials for the retry).
+    let reconnect_host = host.clone();
+    let reconnect_user = user.clone();
+    let reconnect_port = port;
+    let reconnect_key_path = key_path.clone();
+    let reconnect_tmux_name = tmux_session_name.clone();
+    let reconnect_persistent = persistent;
+    // beta.3 (netfree, Track 1b): shared reconnect-in-progress flag. Created
+    // here so both the io task (which flips it true on transport drop) and
+    // the SshSession stored in the sessions map (so the cancel command can
+    // clear it) point at the same AtomicBool.
+    let reconnecting_flag =
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reconnecting_for_task = std::sync::Arc::clone(&reconnecting_flag);
+    let reconnecting_for_state = std::sync::Arc::clone(&reconnecting_flag);
     tokio::spawn(async move {
         let mut leftover: Vec<u8> = Vec::new();
         let mut osc = osc_notify::OscNotifyParser::new();
@@ -2444,6 +2486,41 @@ async fn spawn_ssh(
                                 "ssh-disconnect: transport dropped (likely network/keepalive timeout), workspace={} pane={} channel={:?} last_activity_ms={}",
                                 workspace_for_task, pane_for_task, ch_id, last_data_at.elapsed().as_millis()
                             ));
+                            // beta.3 (netfree, Track 1b): mark this session as
+                            // reconnecting so the cancel command has a flag to
+                            // clear, then emit the structured event so the
+                            // frontend can show the reconnect toast and drive
+                            // a backoff retry loop through the existing
+                            // pane_connect command. Rule #1: no shell content
+                            // in the payload — just connection identity + tmux
+                            // hint. Guard: skip the emit if the flag was
+                            // already set (a re-drop while a retry is in
+                            // flight — the frontend is already showing the
+                            // toast, no need to spawn a second one).
+                            let was_already =
+                                reconnecting_for_task.swap(true, std::sync::atomic::Ordering::Relaxed);
+                            if was_already {
+                                dlog(&format!(
+                                    "ssh-disconnect: reconnect already announced for pane={}, skipping duplicate emit",
+                                    pane_for_task
+                                ));
+                                break;
+                            }
+                            let _ = app_for_task.emit(
+                                "ssh:disconnected",
+                                serde_json::json!({
+                                    "workspace_id": workspace_for_task,
+                                    "pane_id": pane_for_task,
+                                    "host": reconnect_host,
+                                    "user": reconnect_user,
+                                    "port": reconnect_port,
+                                    "key_path": reconnect_key_path,
+                                    "tmux_session_name": reconnect_tmux_name,
+                                    "persistent": reconnect_persistent,
+                                    "reason": "transport-dropped",
+                                }),
+                            );
+                            exit_reason = Some("transport dropped — reconnect toast emitted".into());
                             break;
                         }
                         _ => {}
@@ -2537,6 +2614,10 @@ async fn spawn_ssh(
             user: user.clone(),
             port,
             key_path: key_path.clone(),
+            // beta.3 (netfree): flipped true by the io-loop when the transport
+            // drops so the reconnect-emit path is single-shot, and cleared by
+            // the ssh_cancel_reconnect command when the user aborts the toast.
+            reconnecting: reconnecting_for_state,
         }),
     );
 
@@ -4845,6 +4926,9 @@ async fn workspace_ensure_connected(
                     user,
                     port,
                     key_path,
+                    // beta.3 (netfree): headless sessions have no PTY / io-loop,
+                    // so the reconnect flow never fires on them — flag is inert.
+                    reconnecting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 }),
             );
             drop(sessions);
@@ -6410,6 +6494,9 @@ pub fn run() {
             workspace_browser::workspace_browser_close,
             workspace_browser::workspace_browser_resize,
             ssh_key_offer_dismiss,
+            // beta.3 (netfree, Track 1b): frontend calls this when the user
+            // clicks "בטל" on the reconnect toast.
+            ssh_cancel_reconnect,
             ssh_key_generate_and_install,
             provision_existing_install_key,
             workspace_delete,

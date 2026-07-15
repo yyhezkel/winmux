@@ -871,6 +871,11 @@
   "sidebar.delete_group": "Delete group",
   "sidebar.change_color": "Change color",
   "sidebar.move_to_group": "Move to group",
-  "sidebar.move_out_of_group": "Move out of group"
+  "sidebar.move_out_of_group": "Move out of group",
+  "reconnect.title": "Connection to {host} dropped",
+  "reconnect.attempt": "Reconnecting… (attempt {n}/{max})",
+  "reconnect.cancel": "Cancel",
+  "reconnect.success": "Reconnected to {host}",
+  "reconnect.failed": "Couldn't reconnect to {host}. Click the pane to retry."
 }
 

@@ -33,6 +33,7 @@ fn is_placeholder_host(url: &str) -> bool {
 }
 
 use crate::{dlog, AppState};
+use winmux_core::http::get_with_retry;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -145,14 +146,17 @@ async fn fetch_manifest(url: &str) -> Result<Manifest, String> {
     // class of breakage.
     let url = url.to_string();
     let body = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        let resp = ureq::get(&url)
-            .set(
-                "User-Agent",
-                &format!("winmux/{}", env!("CARGO_PKG_VERSION")),
-            )
-            .timeout(std::time::Duration::from_secs(8))
-            .call()
-            .map_err(|e| format!("fetch manifest: {e}"))?;
+        // beta.3 (netfree): wrap in retry so a transient MITM-filter blip
+        // or hotel-wifi glitch doesn't turn "Check for updates" red.
+        let resp = get_with_retry(|| {
+            ureq::get(&url)
+                .set(
+                    "User-Agent",
+                    &format!("winmux/{}", env!("CARGO_PKG_VERSION")),
+                )
+                .timeout(std::time::Duration::from_secs(8))
+        })
+        .map_err(|e| format!("fetch manifest: {e}"))?;
         if resp.status() < 200 || resp.status() >= 300 {
             return Err(format!("manifest HTTP {}", resp.status()));
         }
@@ -513,16 +517,20 @@ async fn http_download_to_file(
     let url = url.to_string();
     let dest = dest.to_path_buf();
     tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let resp = ureq::get(&url)
-            .set(
-                "User-Agent",
-                &format!("winmux/{}", env!("CARGO_PKG_VERSION")),
-            )
-            // Installer is ~5 MB; 180s tolerates slow networks /
-            // corporate proxies without surfacing a confusing timeout.
-            .timeout(std::time::Duration::from_secs(180))
-            .call()
-            .map_err(|e| format!("download {url}: {e}"))?;
+        // beta.3 (netfree): retry on transport errors — worst case is 3×
+        // the ~5MB NSIS download (15MB) which is still cheap. HTTP-status
+        // failures fall through immediately without retry.
+        let resp = get_with_retry(|| {
+            ureq::get(&url)
+                .set(
+                    "User-Agent",
+                    &format!("winmux/{}", env!("CARGO_PKG_VERSION")),
+                )
+                // Installer is ~5 MB; 180s tolerates slow networks /
+                // corporate proxies without surfacing a confusing timeout.
+                .timeout(std::time::Duration::from_secs(180))
+        })
+        .map_err(|e| format!("download {url}: {e}"))?;
         if resp.status() < 200 || resp.status() >= 300 {
             return Err(format!("download HTTP {}", resp.status()));
         }
@@ -734,13 +742,17 @@ fn strip_sha256(digest: &Option<String>) -> Option<String> {
 /// already returns newest-first.
 async fn fetch_releases() -> Result<Vec<ReleaseInfo>, String> {
     let body = tokio::task::spawn_blocking(|| -> Result<String, String> {
-        let resp = ureq::get(GITHUB_RELEASES_API)
-            .set("User-Agent", &format!("winmux/{}", env!("CARGO_PKG_VERSION")))
-            .set("Accept", "application/vnd.github+json")
-            .set("X-GitHub-Api-Version", "2022-11-28")
-            .timeout(std::time::Duration::from_secs(10))
-            .call()
-            .map_err(|e| format!("github releases: {e}"))?;
+        // beta.3 (netfree): retry on transport errors. GitHub returns 4xx
+        // for rate-limit (not a transport error), which is deliberately
+        // surfaced immediately — retrying wouldn't help against a rate cap.
+        let resp = get_with_retry(|| {
+            ureq::get(GITHUB_RELEASES_API)
+                .set("User-Agent", &format!("winmux/{}", env!("CARGO_PKG_VERSION")))
+                .set("Accept", "application/vnd.github+json")
+                .set("X-GitHub-Api-Version", "2022-11-28")
+                .timeout(std::time::Duration::from_secs(10))
+        })
+        .map_err(|e| format!("github releases: {e}"))?;
         if resp.status() < 200 || resp.status() >= 300 {
             return Err(format!("github releases HTTP {}", resp.status()));
         }

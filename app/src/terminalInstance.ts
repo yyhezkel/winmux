@@ -1003,9 +1003,12 @@ export class TerminalInstance {
    * does internally.
    */
   remeasureFont(): void {
-    const before = this.cs()?.height;
+    const cs0 = this.cs();
+    const bw = cs0?.width;
+    const bh = cs0?.height;
+    const hasMeasure = typeof cs0?.measure === "function";
     try {
-      this.cs()?.measure?.();
+      cs0?.measure?.();
     } catch (e) {
       console.warn("remeasureFont: charSize measure failed", e);
     }
@@ -1013,13 +1016,11 @@ export class TerminalInstance {
     try {
       this.term.refresh(0, this.term.rows - 1);
     } catch {}
-    const after = this.cs()?.height;
-    if (before !== after) {
-      void invoke("diag_log", {
-        level: "info",
-        msg: `[font-fix] pane=${this.paneId} charCell ${this.cs()?.width}x${after} (was h=${before})`,
-      }).catch(() => {});
-    }
+    const cs1 = this.cs();
+    void invoke("diag_log", {
+      level: "info",
+      msg: `[font-fix] pane=${this.paneId} csFound=${!!cs0} hasMeasure=${hasMeasure} before=${bw}x${bh} after=${cs1?.width}x${cs1?.height} fam=${JSON.stringify(String(this.term.options.fontFamily ?? "").slice(0, 40))}`,
+    }).catch(() => {});
   }
 
   /** True if the cell isn't measured yet, or is "compressed" — height well

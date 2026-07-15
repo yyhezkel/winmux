@@ -53,3 +53,11 @@ fix-git.bat
 fix-git.ps1
 setup-line-endings-and-commit.bat
 status.txt
+
+# Local session-workflow notes (per CLAUDE.md "Session workflow") — local only,
+# never pushed. Root-anchored so docs/INSTALL_AGENTS.md stays tracked.
+/AGENTS.md
+/BACKLOG.md
+/FOLLOWUPS.md
+/PROGRESS.txt
+/PROGRESS_OLD_*.txt

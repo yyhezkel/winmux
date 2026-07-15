@@ -12,3 +12,18 @@ FILES:
 RESULT: <verified-live | compiles-untested | reverted | partial>
 NOTES: <optional — anything a future session would want to grep for>
 ==================================================================
+
+==================================================================
+[2026-07-15 13:10 IDT] session=multi-machine-sync
+TASK: track BACKLOG/FOLLOWUPS/PROGRESS in git for cross-machine sync
+FILES:
+  A BACKLOG.md
+  A FOLLOWUPS.md
+  A PROGRESS.txt
+  M CLAUDE.md (Session workflow section)
+  M .gitignore (partial revert of 0583112 — AGENTS.md + PROGRESS_OLD_* stay local)
+RESULT: verified-live (pushed to origin/main)
+NOTES: local WIP stash "wip: terminal/textDirection changes during sync-commit"
+  kept in stash@{0} — appears to be a stale copy of font/RTL work already
+  committed remotely (7956c30, a20f375). Safe to drop after Yossi confirms.
+==================================================================

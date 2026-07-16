@@ -32,7 +32,7 @@ interface Metric {
 
 function color(pct: number): string {
   if (pct > 85) return "var(--w-error)";
-  if (pct > 60) return "var(--w-warn, #e0af68)";
+  if (pct > 60) return "var(--w-warning, #e0af68)";
   return "var(--w-ok, #9ece6a)";
 }
 

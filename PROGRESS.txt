@@ -173,3 +173,43 @@ NOTES:
     chrome (watchSystemTheme) but keeps the current preset variant until
     the user touches the toggle/grid — acceptable edge, noted.
 ------------------------------------------------------------------
+------------------------------------------------------------------
+2026-07-16 · Redesign themes — pass 6: light-theme contrast bugs (Yossi's live QA)
+TASK: Yossi tested the light directions and hit light-on-light /
+  dark-on-dark surfaces. Root causes found and fixed — all three were
+  the same class: values calibrated for dark-only that light grounds expose.
+FIXES:
+  1. PHANTOM CSS VARS (the big one): App.css referenced 11 var() names
+     that were NEVER DEFINED — --w-text-primary, --w-text-secondary,
+     --w-background, --w-bg-elev, --w-fg, --w-fg-muted, --w-mono,
+     --w-surface-2, --w-surface-hover, --w-surface-raised, --w-warn —
+     131 occurrences, every one silently falling back to a
+     hardcoded-dark default. Invisible on dark themes (fallback ≈
+     palette), broken on light. All renamed to the real tokens
+     (--w-text / --w-text-dim / --w-bg / --w-surface / --w-surface-hi /
+     --w-font-mono / --w-warning). +1 in ClaudeUsageIndicator.tsx.
+     This fixes Yossi's two chrome reports: Add-ons "winmux-cli" title
+     (light-on-light) and Settings→Logs viewer (dark-on-dark).
+  2. TERMINAL ANSI ON LIGHT GROUND: the 4 light directions recycled
+     AnsiPalette::solarized_light() whose white/bright_white are
+     #eee8d5/#fdf6e3 — invisible on the near-white grounds (Yossi's
+     "bullet circle" report; Claude Code prints bullets in ANSI white).
+     New AnsiPalette::daylight() (GitHub-Light derived, white slots are
+     mid-grays) wired to industry/broadsheet/modernist/classical light.
+     Stock solarized-light keeps its authentic ramp.
+FILES:
+  M app/src/App.css (131 phantom-var renames)
+  M app/src/ClaudeUsageIndicator.tsx (--w-warn → --w-warning)
+  M app/src-tauri/src/settings.rs (AnsiPalette::daylight() + 4 light
+      redesign presets point at it)
+RESULT: verified-live (tauri dev auto-rebuilt): Logs viewer light box +
+  dark text under Classical; Add-ons names readable; live Claude-session
+  terminal bullet turned visible gray after re-applying the preset.
+  tsc + cargo check green. themes-redesign.css/tokens.css sweep-clean.
+NOTES:
+  - Applied presets snapshot Theme (incl. ansi) into settings.json — a
+    palette data change only reaches users when they re-apply a preset.
+  - Incident during QA: open_application launched the INSTALLED winmux
+    alongside the dev instance (same %APPDATA% settings + rpc pipe).
+    Closed it; no damage. Watch for this when driving the dev app by name.
+------------------------------------------------------------------

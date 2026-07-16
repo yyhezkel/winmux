@@ -223,6 +223,31 @@ impl AnsiPalette {
             bright_white: "#fdf6e3".into(),
         }
     }
+
+    /// Redesign pass 6: ANSI ramp for LIGHT-ground terminals (GitHub-Light
+    /// derived). Unlike solarized_light, the white/bright slots are mid
+    /// grays — apps that print "white" text (Claude Code bullets, dimmed
+    /// output) stay readable on a light background.
+    fn daylight() -> Self {
+        Self {
+            black: "#24292f".into(),
+            red: "#cf222e".into(),
+            green: "#116329".into(),
+            yellow: "#9a6700".into(),
+            blue: "#0969da".into(),
+            magenta: "#8250df".into(),
+            cyan: "#1b7c83".into(),
+            white: "#57606a".into(),
+            bright_black: "#656d76".into(),
+            bright_red: "#a40e26".into(),
+            bright_green: "#1a7f37".into(),
+            bright_yellow: "#bf8700".into(),
+            bright_blue: "#218bff".into(),
+            bright_magenta: "#a475f9".into(),
+            bright_cyan: "#3192aa".into(),
+            bright_white: "#8c959f".into(),
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, ts_rs::TS)]
@@ -1081,7 +1106,7 @@ pub(crate) fn list_presets() -> Vec<PresetEntry> {
                 success: "#3d7a54".into(),
                 warning: "#9a6a00".into(),
                 error: "#b3392f".into(),
-                ansi: AnsiPalette::solarized_light(),
+                ansi: AnsiPalette::daylight(),
             },
         },
         PresetEntry {
@@ -1098,7 +1123,7 @@ pub(crate) fn list_presets() -> Vec<PresetEntry> {
                 success: "#2f7d4f".into(),
                 warning: "#9a6a00".into(),
                 error: "#c02d3c".into(),
-                ansi: AnsiPalette::solarized_light(),
+                ansi: AnsiPalette::daylight(),
             },
         },
         PresetEntry {
@@ -1115,7 +1140,7 @@ pub(crate) fn list_presets() -> Vec<PresetEntry> {
                 success: "#2f7d4f".into(),
                 warning: "#9a6a00".into(),
                 error: "#ec3013".into(),
-                ansi: AnsiPalette::solarized_light(),
+                ansi: AnsiPalette::daylight(),
             },
         },
         PresetEntry {
@@ -1132,7 +1157,7 @@ pub(crate) fn list_presets() -> Vec<PresetEntry> {
                 success: "#4a7a4a".into(),
                 warning: "#b68235".into(),
                 error: "#a3392f".into(),
-                ansi: AnsiPalette::solarized_light(),
+                ansi: AnsiPalette::daylight(),
             },
         },
         // ── Dark variants of the four directions (same identity, night ground).

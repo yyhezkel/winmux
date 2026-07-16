@@ -261,6 +261,10 @@
 [data-theme-preset^="modernist"] .side-drawer { border-inline-start-width: 2px; }
 [data-theme-preset^="modernist"] .fm-window-header,
 [data-theme-preset^="modernist"] .browser-window-header { border-bottom-width: 2px; }
+[data-theme-preset^="modernist"] .modal h3 {
+  border-bottom: 2px solid color-mix(in srgb, var(--w-border) 45%, transparent);
+  padding-bottom: 8px;
+}
 [data-theme-preset^="modernist"] .modal h3,
 [data-theme-preset^="modernist"] .fm-window-title,
 [data-theme-preset^="modernist"] .browser-window-title,
@@ -394,6 +398,23 @@
   background: color-mix(in srgb, var(--w-accent) 86%, var(--w-text));
   border-color: color-mix(in srgb, var(--w-accent) 86%, var(--w-text));
   color: var(--w-bg);
+}
+
+/* App.css hardcodes border-radius (3-10px) on dozens of secondary
+   surfaces/controls that never read --w-r-*. The two SQUARE directions
+   flatten them wholesale; round status dots (border-radius:50%) are
+   untouched — they're not in this list. */
+[data-theme-preset^="industry"] :is(button, input, select, textarea,
+  .modal, .command-palette, .fm-window, .browser-window, .addons-window,
+  .ports-window, .insights-window, .md-window, .feed-card, .notif-center,
+  .panel-float, .ws-menu, .pane, .ws-badge, .note-card, .settings-preset-card,
+  .welcome-card, .sidebar-empty-card, .feed-allow, .feed-deny),
+[data-theme-preset^="modernist"] :is(button, input, select, textarea,
+  .modal, .command-palette, .fm-window, .browser-window, .addons-window,
+  .ports-window, .insights-window, .md-window, .feed-card, .notif-center,
+  .panel-float, .ws-menu, .pane, .ws-badge, .note-card, .settings-preset-card,
+  .welcome-card, .sidebar-empty-card, .feed-allow, .feed-deny) {
+  border-radius: 0;
 }
 
 /* ── Industry: steel active row, outline toolbar, brand letterspacing,

@@ -323,3 +323,211 @@
     box-shadow: 0 0 0 2px var(--wmx-wait-ring);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Canvas fidelity pass (2026-07-17) — closes the visible gaps between the
+   live app and the 4 design-canvas mocks. Everything is var-driven
+   (--w-accent / --wmx-wait-ring) so each rule serves both the light and
+   the dark variant of its direction.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Shared: kill the Tokyo-blue hardcodes the redesign presets inherit
+   from App.css (gradient brand, blue active tint, amber waiting dot,
+   dark-only hover border). ── */
+[data-theme-family="redesign"] .sidebar-header .sidebar-brand {
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  color: var(--w-text);
+}
+[data-theme-family="redesign"] .ws-item.has-waiting::after {
+  background: var(--wmx-wait-ring);
+  box-shadow: 0 0 6px 1px var(--wmx-wait-glow-hi);
+}
+[data-theme-family="redesign"] .pane-status-text { color: var(--wmx-wait-ring); }
+[data-theme-family="redesign"] .feed-card.blocking {
+  border-color: var(--wmx-wait-ring);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.35),
+    0 0 0 1px var(--wmx-wait-glow-lo);
+}
+[data-theme-family="redesign"] button:hover:not(:disabled) {
+  border-color: var(--w-border-hi);
+}
+/* Sidebar badges: App.css hardcodes Tokyo-blue tints and a dark "local"
+   chip — both wrong on the redesign grounds. Re-derive from the live vars;
+   the mock renders "מקומי" as quiet text, not a chip. */
+[data-theme-family="redesign"] .ws-badge {
+  background: var(--w-surface-hi);
+  color: var(--w-text-dim);
+}
+[data-theme-family="redesign"] .ws-badge.ssh {
+  background: color-mix(in srgb, var(--w-accent) 14%, transparent);
+  color: var(--w-accent);
+}
+[data-theme-family="redesign"] .ws-badge.split {
+  background: color-mix(in srgb, var(--w-success) 14%, transparent);
+  color: var(--w-success);
+}
+[data-theme-family="redesign"] .ws-badge.local {
+  background: transparent;
+  color: var(--w-text-faint);
+}
+/* The waiting pane's FRAME follows the signature waiting colour, not the
+   interaction accent (Broadsheet: magenta frame, cyan links — per mock). */
+[data-theme-family="redesign"] .pane.waiting:not([data-has-color="true"]) {
+  border-color: var(--wmx-wait-ring);
+}
+/* The mock's primary sidebar action is a filled accent button (Industry
+   steel / Broadsheet cyan / Modernist red), not App.css's dashed ghost. */
+[data-theme-preset^="industry"] .ws-add,
+[data-theme-preset^="broadsheet"] .ws-add,
+[data-theme-preset^="modernist"] .ws-add {
+  background: var(--w-accent);
+  color: var(--w-bg);
+  border: 1px solid var(--w-accent);
+  font-weight: 600;
+}
+[data-theme-preset^="industry"] .ws-add:hover,
+[data-theme-preset^="broadsheet"] .ws-add:hover,
+[data-theme-preset^="modernist"] .ws-add:hover {
+  background: color-mix(in srgb, var(--w-accent) 86%, var(--w-text));
+  border-color: color-mix(in srgb, var(--w-accent) 86%, var(--w-text));
+  color: var(--w-bg);
+}
+
+/* ── Industry: steel active row, outline toolbar, brand letterspacing,
+   registration marks on the primary button (mock's + crosses). ── */
+[data-theme-preset^="industry"] .sidebar-header .sidebar-brand {
+  color: var(--w-accent);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+[data-theme-preset^="industry"] .ws-item.active {
+  background: color-mix(in srgb, var(--w-accent) 10%, var(--w-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--w-accent) 55%, transparent);
+}
+[data-theme-preset^="industry"] .sidebar-section-title { letter-spacing: 0.08em; }
+[data-theme-preset^="industry"] .ws-header-btn {
+  background: transparent;
+  border-color: var(--w-border-hi);
+}
+[data-theme-preset^="industry"] .ws-header-btn:hover {
+  background: color-mix(in srgb, var(--w-accent) 10%, var(--w-bg));
+  border-color: color-mix(in srgb, var(--w-accent) 55%, transparent);
+}
+[data-theme-preset^="industry"] .ws-add { position: relative; }
+[data-theme-preset^="industry"] .ws-add::before,
+[data-theme-preset^="industry"] .ws-add::after {
+  content: "";
+  position: absolute;
+  width: 11px; height: 11px;
+  opacity: 0.55;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--w-text), var(--w-text)) center / 100% 1px no-repeat,
+    linear-gradient(var(--w-text), var(--w-text)) center / 1px 100% no-repeat;
+}
+[data-theme-preset^="industry"] .ws-add::before { top: -6px; inset-inline-end: -6px; }
+[data-theme-preset^="industry"] .ws-add::after { bottom: -6px; inset-inline-start: -6px; }
+
+/* ── Broadsheet: newspaper toolbar links (cyan, underline-on-rest),
+   italic serif metadata, emphasised active row. ── */
+[data-theme-preset^="broadsheet"] .sidebar-header .sidebar-brand {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+[data-theme-preset^="broadsheet"] .ws-item.active {
+  background: transparent;
+  box-shadow: none;
+}
+[data-theme-preset^="broadsheet"] .ws-item.active .ws-name {
+  font-weight: 600;
+  color: var(--w-accent);
+}
+[data-theme-preset^="broadsheet"] .ws-header-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--w-accent) 40%, transparent);
+  border-radius: 0;
+  color: var(--w-accent);
+  padding-inline: 4px;
+}
+[data-theme-preset^="broadsheet"] .ws-header-btn:hover {
+  background: transparent;
+  border-bottom-color: var(--w-accent);
+}
+[data-theme-preset^="broadsheet"] .ws-conn-info,
+[data-theme-preset^="broadsheet"] .pane-conn {
+  font-style: italic;
+  font-family: var(--w-font-ui);
+}
+[data-theme-preset^="broadsheet"] .pane-status-text { font-style: italic; }
+
+/* ── Modernist: red active bar (4px, logical inline-start), cell-like
+   toolbar buttons, caps on the workspace header. ── */
+[data-theme-preset^="modernist"] .sidebar-header .sidebar-brand {
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+[data-theme-preset^="modernist"] .ws-item.active {
+  background: color-mix(in srgb, var(--w-accent) 14%, var(--w-bg));
+  box-shadow: inset 4px 0 0 var(--w-accent);
+}
+[dir="rtl"][data-theme-preset^="modernist"] .ws-item.active {
+  box-shadow: inset -4px 0 0 var(--w-accent);
+}
+[data-theme-preset^="modernist"] .ws-header-btn {
+  background: transparent;
+  border: 2px solid color-mix(in srgb, var(--w-border) 45%, transparent);
+  font-weight: 600;
+  color: var(--w-text);
+}
+[data-theme-preset^="modernist"] .ws-header-btn:hover {
+  background: var(--w-surface-hi);
+  border-color: color-mix(in srgb, var(--w-border) 45%, transparent);
+}
+[data-theme-preset^="modernist"] .ws-title {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 800;
+}
+[data-theme-preset^="modernist"] .ws-conn-info { text-transform: uppercase; }
+
+/* ── Classical: gold hairline active row, gold outline toolbar + primary,
+   tabular numerals on counts. ── */
+[data-theme-preset^="classical"] .sidebar-header .sidebar-brand {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+[data-theme-preset^="classical"] .ws-item.active {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--w-accent);
+}
+[data-theme-preset^="classical"] .ws-header-btn {
+  background: transparent;
+  border-color: var(--w-accent);
+  color: color-mix(in srgb, var(--w-accent) 70%, var(--w-text));
+}
+[data-theme-preset^="classical"] .ws-header-btn:hover {
+  background: color-mix(in srgb, var(--w-accent) 12%, var(--w-bg));
+  border-color: var(--w-accent);
+}
+[data-theme-preset^="classical"] .ws-add {
+  background: transparent;
+  border: 1px solid var(--w-accent);
+  border-style: solid;
+  color: color-mix(in srgb, var(--w-accent) 70%, var(--w-text));
+}
+[data-theme-preset^="classical"] .ws-add:hover {
+  background: color-mix(in srgb, var(--w-accent) 12%, var(--w-bg));
+  border-color: var(--w-accent);
+  color: color-mix(in srgb, var(--w-accent) 70%, var(--w-text));
+}
+[data-theme-preset^="classical"] .ws-badge,
+[data-theme-preset^="classical"] .group-header-count,
+[data-theme-preset^="classical"] .ws-conn-info {
+  font-feature-settings: "tnum";
+}

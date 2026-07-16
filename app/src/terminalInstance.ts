@@ -1,4 +1,4 @@
-import { Terminal, type IDisposable, type ILink } from "@xterm/xterm";
+import { Terminal, type IDisposable, type ILink, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
@@ -105,6 +105,10 @@ interface XtermInternals {
 
 let g_fontFamily: string | null = null;
 let g_fontSizePx: number | null = null;
+/** Redesign pass 4: the terminal follows the active theme. Cached so new
+ *  panes construct with it; null until the first applyTheme() pushes one
+ *  (the constructor then falls back to the Tokyo Night default below). */
+let g_termTheme: ITheme | null = null;
 let g_rtlMode: RtlMode = "auto_per_line";
 /** Phase 16: when true, Ctrl+C with a non-empty selection copies the
  *  selection to clipboard instead of sending SIGINT. Mirrors Windows
@@ -143,6 +147,50 @@ export function setAutoResetOnConnect(on: boolean): void {
  * caller. Called from App.tsx on settings load and on every
  * `settings:changed`.
  */
+/** Tokyo Night — the historical hardcoded palette, kept as the fallback
+ *  for terminals constructed before the first applyTheme() call. */
+const DEFAULT_TERM_THEME: ITheme = {
+  background: "#0e1116",
+  foreground: "#e6edf3",
+  cursor: "#7aa2f7",
+  cursorAccent: "#0e1116",
+  selectionBackground: "rgba(122, 162, 247, 0.35)",
+  black: "#15161e",
+  red: "#f7768e",
+  green: "#9ece6a",
+  yellow: "#e0af68",
+  blue: "#7aa2f7",
+  magenta: "#bb9af7",
+  cyan: "#7dcfff",
+  white: "#a9b1d6",
+  brightBlack: "#414868",
+  brightRed: "#ff7a93",
+  brightGreen: "#b9f27c",
+  brightYellow: "#ff9e64",
+  brightBlue: "#7da6ff",
+  brightMagenta: "#bb9af7",
+  brightCyan: "#0db9d7",
+  brightWhite: "#c0caf5",
+};
+
+/**
+ * Redesign pass 4: push the active theme's terminal palette into every
+ * live xterm and cache it for future constructions — same contract as
+ * setTerminalFont. Called from applyTheme() on load, preset switch, and
+ * any base-colour edit.
+ */
+export function setTerminalTheme(theme: ITheme): void {
+  g_termTheme = theme;
+  for (const ti of g_terminals) {
+    try {
+      ti.term.options.theme = theme;
+      ti.term.refresh(0, ti.term.rows - 1);
+    } catch (e) {
+      console.warn("setTerminalTheme: per-instance update failed", e);
+    }
+  }
+}
+
 export function setTerminalFont(family: string, sizePt: number): void {
   const px = Math.max(8, Math.round(sizePt * PT_TO_PX));
   g_fontFamily = family;
@@ -455,29 +503,7 @@ export class TerminalInstance {
       cursorWidth: 2,
       allowProposedApi: true,
       allowTransparency: true,
-      theme: {
-        background: "#0e1116",
-        foreground: "#e6edf3",
-        cursor: "#7aa2f7",
-        cursorAccent: "#0e1116",
-        selectionBackground: "rgba(122, 162, 247, 0.35)",
-        black: "#15161e",
-        red: "#f7768e",
-        green: "#9ece6a",
-        yellow: "#e0af68",
-        blue: "#7aa2f7",
-        magenta: "#bb9af7",
-        cyan: "#7dcfff",
-        white: "#a9b1d6",
-        brightBlack: "#414868",
-        brightRed: "#ff7a93",
-        brightGreen: "#b9f27c",
-        brightYellow: "#ff9e64",
-        brightBlue: "#7da6ff",
-        brightMagenta: "#bb9af7",
-        brightCyan: "#0db9d7",
-        brightWhite: "#c0caf5",
-      },
+      theme: g_termTheme ?? DEFAULT_TERM_THEME,
       scrollback: 10000,
       windowsPty: { backend: "conpty" },
       windowOptions: { setWinSizeChars: true },

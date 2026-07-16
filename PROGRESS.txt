@@ -135,3 +135,41 @@ NOTES:
     approval), File Manager / Browser window / Notification Center
     chrome per preset — worth a pass when those surfaces are in use.
 ------------------------------------------------------------------
+------------------------------------------------------------------
+2026-07-16 · Redesign themes — pass 5 (Yossi's two calls, verified live)
+DECISIONS APPLIED (Yossi, this session):
+  • "Why 8 presets when there's a dark/light/system toggle?" → FOLDED.
+    The engine keeps all 8 preset entries (they ARE the palettes), but the
+    Settings grid shows ONE card per direction; clicking resolves the
+    light/dark variant from the effective appearance mode, the mode toggle
+    re-applies the paired variant when a redesign preset is active, and
+    the card swatches preview the variant the toggle would apply.
+  • "The terminal was supposed to follow the theme" → WIRED. Theme.ansi
+    (shipped since Phase 9.A, never connected) now reaches xterm:
+    setTerminalTheme() mirrors the setTerminalFont contract (cache for
+    new constructions + live options.theme push to every g_terminals
+    member); applyTheme builds the ITheme (bg/fg from theme, cursor =
+    accent, selection = accent @35%, 16 ANSI slots).
+FILES:
+  M app/src/terminalInstance.ts (DEFAULT_TERM_THEME fallback extracted
+      from the constructor's hardcoded Tokyo Night; setTerminalTheme)
+  M app/src/settings.ts (buildTerminalTheme + alpha(); applyTheme calls
+      setTerminalTheme)
+  M app/src/SettingsModal.tsx (redesignBase/effectiveMode/cardTheme
+      helpers; onPickPreset variant resolution; onPickMode — immediate
+      save, no debounce race — swaps the active redesign variant; grid
+      filter hides the redesign -dark twins)
+RESULT: verified-live (tauri dev, Windows). Grid shows 9 cards (4 stock +
+  solarized-light + 4 directions). Clicked Broadsheet under system=dark →
+  broadsheet-dark applied, LIVE cmd.exe terminal recoloured (cyan cursor,
+  dark ground); toggled בהיר → broadsheet (light) auto-applied, terminal
+  flipped to light ground + dark text without reopening. tsc clean.
+NOTES:
+  - ANSI ramps are still recycled data (light directions share
+    solarized_light, darks share tokyo_night — settings.rs). Terminal bg/
+    fg/cursor ARE per-direction via Theme. Tuned per-direction 16-colour
+    ramps = pure data tweak in list_presets() when desired.
+  - OS scheme flip while on "system" + a redesign preset re-themes the
+    chrome (watchSystemTheme) but keeps the current preset variant until
+    the user touches the toggle/grid — acceptable edge, noted.
+------------------------------------------------------------------

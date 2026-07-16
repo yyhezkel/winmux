@@ -3,7 +3,8 @@
 // this file is the typed mirror used by the frontend.
 
 import { invoke } from "@tauri-apps/api/core";
-import { setTerminalFont, setRtlMode, setAutoDirection, setAutoResetOnConnect, type RtlMode } from "./terminalInstance";
+import { setTerminalFont, setTerminalTheme, setRtlMode, setAutoDirection, setAutoResetOnConnect, type RtlMode } from "./terminalInstance";
+import type { ITheme } from "@xterm/xterm";
 
 export interface AnsiPalette {
   black: string;
@@ -434,6 +435,10 @@ export function applyTheme(s: Settings): void {
   // Push terminal font + size into every live xterm instance. New panes
   // opened later inherit the cached values via the constructor.
   setTerminalFont(quoteFamily(s.font.terminal_family), s.font.terminal_size_pt);
+  // Redesign pass 4: the terminal palette follows the theme — background,
+  // foreground, cursor and the 16 ANSI colours all come from the preset
+  // (Theme.ansi shipped since Phase 9.A but was never wired to xterm).
+  setTerminalTheme(buildTerminalTheme(t));
   // Phase 15.A: push the RTL mode. The write pipeline flips immediately
   // on every live pane; the renderer choice (DOM vs WebGL) is sticky
   // per pane and only affects newly-opened terminals.
@@ -531,6 +536,40 @@ function quoteFamily(family: string): string {
 // Minimal hex color blender (#rrggbb only). Best-effort — non-hex values
 // pass through unchanged, which still works because CSS will fall back
 // when it sees an invalid value.
+/** Redesign pass 4: map our Theme onto xterm's ITheme. */
+function buildTerminalTheme(t: Theme): ITheme {
+  const a = t.ansi;
+  return {
+    background: t.background,
+    foreground: t.text_primary,
+    cursor: t.accent,
+    cursorAccent: t.background,
+    selectionBackground: alpha(t.accent, 0.35),
+    black: a.black,
+    red: a.red,
+    green: a.green,
+    yellow: a.yellow,
+    blue: a.blue,
+    magenta: a.magenta,
+    cyan: a.cyan,
+    white: a.white,
+    brightBlack: a.bright_black,
+    brightRed: a.bright_red,
+    brightGreen: a.bright_green,
+    brightYellow: a.bright_yellow,
+    brightBlue: a.bright_blue,
+    brightMagenta: a.bright_magenta,
+    brightCyan: a.bright_cyan,
+    brightWhite: a.bright_white,
+  };
+}
+
+/** Hex colour → rgba() string with the given alpha (falls back to the hex). */
+function alpha(hex: string, a: number): string {
+  const c = parseHex(hex);
+  return c ? `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${a})` : hex;
+}
+
 function mix(base: string, with_: string, amount: number): string {
   const a = parseHex(base);
   const b = parseHex(with_);

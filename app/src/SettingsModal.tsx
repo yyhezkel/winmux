@@ -7,6 +7,7 @@ import {
   FontFamilies,
   UpdateInfo,
   applyTheme,
+  resolveThemeMode,
   getPresets,
   applyPreset,
   resetSettings,
@@ -149,14 +150,61 @@ export function SettingsModal(p: Props) {
     onCleanup(() => clearInterval(id));
   });
 
+  // Redesign pass 4: the four redesign directions ship light+dark variants
+  // as separate presets in the engine, but surface as ONE card each — the
+  // appearance toggle above picks which variant actually applies.
+  const REDESIGN_BASES = ["industry", "broadsheet", "modernist", "classical"];
+  const redesignBase = (id: string): string | null => {
+    const base = id.replace(/-dark$/, "");
+    return REDESIGN_BASES.includes(base) ? base : null;
+  };
+  const effectiveMode = () => resolveThemeMode(p.settings.theme_mode ?? "system");
+
+  // Swatches preview the variant the toggle would actually apply.
+  const cardTheme = (pr: PresetEntry) => {
+    const base = redesignBase(pr.id);
+    if (base && effectiveMode() === "dark") {
+      const dark = presets().find((x) => x.id === `${base}-dark`);
+      if (dark) return dark.theme;
+    }
+    return pr.theme;
+  };
+
   const onPickPreset = async (id: string) => {
+    const base = redesignBase(id);
+    const resolved = base
+      ? effectiveMode() === "dark"
+        ? `${base}-dark`
+        : base
+      : id;
     try {
-      const next = await applyPreset(id);
+      const next = await applyPreset(resolved);
       p.onChange(next);
       applyTheme(next);
       setLastSaved(Date.now());
     } catch (e) {
       console.error("apply preset failed", e);
+    }
+  };
+
+  // Mode click: persist immediately (not via the debounced queue) so the
+  // follow-up preset-variant apply on the backend can't race it, then swap
+  // an active redesign preset to the variant matching the new polarity.
+  const onPickMode = async (m: NonNullable<Settings["theme_mode"]>) => {
+    const next = { ...p.settings, theme_mode: m };
+    p.onChange(next);
+    applyTheme(next);
+    try {
+      await saveSettings(next);
+      setLastSaved(Date.now());
+    } catch (e) {
+      console.error("settings_save failed", e);
+      return;
+    }
+    const base = redesignBase(next.theme.preset);
+    if (base) {
+      const variant = resolveThemeMode(m) === "dark" ? `${base}-dark` : base;
+      if (variant !== next.theme.preset) await onPickPreset(variant);
     }
   };
 
@@ -306,7 +354,7 @@ export function SettingsModal(p: Props) {
                       {(m) => (
                         <button
                           class={`settings-mode-btn ${(p.settings.theme_mode ?? "system") === m ? "active" : ""}`}
-                          onClick={() => update("theme_mode", m)}
+                          onClick={() => void onPickMode(m)}
                         >
                           {m === "dark" ? "🌙 " : m === "light" ? "☀ " : "🖥 "}
                           {t(`settings.theme.mode.${m}`)}
@@ -318,22 +366,30 @@ export function SettingsModal(p: Props) {
                 <section>
                   <h4>{t("settings.theme.preset")}</h4>
                   <div class="settings-preset-grid">
-                    <For each={presets()}>
+                    {/* Redesign pass 4: hide the redesign -dark twins — one
+                        card per direction; the appearance toggle picks the
+                        variant (and the swatches preview it live). */}
+                    <For each={presets().filter((pr) => !(pr.id.endsWith("-dark") && redesignBase(pr.id)))}>
                       {(pr) => (
                         <button
-                          class={`settings-preset-card ${p.settings.theme.preset === pr.id ? "active" : ""}`}
+                          class={`settings-preset-card ${
+                            p.settings.theme.preset === pr.id ||
+                            (redesignBase(pr.id) && p.settings.theme.preset === `${pr.id}-dark`)
+                              ? "active"
+                              : ""
+                          }`}
                           onClick={() => onPickPreset(pr.id)}
                           title={pr.label}
                         >
                           <div
                             class="settings-preset-swatches"
-                            style={{ background: pr.theme.background }}
+                            style={{ background: cardTheme(pr).background }}
                           >
-                            <span style={{ background: pr.theme.surface }} />
-                            <span style={{ background: pr.theme.accent }} />
-                            <span style={{ background: pr.theme.success }} />
-                            <span style={{ background: pr.theme.warning }} />
-                            <span style={{ background: pr.theme.error }} />
+                            <span style={{ background: cardTheme(pr).surface }} />
+                            <span style={{ background: cardTheme(pr).accent }} />
+                            <span style={{ background: cardTheme(pr).success }} />
+                            <span style={{ background: cardTheme(pr).warning }} />
+                            <span style={{ background: cardTheme(pr).error }} />
                           </div>
                           <span class="settings-preset-label">{pr.label}</span>
                         </button>

@@ -25,12 +25,10 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 
 ## Open
 
-### 2026-07-15 — Redesign directions: ship as themes, not a chosen single look
-- **Context:** Claude Design handoff exported the WINMUX main screen in four visual directions (Industry / Broadsheet / Modernist / Classical). The design chat ended before Yossi picked one. Asked; Yossi: "why not all of them as themes?" + connect the real repo + main screen then extrapolate.
-- **Options:** (A) pick one direction and restyle; (B) all four as selectable theme presets on the existing engine; (C) static mock screen.
-- **Decision:** (B). Added 4 light-ground presets to `list_presets()`; per-theme fonts/radius/border/heading/waiting-ring in `app/src/themes-redesign.css` keyed on `[data-theme-preset]`; `applyTheme` stamps `data-theme-preset`/`data-theme-family`. Token-driven so it reaches every screen.
-- **Open sub-questions (need Yossi):** (1) derive DARK variants of each direction, or keep light-ground only? (2) how far to push per-screen structural chrome (registration marks, mastheads) vs. the token-level pass already in. (3) keep the fonts as a hard per-theme override of the user's UI-font setting, or make it a soft default?
-- **Outcome / Commit:** implemented on branch `redesign/winmux-directions`; compiles (tsc + vite), Rust parses; not yet smoke-tested on Windows.
+### 2026-07-17 — Redesign fidelity pass: LIVE SMOKE PENDING (rest closed)
+- **Context:** Yossi asked for a refinement pass on the shipped redesign themes: canvas fidelity, per-direction ANSI, secondary screens. Done on worktree branch `claude/winmux-redesign-13049b` (commits `9815835`, `fe60d57`, `83735a3`) — see PROGRESS.txt 2026-07-17 entry.
+- **The 2026-07-15 open sub-questions are now all closed:** (1) dark variants — exist since `c6276e6`, ANSI now per-direction (`fe60d57`); (2) structural-chrome depth — canvas-fidelity + secondary-surface passes landed; (3) fonts — soft apply (custom user font wins) since `96947f7`.
+- **Still open:** live Windows smoke of this pass (verified on a static harness only — computer-use was occupied all session): per-direction main screen, waiting ring animation, 16-colour ANSI print per dark variant after preset RE-APPLY (snapshot caveat), FM/Browser/Notifications spot-check. Also: worktree branch needs merging back into `redesign/winmux-directions` after the smoke.
 
 
 ### 2026-07-15 — Secrets Vault: revive or archive (stalled since 2026-05-28)
@@ -74,6 +72,13 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 ---
 
 ## Decided
+
+### 2026-07-15 — Redesign directions: ship as themes, not a chosen single look
+- **Context:** Claude Design handoff exported the WINMUX main screen in four visual directions (Industry / Broadsheet / Modernist / Classical). The design chat ended before Yossi picked one. Asked; Yossi: "why not all of them as themes?" + connect the real repo + main screen then extrapolate.
+- **Options:** (A) pick one direction and restyle; (B) all four as selectable theme presets on the existing engine; (C) static mock screen.
+- **Decision:** (B). Added 4 light-ground presets to `list_presets()`; per-theme fonts/radius/border/heading/waiting-ring in `app/src/themes-redesign.css` keyed on `[data-theme-preset]`; `applyTheme` stamps `data-theme-preset`/`data-theme-family`. Token-driven so it reaches every screen.
+- **Sub-questions closed 2026-07-17** (dark variants + ANSI, structural-chrome depth, soft fonts) — see the fidelity-pass entry under Open (live smoke is the only remainder).
+- **Outcome / Commit:** `redesign/winmux-directions` (`c6276e6`…`b8e0ab4`) + fidelity pass on `claude/winmux-redesign-13049b`.
 
 ### 2026-07-15 — Phase 64 J — CLOSED: [file] links live-verified (Track B shipped)
 - **Yossi live test (2026-07-15): WORKS.** Hover underline + tooltip, click → Save-As download / relative-path copy toast, all confirmed in the debug build. Thread open since 2026-06-18 — closed. Original entry (with the full Track A/B history) preserved below.

@@ -232,3 +232,30 @@ RESULT: verified-live on Yossi's active Claude session (Classical light,
 NOTE: pass-6 daylight() ANSI ramp stays — it fixes the 16-slot layer
   properly; the contrast floor catches everything the palette can't.
 ------------------------------------------------------------------
+
+=== 2026-07-17 — Redesign fidelity pass (worktree winmux-redesign-13049b) ===
+[canvas fidelity 9815835] themes-redesign.css: per-direction main-screen gaps
+  closed vs the 4 design-canvas mocks — solid brand (no Tokyo gradient),
+  ws-item.active per direction (Industry steel tint+hairline / Broadsheet
+  emphasised text / Modernist 4px red bar RTL-aware / Classical gold ring),
+  toolbar ws-header-btn per direction (outline / cyan links / 2px cells /
+  gold outline), filled-accent ws-add (+reg-marks on Industry), waiting dot,
+  status text + blocking feed card + waiting pane FRAME follow
+  --wmx-wait-ring, sidebar badges re-derived from vars (ssh chip was
+  hardcoded Tokyo blue; "local" dark chip -> quiet text).
+[ANSI fe60d57] settings.rs: industry_dark/broadsheet_dark/modernist_dark/
+  classical_dark 16-colour ramps replace the tokyo_night() recycle; light
+  variants take one-slot identity nudges over daylight(). Snapshot caveat
+  unchanged: ramps reach a session only on preset re-apply.
+[secondary 83735a3] Industry+Modernist flatten App.css's hardcoded radii on
+  secondary surfaces via one :is() list; Modernist modal h3 gets the 2px
+  under-rule.
+VERIFICATION: static harness (real App.css+tokens+themes-redesign.css, real
+  class markup, 8 palette stamps) shot headless-Chrome 1440x900 — all 8
+  variants main screen + 4 variants secondary surfaces reviewed. cargo check
+  green. LIVE smoke NOT done (computer-use occupied by another session all
+  session) — app runs via tauri dev from the worktree (note: needed
+  resources/winmux-cli.exe copied from main repo; node_modules installed;
+  CARGO_TARGET_DIR shared with main repo target). Pending live: 16-colour
+  ANSI print per dark variant after preset re-apply, waiting-ring animation,
+  FM/Browser/Notifications under 2-3 presets.

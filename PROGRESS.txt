@@ -213,3 +213,22 @@ NOTES:
     alongside the dev instance (same %APPDATA% settings + rpc pipe).
     Closed it; no damage. Watch for this when driving the dev app by name.
 ------------------------------------------------------------------
+------------------------------------------------------------------
+2026-07-16 · Redesign themes — pass 6b: the REAL terminal-contrast fix
+TASK: Yossi re-tested — Claude Code's bullet was STILL pale on light
+  ground. Root cause understood properly this time: the bullet is drawn
+  with 256-colour/truecolor escapes, not the 16 ANSI slots — a theme
+  palette can't remap those, and apps pick them assuming a dark ground.
+FIX: xterm's built-in contrast floor — `minimumContrastRatio: 4.5`
+  (WCAG AA, VS Code's terminal default). The renderer auto-adjusts any
+  foreground that misses the ratio against the current background, which
+  covers indexed + truecolor output on BOTH light and dark grounds.
+  Set at construction + re-asserted in setTerminalTheme (HMR-safe).
+FILES:
+  M app/src/terminalInstance.ts
+RESULT: verified-live on Yossi's active Claude session (Classical light,
+  tmux reattach after webview reload): the bullet + dim-gray status lines
+  render dark and readable. tsc clean.
+NOTE: pass-6 daylight() ANSI ramp stays — it fixes the 16-slot layer
+  properly; the contrast floor catches everything the palette can't.
+------------------------------------------------------------------

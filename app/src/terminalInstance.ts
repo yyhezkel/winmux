@@ -184,6 +184,9 @@ export function setTerminalTheme(theme: ITheme): void {
   for (const ti of g_terminals) {
     try {
       ti.term.options.theme = theme;
+      // Keep the contrast floor on terminals constructed before this
+      // module version (HMR) — setting it repeatedly is idempotent.
+      ti.term.options.minimumContrastRatio = 4.5;
       ti.term.refresh(0, ti.term.rows - 1);
     } catch (e) {
       console.warn("setTerminalTheme: per-instance update failed", e);
@@ -504,6 +507,13 @@ export class TerminalInstance {
       allowProposedApi: true,
       allowTransparency: true,
       theme: g_termTheme ?? DEFAULT_TERM_THEME,
+      // Redesign pass 6: apps pick 256/truecolor foregrounds assuming a
+      // dark ground (Claude Code's dim-gray bullets vanish on the light
+      // themes). The 16 ANSI slots are theme-mapped, but indexed/true
+      // colors can't be — so let xterm auto-adjust any foreground that
+      // misses WCAG AA contrast against the background (VS Code's
+      // default terminal behaviour, same 4.5 ratio).
+      minimumContrastRatio: 4.5,
       scrollback: 10000,
       windowsPty: { backend: "conpty" },
       windowOptions: { setWinSizeChars: true },

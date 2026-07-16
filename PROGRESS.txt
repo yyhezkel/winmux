@@ -259,3 +259,20 @@ VERIFICATION: static harness (real App.css+tokens+themes-redesign.css, real
   CARGO_TARGET_DIR shared with main repo target). Pending live: 16-colour
   ANSI print per dark variant after preset re-apply, waiting-ring animation,
   FM/Browser/Notifications under 2-3 presets.
+
+=== 2026-07-17 (המשך) — LIVE SMOKE PASSED ===
+computer-use freed; live pass on tauri-dev app.exe (Windows):
+- 4 direction presets applied from the Settings grid (light): Industry brand
+  caps+reg-marks on ws-add VERIFIED via zoom; Broadsheet serif+cyan links+
+  double rule; Modernist BOOST caps + 4px red active bar (LTR side correct);
+  Classical gold ring/outline buttons. Dark mode toggle folds correctly.
+- ANSI: 16-colour bg ramp printed live in a Local PowerShell pane under all
+  4 dark variants (preset re-apply picked up the new snapshots after the dev
+  rebuild): classical=warm gold, industry=cool steel, broadsheet=neutral ink
+  with loud magenta+cyan, modernist=monochrome+one red. Terminal recolours
+  live on preset switch (96947f7 path) — confirmed.
+- Secondary: FM window + Notification Center under modernist-dark — caps
+  titles, square chrome, red active filter chip. All good.
+NOT tested live: waiting-ring animation (needs a real blocking Claude
+permission) — harness-verified only. App left on modernist-dark (shared
+%APPDATA% settings — Yossi: switch back in Settings if unwanted).

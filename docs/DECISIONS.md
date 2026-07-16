@@ -28,7 +28,7 @@ When starting a session, scan **Open** first. Surface anything that's been pendi
 ### 2026-07-17 — Redesign fidelity pass: LIVE SMOKE PENDING (rest closed)
 - **Context:** Yossi asked for a refinement pass on the shipped redesign themes: canvas fidelity, per-direction ANSI, secondary screens. Done on worktree branch `claude/winmux-redesign-13049b` (commits `9815835`, `fe60d57`, `83735a3`) — see PROGRESS.txt 2026-07-17 entry.
 - **The 2026-07-15 open sub-questions are now all closed:** (1) dark variants — exist since `c6276e6`, ANSI now per-direction (`fe60d57`); (2) structural-chrome depth — canvas-fidelity + secondary-surface passes landed; (3) fonts — soft apply (custom user font wins) since `96947f7`.
-- **Still open:** live Windows smoke of this pass (verified on a static harness only — computer-use was occupied all session): per-direction main screen, waiting ring animation, 16-colour ANSI print per dark variant after preset RE-APPLY (snapshot caveat), FM/Browser/Notifications spot-check. Also: worktree branch needs merging back into `redesign/winmux-directions` after the smoke.
+- **Live smoke PASSED (2026-07-17, same day):** 4 presets applied live, 16-colour ramps verified in a live pane under all 4 darks, FM + Notification Center spot-checked under modernist-dark. Only remainder: waiting-ring animation under a real blocking Claude permission (harness-verified only), and merging the worktree branch back into `redesign/winmux-directions`.
 
 
 ### 2026-07-15 — Secrets Vault: revive or archive (stalled since 2026-05-28)
